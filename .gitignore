@@ -18,9 +18,14 @@ coverage/
 .tsbuildinfo
 *.tsbuildinfo
 
-.omc/state/
-.omc/logs/
-.omc/research/
+# OMC tooling state at any depth (root or per-package)
+**/.omc/state/
+**/.omc/logs/
+**/.omc/research/
+**/.omc/sessions/
+**/.omc/project-memory.json
+**/.omc/notepad.md
+**/.omc/plans/
 
 ios/
 android/
