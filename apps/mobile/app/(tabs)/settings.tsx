@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
@@ -23,7 +25,8 @@ import {
 import { useToast, Toast, ToastTitle, ToastDescription } from '@/components/ui/toast';
 
 import { useAppConfig } from '../../src/config-store';
-import { setToken, setBaseUrl, type ThemeOverride } from '../../src/storage';
+import { setToken, setBaseUrl, clearEmail, type ThemeOverride } from '../../src/storage';
+import { logout } from '../../src/api';
 import {
   usePushTokens,
   useRegisterPushToken,
@@ -33,12 +36,15 @@ import {
 const THEME_OPTIONS: ThemeOverride[] = ['system', 'light', 'dark'];
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const {
     token,
     baseUrl,
+    email,
     themeOverride,
     setToken: setTokenCtx,
     setBaseUrl: setBaseUrlCtx,
+    setEmail: setEmailCtx,
     setThemeOverride,
   } = useAppConfig();
 
@@ -46,6 +52,7 @@ export default function SettingsScreen() {
   const [urlDraft, setUrlDraft] = useState(baseUrl);
   const [tokenDraft, setTokenDraft] = useState(token ?? '');
   const [showToken, setShowToken] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     setUrlDraft(baseUrl);
@@ -120,13 +127,26 @@ export default function SettingsScreen() {
     }
   }
 
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await logout(baseUrl);
+    } catch {
+      // Ignore logout errors — clear local state regardless.
+    }
+    await clearEmail();
+    setEmailCtx(null);
+    setSigningOut(false);
+    router.replace('/login');
+  }
+
   return (
     <ScrollView className="flex-1 bg-background">
       <VStack
         space="2xl"
         className="p-5 md:p-8 w-full max-w-2xl mx-auto"
       >
-        {/* Control Plane */}
+        {/* Control Plane — Base URL (always visible) */}
         <VStack space="md">
           <Heading size="md" bold className="text-foreground">
             Control Plane
@@ -148,28 +168,31 @@ export default function SettingsScreen() {
             </Input>
           </FormControl>
 
-          <FormControl>
-            <FormControlLabel>
-              <FormControlLabelText>Bearer Token</FormControlLabelText>
-            </FormControlLabel>
-            <Input>
-              <InputField
-                value={tokenDraft}
-                onChangeText={setTokenDraft}
-                secureTextEntry={!showToken}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="Paste your token here"
-              />
-              <InputSlot onPress={() => setShowToken((v) => !v)} className="pr-3">
-                <Icon
-                  as={showToken ? EyeOffIcon : EyeIcon}
-                  size="sm"
-                  className="text-muted-foreground"
+          {/* Native-only: Bearer Token field */}
+          {Platform.OS !== 'web' ? (
+            <FormControl>
+              <FormControlLabel>
+                <FormControlLabelText>Bearer Token</FormControlLabelText>
+              </FormControlLabel>
+              <Input>
+                <InputField
+                  value={tokenDraft}
+                  onChangeText={setTokenDraft}
+                  secureTextEntry={!showToken}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="Paste your token here"
                 />
-              </InputSlot>
-            </Input>
-          </FormControl>
+                <InputSlot onPress={() => setShowToken((v) => !v)} className="pr-3">
+                  <Icon
+                    as={showToken ? EyeOffIcon : EyeIcon}
+                    size="sm"
+                    className="text-muted-foreground"
+                  />
+                </InputSlot>
+              </Input>
+            </FormControl>
+          ) : null}
 
           <Button
             variant="default"
@@ -182,6 +205,38 @@ export default function SettingsScreen() {
         </VStack>
 
         <Divider />
+
+        {/* Session — Web: email + sign out. Native: nothing extra (bearer is above). */}
+        {Platform.OS === 'web' ? (
+          <>
+            <VStack space="md">
+              <Heading size="md" bold className="text-foreground">
+                Session
+              </Heading>
+              {email ? (
+                <VStack space="xs">
+                  <Text size="sm" bold className="text-foreground">
+                    {email}
+                  </Text>
+                  <Text size="xs" className="font-mono text-muted-foreground">
+                    Signed in via Fly
+                  </Text>
+                </VStack>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                isDisabled={signingOut}
+                onPress={() => void handleSignOut()}
+              >
+                {signingOut ? <ButtonSpinner /> : null}
+                <ButtonText>Sign out</ButtonText>
+              </Button>
+            </VStack>
+            <Divider />
+          </>
+        ) : null}
 
         {/* Push Notifications */}
         <VStack space="md">

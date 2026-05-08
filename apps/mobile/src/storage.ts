@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 const TOKEN_KEY = 'sprite_machine_token';
 const BASE_URL_KEY = 'sprite_machine_base_url';
 const THEME_OVERRIDE_KEY = 'sprite_machine_theme_override';
+const EMAIL_KEY = 'sprite_machine_email';
 
 export type ThemeOverride = 'system' | 'light' | 'dark';
 
@@ -76,8 +77,21 @@ export async function setThemeOverride(value: ThemeOverride): Promise<void> {
   await kv.set(THEME_OVERRIDE_KEY, value);
 }
 
+export async function getEmail(): Promise<string | null> {
+  return kv.get(EMAIL_KEY);
+}
+
+export async function setEmail(email: string): Promise<void> {
+  await kv.set(EMAIL_KEY, email);
+}
+
+export async function clearEmail(): Promise<void> {
+  await kv.del(EMAIL_KEY);
+}
+
 export async function clearAll(): Promise<void> {
   await kv.del(TOKEN_KEY);
   await kv.del(BASE_URL_KEY);
   await kv.del(THEME_OVERRIDE_KEY);
+  await kv.del(EMAIL_KEY);
 }

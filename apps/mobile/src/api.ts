@@ -88,6 +88,9 @@ async function apiFetch<T>(
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers,
+    // On web this lets the browser send the signed sm_session cookie. Native
+    // fetch ignores credentials but still attaches the bearer header above.
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -203,6 +206,22 @@ export function tickIdleScheduler(
     '/admin/idle/tick',
     { method: 'POST' },
   );
+}
+
+// Auth (web cookie session)
+export function login(baseUrl: string, flyToken: string): Promise<{ email: string }> {
+  return apiFetch<{ email: string }>(baseUrl, null, '/login', {
+    method: 'POST',
+    body: JSON.stringify({ flyToken }),
+  });
+}
+
+export function logout(baseUrl: string): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>(baseUrl, null, '/logout', { method: 'POST' });
+}
+
+export function getMe(baseUrl: string): Promise<{ email: string }> {
+  return apiFetch<{ email: string }>(baseUrl, null, '/me');
 }
 
 // Re-export shared types used by consumers

@@ -122,3 +122,32 @@ These are tracked as follow-ups, not bugs:
   cross-session.
 - Multi-target `cssInterop` mappings in `nativewind-shim.ts`. See the
   caveat above.
+
+## Web bundle: wterm is inlined into the entry chunk
+
+`apps/mobile/components/shell-panel.web.tsx` statically imports
+`@wterm/react`. Metro under Expo SDK 53 emits a single web entry chunk
+(`_expo/static/js/web/entry-*.js`) — there is no automatic
+`React.lazy()`-driven split, no separate runtime chunk, and no
+`SplitChunksPlugin`-equivalent for Metro's web target. We tried
+`React.lazy(() => import('@wterm/react'))` and Metro inlined the
+`import()` anyway (one chunk in, one chunk out).
+
+The previous build was ~2.10 MB; after dropping the (no-op) lazy wrapper
+the bundle is ~2.15 MB (the lazy/Suspense plumbing was net deadweight).
+We rely on Metro's **platform-extension resolver** (`shell-panel.web.tsx`
+vs `shell-panel.native.tsx`) to keep wterm out of the native bundle —
+verified by the fact that native typecheck passes with `Terminal` typed
+only on the web side and the iOS/Android bundle never resolves
+`@wterm/react`.
+
+A `shell-panel.d.ts` shim sits beside the `.web.tsx`/`.native.tsx`
+implementations so TypeScript's Bundler resolution can find a typed
+default export when `app/run/[id].tsx` imports `'../../components/shell-panel'`
+without an extension. Metro ignores `.d.ts` files; TS uses it.
+
+**When to revisit:** if/when Expo SDK 54 + Metro 0.84 + an enabled
+RSC/lazy-chunk pipeline lands, swap back to a true `import()`-driven
+split so the wterm/xterm payload only loads when the Shell tab is
+opened. Until then, the inlined cost is acceptable for our single-user
+dashboard.

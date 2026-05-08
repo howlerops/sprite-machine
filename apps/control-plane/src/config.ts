@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -9,6 +10,9 @@ const ConfigSchema = z.object({
   dbPath: z.string(),
   userToken: z.string().min(8, 'USER_TOKEN must be at least 8 chars'),
   webhookToken: z.string().min(8, 'CONTROL_PLANE_WEBHOOK_TOKEN must be at least 8 chars'),
+  sessionSecret: z.string().min(32, 'SESSION_SECRET must be at least 32 bytes (base64/hex/raw)'),
+  allowedEmails: z.array(z.string()).default([]),
+  cookieSecure: z.boolean().default(false),
   publicBaseUrl: z.string().url(),
   templateCheckpointId: z.string().nullable(),
   spritesBackend: z.enum(['local', 'fly']).default('local'),
@@ -31,6 +35,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const port = env.PORT ?? '8787';
   const host = env.HOST ?? '127.0.0.1';
   const publicBaseUrl = env.PUBLIC_BASE_URL ?? `http://${host}:${port}`;
+
+  // SESSION_SECRET: hard-fail in prod, derived (with warning) for dev.
+  let sessionSecret = env.SESSION_SECRET;
+  if (!sessionSecret || sessionSecret.length < 32) {
+    if (env.NODE_ENV === 'production') {
+      throw new Error('SESSION_SECRET env var is required in production (min 32 chars)');
+    }
+    const userToken = env.USER_TOKEN ?? 'dev-user-token';
+    const webhookToken = env.CONTROL_PLANE_WEBHOOK_TOKEN ?? 'dev-webhook-token';
+    sessionSecret = createHash('sha256')
+      .update(`${userToken}|${webhookToken}|sm_session`)
+      .digest('hex');
+    console.log(
+      '[control-plane] SESSION_SECRET not set — using dev-derived secret. Set SESSION_SECRET for production.',
+    );
+  }
+
+  const allowedEmails = (env.ALLOWED_EMAILS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  // Cookie secure flag: derive from publicBaseUrl scheme (https → secure).
+  const cookieSecure = publicBaseUrl.startsWith('https://');
+
   return ConfigSchema.parse({
     port,
     host,
@@ -39,6 +68,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath,
     userToken: env.USER_TOKEN ?? 'dev-user-token',
     webhookToken: env.CONTROL_PLANE_WEBHOOK_TOKEN ?? 'dev-webhook-token',
+    sessionSecret,
+    allowedEmails,
+    cookieSecure,
     publicBaseUrl,
     templateCheckpointId: env.TEMPLATE_CHECKPOINT_ID ?? null,
     spritesBackend: env.SPRITES_BACKEND,

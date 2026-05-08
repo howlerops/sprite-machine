@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import type { FlatList as RNFlatListType } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { Platform } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { tva } from '@gluestack-ui/utils/nativewind-utils';
 
 import { Box } from '@/components/ui/box';
@@ -35,6 +36,12 @@ import { useRunEventStream } from '../../src/sse';
 import { statusColor, formatCost } from '../../src/utils';
 import type { RunEventRow } from '../../src/api';
 
+// Platform-split shell panel: Metro's platform-extension resolver picks
+// shell-panel.web.tsx when bundling for web and shell-panel.native.tsx for
+// native. A plain static import is sufficient — wterm only lives in
+// shell-panel.web.tsx, so it never lands in the native bundle.
+import ShellPanel from '../../components/shell-panel';
+
 const eventCardStyle = tva({
   base: 'rounded-[10px] p-3 border-l-4',
   variants: {
@@ -48,6 +55,18 @@ const eventCardStyle = tva({
     },
   },
 });
+
+const tabChipStyle = tva({
+  base: 'px-3 py-1.5 rounded-full border',
+  variants: {
+    active: {
+      true: 'border-primary bg-primary',
+      false: 'border-border bg-background data-[hover=true]:bg-accent',
+    },
+  },
+});
+
+type ActiveTab = 'timeline' | 'shell';
 
 function EventCard({
   row,
@@ -211,6 +230,7 @@ export default function RunDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [message, setMessage] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('timeline');
   const flatListRef = useRef<RNFlatListType<RunEventRow>>(null);
   const toast = useToast();
 
@@ -291,6 +311,9 @@ export default function RunDetailScreen() {
 
   const color = statusColor(run.status);
 
+  // Shell tab is only rendered on web; on native it shows the placeholder.
+  const showShellTab = Platform.OS === 'web';
+
   return (
     <Box className="flex-1 bg-background lg:max-w-3xl lg:mx-auto lg:w-full">
       {/* Header info */}
@@ -340,47 +363,84 @@ export default function RunDetailScreen() {
               {formatCost(run.totalCostUsd)} · {run.totalInputTokens}↑ {run.totalOutputTokens}↓
             </Text>
           ) : null}
+
+          {/* Tab segment: Timeline | Shell */}
+          <HStack space="sm" className="pt-1">
+            <Pressable
+              onPress={() => setActiveTab('timeline')}
+              className={tabChipStyle({ active: activeTab === 'timeline' })}
+            >
+              <Text
+                size="xs"
+                bold={activeTab === 'timeline'}
+                className={activeTab === 'timeline' ? 'text-primary-foreground' : 'text-foreground'}
+              >
+                Timeline
+              </Text>
+            </Pressable>
+            {showShellTab ? (
+              <Pressable
+                onPress={() => setActiveTab('shell')}
+                className={tabChipStyle({ active: activeTab === 'shell' })}
+              >
+                <Text
+                  size="xs"
+                  bold={activeTab === 'shell'}
+                  className={activeTab === 'shell' ? 'text-primary-foreground' : 'text-foreground'}
+                >
+                  Shell
+                </Text>
+              </Pressable>
+            ) : null}
+          </HStack>
         </VStack>
       </Box>
 
-      {/* Events list */}
-      <FlatList
-        ref={flatListRef}
-        data={run.events}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        contentContainerStyle={{ padding: 12, gap: 10 }}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        ListEmptyComponent={
-          <Text size="sm" className="text-muted-foreground text-center pt-10">
-            No events yet. The run is starting…
-          </Text>
-        }
-      />
+      {/* Tab content */}
+      {activeTab === 'shell' ? (
+        <ShellPanel spriteId={spriteId} runId={id} sprite={sprite ?? null} />
+      ) : (
+        <>
+          {/* Events list */}
+          <FlatList
+            ref={flatListRef}
+            data={run.events}
+            renderItem={renderItem}
+            keyExtractor={keyExtractor}
+            contentContainerStyle={{ padding: 12, gap: 10 }}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            ListEmptyComponent={
+              <Text size="sm" className="text-muted-foreground text-center pt-10">
+                No events yet. The run is starting…
+              </Text>
+            }
+          />
 
-      {/* Composer */}
-      <HStack space="sm" className="p-3 bg-card border-t border-border items-end">
-        <Box className="flex-1">
-          <Input>
-            <InputField
-              value={message}
-              onChangeText={setMessage}
-              multiline
-              placeholder={canSend ? 'Send a message…' : 'Waiting for agent…'}
-              editable={canSend}
-              className="max-h-32"
-            />
-          </Input>
-        </Box>
-        <Button
-          variant="default"
-          isDisabled={!canSend || !message.trim() || sendMsg.isPending}
-          onPress={() => void handleSend()}
-        >
-          {sendMsg.isPending ? <ButtonSpinner /> : null}
-          <ButtonText>Send</ButtonText>
-        </Button>
-      </HStack>
+          {/* Composer */}
+          <HStack space="sm" className="p-3 bg-card border-t border-border items-end">
+            <Box className="flex-1">
+              <Input>
+                <InputField
+                  value={message}
+                  onChangeText={setMessage}
+                  multiline
+                  placeholder={canSend ? 'Send a message…' : 'Waiting for agent…'}
+                  editable={canSend}
+                  className="max-h-32"
+                />
+              </Input>
+            </Box>
+            <Button
+              variant="default"
+              isDisabled={!canSend || !message.trim() || sendMsg.isPending}
+              onPress={() => void handleSend()}
+            >
+              {sendMsg.isPending ? <ButtonSpinner /> : null}
+              <ButtonText>Send</ButtonText>
+            </Button>
+          </HStack>
+        </>
+      )}
 
       <AlertDialog isOpen={confirmCancel} onClose={() => setConfirmCancel(false)}>
         <AlertDialogBackdrop />

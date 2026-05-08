@@ -16,10 +16,12 @@
     "@sprite-machine/sprites-client": "workspace:*",
     "better-sqlite3": "^12.9.0",
     "hono": "catalog:",
+    "ws": "^8.20.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/ws": "^8.18.1",
     "esbuild": "^0.28.0"
   }
 }

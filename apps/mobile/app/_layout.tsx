@@ -19,6 +19,7 @@ import { AppConfigContext, useAppConfig } from '../src/config-store';
 import {
   getToken,
   getBaseUrl,
+  getEmail,
   getThemeOverride,
   setThemeOverride as persistThemeOverride,
   DEFAULT_BASE_URL,
@@ -63,6 +64,7 @@ const queryClient = new QueryClient({
 type Hydrated = {
   token: string | null;
   baseUrl: string;
+  email: string | null;
   themeOverride: ThemeOverride;
 };
 
@@ -74,14 +76,25 @@ function PushSetup() {
 function RouteGuard({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const router = useRouter();
-  const { token } = useAppConfig();
+  const { token, email } = useAppConfig();
 
   useEffect(() => {
     const inSettings = segments.includes('settings');
-    if (!token && !inSettings) {
-      router.replace('/(tabs)/settings');
+    const inLogin = segments.includes('login');
+
+    if (Platform.OS === 'web') {
+      // Web: guard on email (cookie session). If no email, redirect to /login
+      // unless already there.
+      if (!email && !inLogin) {
+        router.replace('/login');
+      }
+    } else {
+      // Native iOS: keep original bearer-token guard.
+      if (!token && !inSettings) {
+        router.replace('/(tabs)/settings');
+      }
     }
-  }, [token, segments, router]);
+  }, [token, email, segments, router]);
 
   return <>{children}</>;
 }
@@ -208,9 +221,11 @@ function DesktopRail() {
 
 function ResponsiveShell({ children }: { children: React.ReactNode }) {
   const { width } = useWindowDimensions();
+  const segments = useSegments();
   const isDesktop = width >= LG_BREAKPOINT;
+  const onLogin = segments.includes('login');
 
-  if (!isDesktop) return <>{children}</>;
+  if (!isDesktop || onLogin) return <>{children}</>;
 
   return (
     <Box className="flex-1 flex-row bg-background">
@@ -222,9 +237,6 @@ function ResponsiveShell({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   const systemScheme = useColorScheme();
-  // Read the persisted theme synchronously on web so the first paint is
-  // already in the right mode. On native we leave this null and rely on the
-  // provider's blank canvas while async hydration runs.
   const [initialThemeOverride] = useState<ThemeOverride | null>(() =>
     readThemeOverrideSync(),
   );
@@ -232,8 +244,13 @@ export default function RootLayout() {
 
   useEffect(() => {
     void (async () => {
-      const [t, u, theme] = await Promise.all([getToken(), getBaseUrl(), getThemeOverride()]);
-      setHydrated({ token: t, baseUrl: u, themeOverride: theme });
+      const [t, u, em, theme] = await Promise.all([
+        getToken(),
+        getBaseUrl(),
+        getEmail(),
+        getThemeOverride(),
+      ]);
+      setHydrated({ token: t, baseUrl: u, email: em, themeOverride: theme });
     })();
   }, []);
 
@@ -243,14 +260,15 @@ export default function RootLayout() {
   const setBaseUrl = useCallback((u: string) => {
     setHydrated((prev) => (prev ? { ...prev, baseUrl: u } : prev));
   }, []);
+  const setEmail = useCallback((em: string | null) => {
+    setHydrated((prev) => (prev ? { ...prev, email: em } : prev));
+  }, []);
   const setThemeOverride = useCallback((value: ThemeOverride) => {
     setHydrated((prev) => (prev ? { ...prev, themeOverride: value } : prev));
     void persistThemeOverride(value);
   }, []);
 
   const resolved: 'light' | 'dark' = useMemo(() => {
-    // Pre-hydration on web we know the persisted override synchronously, so
-    // honor it. After hydration, the async-loaded value takes over.
     const override =
       hydrated?.themeOverride ?? initialThemeOverride ?? 'system';
     if (override === 'system') return systemScheme === 'dark' ? 'dark' : 'light';
@@ -261,17 +279,17 @@ export default function RootLayout() {
     () => ({
       token: hydrated?.token ?? null,
       baseUrl: hydrated?.baseUrl ?? DEFAULT_BASE_URL,
+      email: hydrated?.email ?? null,
       themeOverride: hydrated?.themeOverride ?? 'system',
       setToken,
       setBaseUrl,
+      setEmail,
       setThemeOverride,
     }),
-    [hydrated, setToken, setBaseUrl, setThemeOverride],
+    [hydrated, setToken, setBaseUrl, setEmail, setThemeOverride],
   );
 
   if (!hydrated) {
-    // Mount provider so the white/dark canvas is correct while we hydrate
-    // settings; children mount only after hydration completes.
     return <GluestackUIProvider mode={resolved} />;
   }
 
@@ -292,6 +310,10 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="new"
                   options={{ title: 'New Run', presentation: 'modal', headerBackTitle: 'Cancel' }}
+                />
+                <Stack.Screen
+                  name="login"
+                  options={{ headerShown: false }}
                 />
               </Stack>
             </ResponsiveShell>
