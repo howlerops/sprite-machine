@@ -1,0 +1,34 @@
+node_modules/
+dist/
+build/
+.next/
+.expo/
+.expo-shared/
+coverage/
+
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+.tsbuildinfo
+*.tsbuildinfo
+
+.omc/state/
+.omc/logs/
+.omc/research/
+
+ios/
+android/
+
+# local runtime data — contains tokens & user-specific deployment ids
+.sprite-machine-data/
+
+# tooling caches
+.playwright-mcp/
+.omx/
+.claude/

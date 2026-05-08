@@ -1,0 +1,18 @@
+{
+  "name": "@sprite-machine/cli",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build-template": "tsx src/build-template.ts",
+    "sync-settings": "tsx src/sync-settings.ts",
+    "provision-worker": "tsx src/provision-worker.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sprite-machine/shared": "workspace:*",
+    "@sprite-machine/sprite-agent": "workspace:*",
+    "@sprite-machine/sprites-client": "workspace:*",
+    "zod": "catalog:"
+  }
+}

@@ -1,0 +1,5 @@
+{"t":0,"agent":"ac55fce","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a359927","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"system","event":"keyword_detected","keyword":"autopilot"}
+{"t":0,"agent":"system","event":"mode_change","mode_from":"none","mode_to":"autopilot"}
+{"t":0,"agent":"af49917","agent_type":"unknown","event":"agent_stop","success":true}

@@ -1,0 +1,4 @@
+{
+  "$comment": "Codex CLI plugins/agents to install on the worker sprite. Codex installs via `bun install -g @openai/codex`. Plugin install command (if any) is per-package via the codex CLI; agents are configured via ~/.codex/AGENTS.md (synced separately).",
+  "plugins": []
+}

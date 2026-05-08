@@ -1,0 +1,4 @@
+{
+  "$comment": "oh-my-pi (pi-coding-agent) plugins. Each entry is the source string passed to `pi install <source>`. The pi CLI is installed globally via bun.",
+  "plugins": ["npm:context-mode", "npm:pi-mcp-adapter", "npm:pi-rtk-optimizer"]
+}

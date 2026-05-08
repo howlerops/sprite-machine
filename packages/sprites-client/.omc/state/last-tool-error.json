@@ -1,0 +1,7 @@
+{
+  "tool_name": "mcp__playwright__browser_type",
+  "tool_input_preview": "{\"element\":\"composer\",\"target\":\"e90\",\"text\":\"follow-up message from the dashboard\"}",
+  "error": "### Error\nTimeoutError: browserBackend.callTool: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('aria-ref=e90')\u001b[22m\n\u001b[2m    - locator resolved to <textarea readonly dir=\"auto\" autocorrect=\"on\" autocomplete=\"on\" spellcheck=\"true\" autocapitalize=\"sentences\" virtualkeyboardpolicy=\"auto\" placeholder=\"Waiting for agent…\" class=\"css-11aywtz r-6taxm2 r-m4suti r-1dzdj1l r-rs99b7 r-18zdu8c r-13awgt0 r-a023e6 r-1xpiuri r-ytbthy r-3o4zer\"></textarea>\u001b[22m\n\u001b[2m    - fill(\"follow-up message ...",
+  "timestamp": "2026-05-08T15:22:24.561Z",
+  "retry_count": 1
+}

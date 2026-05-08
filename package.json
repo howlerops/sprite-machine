@@ -1,0 +1,36 @@
+{
+  "name": "sprite-machine",
+  "private": true,
+  "version": "0.0.0",
+  "description": "sprites.dev-backed Claude Code orchestration: iOS-first, durable, idle-aware",
+  "packageManager": "pnpm@10.30.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --parallel typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "sync-settings": "pnpm --filter @sprite-machine/cli sync-settings",
+    "build-template": "pnpm --filter @sprite-machine/cli build-template",
+    "build-sidecar": "pnpm --filter @sprite-machine/sprite-agent build",
+    "provision-worker": "pnpm build-sidecar && pnpm --filter @sprite-machine/cli provision-worker",
+    "rebuild-template": "pnpm sync-settings && pnpm build-template",
+    "dev": "pnpm dev:control-plane",
+    "dev:control-plane": "pnpm --filter @sprite-machine/control-plane dev",
+    "dev:agent": "pnpm --filter @sprite-machine/sprite-agent dev",
+    "dev:mobile": "pnpm --filter @sprite-machine/mobile exec npx expo start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

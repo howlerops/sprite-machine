@@ -1,0 +1,54 @@
+{
+  "$comment": "OMC plugin manifest. Source of truth for what M1 installs into the template sprite. Mirror of the user's laptop install as of 2026-05-07.",
+  "marketplaces": [
+    {
+      "name": "claude-code-plugins",
+      "git": "https://github.com/anthropics/claude-code.git"
+    },
+    {
+      "name": "claude-code-workflows",
+      "git": "https://github.com/wshobson/agents.git"
+    },
+    {
+      "name": "omc",
+      "git": "https://github.com/Yeachan-Heo/oh-my-claudecode.git"
+    },
+    {
+      "name": "claude-plugins-official",
+      "builtin": true,
+      "$note": "Built into Claude Code itself; nothing to clone."
+    }
+  ],
+  "plugins": [
+    "agent-orchestration@claude-code-workflows",
+    "agent-sdk-dev@claude-code-plugins",
+    "backend-development@claude-code-workflows",
+    "clangd-lsp@claude-plugins-official",
+    "code-documentation@claude-code-workflows",
+    "code-refactoring@claude-code-workflows",
+    "code-review-ai@claude-code-workflows",
+    "comprehensive-review@claude-code-workflows",
+    "context-management@claude-code-workflows",
+    "database-design@claude-code-workflows",
+    "database-migrations@claude-code-workflows",
+    "debugging-toolkit@claude-code-workflows",
+    "feature-dev@claude-code-plugins",
+    "frontend-design@claude-code-plugins",
+    "frontend-mobile-development@claude-code-workflows",
+    "frontend-mobile-security@claude-code-workflows",
+    "full-stack-orchestration@claude-code-workflows",
+    "git-pr-workflows@claude-code-workflows",
+    "hookify@claude-code-plugins",
+    "javascript-typescript@claude-code-workflows",
+    "llm-application-dev@claude-code-workflows",
+    "multi-platform-apps@claude-code-workflows",
+    "oh-my-claudecode@omc",
+    "performance-testing-review@claude-code-workflows",
+    "pyright-lsp@claude-plugins-official",
+    "python-development@claude-code-workflows",
+    "ralph-wiggum@claude-code-plugins",
+    "rust-analyzer-lsp@claude-plugins-official",
+    "security-scanning@claude-code-workflows",
+    "systems-programming@claude-code-workflows"
+  ]
+}

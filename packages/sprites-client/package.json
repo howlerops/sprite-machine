@@ -1,0 +1,24 @@
+{
+  "name": "@sprite-machine/sprites-client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sprite-machine/shared": "workspace:*",
+    "ws": "^8.20.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.4.2"
+  }
+}

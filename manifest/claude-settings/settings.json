@@ -1,0 +1,51 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node $HOME/.claude/hud/omc-hud.mjs"
+  },
+  "enabledPlugins": {
+    "python-development@claude-code-workflows": true,
+    "javascript-typescript@claude-code-workflows": true,
+    "backend-development@claude-code-workflows": true,
+    "security-scanning@claude-code-workflows": true,
+    "code-review-ai@claude-code-workflows": true,
+    "full-stack-orchestration@claude-code-workflows": true,
+    "debugging-toolkit@claude-code-workflows": true,
+    "frontend-mobile-development@claude-code-workflows": true,
+    "multi-platform-apps@claude-code-workflows": true,
+    "code-documentation@claude-code-workflows": true,
+    "git-pr-workflows@claude-code-workflows": true,
+    "comprehensive-review@claude-code-workflows": true,
+    "performance-testing-review@claude-code-workflows": true,
+    "code-refactoring@claude-code-workflows": true,
+    "llm-application-dev@claude-code-workflows": true,
+    "agent-orchestration@claude-code-workflows": true,
+    "context-management@claude-code-workflows": true,
+    "database-design@claude-code-workflows": true,
+    "database-migrations@claude-code-workflows": true,
+    "frontend-mobile-security@claude-code-workflows": true,
+    "systems-programming@claude-code-workflows": true,
+    "frontend-design@claude-code-plugins": true,
+    "agent-sdk-dev@claude-code-plugins": true,
+    "feature-dev@claude-code-plugins": true,
+    "hookify@claude-code-plugins": true,
+    "ralph-wiggum@claude-code-plugins": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "oh-my-claudecode@omc": true
+  },
+  "extraKnownMarketplaces": {
+    "omc": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/Yeachan-Heo/oh-my-claudecode.git"
+      }
+    }
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "light"
+}

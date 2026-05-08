@@ -1,0 +1,38 @@
+# Fly app config for the sprite-machine control plane.
+# Change `app` if the name is taken; redeploy with `flyctl deploy --remote-only`.
+
+app = "sprite-machine-cp"
+primary_region = "iad"
+
+[build]
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8787"
+  CONTROL_PLANE_DB_PATH = "/data/control-plane.sqlite"
+  SPRITES_BACKEND = "fly"
+  IDLE_SUSPEND_AFTER_MS = "300000"
+  IDLE_CHECK_INTERVAL_MS = "60000"
+
+[mounts]
+  source = "control_plane_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
