@@ -35,9 +35,7 @@ export function styled<T extends React.ComponentType<any>>(
   }
 
   cssInterop(Component, {
-    className: nativeStyleToProp
-      ? { target, nativeStyleToProp }
-      : { target },
+    className: nativeStyleToProp ? { target, nativeStyleToProp } : { target },
   });
   return Component;
 }

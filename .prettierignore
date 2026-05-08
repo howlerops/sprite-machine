@@ -5,3 +5,19 @@ build/
 .expo/
 coverage/
 pnpm-lock.yaml
+
+# Vendored gluestack-ui v5 components (copy-paste; gluestack owns its formatting)
+apps/mobile/components/ui/
+
+# Expo Router static export — generated, not authored
+apps/mobile/dist-web/
+apps/mobile/dist-ios/
+
+# Vendored agent skills repo (third-party content)
+.agents/
+
+# OMC tooling state and authored research (markdown formatted ad-hoc by agents)
+.omc/
+
+# Visual sweep / Playwright screenshot dumps at repo root
+*.png

@@ -10,18 +10,10 @@ import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Divider } from '@/components/ui/divider';
-import {
-  Input,
-  InputField,
-  InputSlot,
-} from '@/components/ui/input';
+import { Input, InputField, InputSlot } from '@/components/ui/input';
 import { Icon, EyeIcon, EyeOffIcon } from '@/components/ui/icon';
 import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
-import {
-  FormControl,
-  FormControlLabel,
-  FormControlLabelText,
-} from '@/components/ui/form-control';
+import { FormControl, FormControlLabel, FormControlLabelText } from '@/components/ui/form-control';
 import { useToast, Toast, ToastTitle, ToastDescription } from '@/components/ui/toast';
 
 import { useAppConfig } from '../../src/config-store';
@@ -142,10 +134,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView className="flex-1 bg-background">
-      <VStack
-        space="2xl"
-        className="p-5 md:p-8 w-full max-w-2xl mx-auto"
-      >
+      <VStack space="2xl" className="p-5 md:p-8 w-full max-w-2xl mx-auto">
         {/* Control Plane — Base URL (always visible) */}
         <VStack space="md">
           <Heading size="md" bold className="text-foreground">
@@ -261,18 +250,11 @@ export default function SettingsScreen() {
                 Registered Tokens
               </Text>
               {pushTokensData?.tokens.map((t) => (
-                <Box
-                  key={t.id}
-                  className="bg-card border border-border rounded-[10px] p-3"
-                >
+                <Box key={t.id} className="bg-card border border-border rounded-[10px] p-3">
                   <Text size="sm" bold className="text-foreground">
                     {t.label ?? 'Unnamed'}
                   </Text>
-                  <Text
-                    size="xs"
-                    isTruncated
-                    className="text-muted-foreground font-mono"
-                  >
+                  <Text size="xs" isTruncated className="text-muted-foreground font-mono">
                     {t.token.slice(0, 32)}…
                   </Text>
                 </Box>

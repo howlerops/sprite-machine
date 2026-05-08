@@ -147,10 +147,7 @@ export function attachExecProxy(deps: ExecProxyDeps): {
 
 function reject(socket: Duplex, status: number, reason: string): void {
   socket.write(
-    `HTTP/1.1 ${status} ${reason}\r\n` +
-      'Connection: close\r\n' +
-      'Content-Length: 0\r\n' +
-      '\r\n',
+    `HTTP/1.1 ${status} ${reason}\r\n` + 'Connection: close\r\n' + 'Content-Length: 0\r\n' + '\r\n',
   );
   socket.destroy();
 }

@@ -115,7 +115,11 @@ export function getRun(baseUrl: string, token: string | null, id: string): Promi
   return apiFetch<RunDetail>(baseUrl, token, `/runs/${id}`);
 }
 
-export function createRun(baseUrl: string, token: string | null, body: CreateRunRequest): Promise<RunRow> {
+export function createRun(
+  baseUrl: string,
+  token: string | null,
+  body: CreateRunRequest,
+): Promise<RunRow> {
   return apiFetch<RunRow>(baseUrl, token, '/runs', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -158,7 +162,10 @@ export function resolvePermission(
 }
 
 // Sprites
-export function getSprites(baseUrl: string, token: string | null): Promise<{ sprites: SpriteRow[] }> {
+export function getSprites(
+  baseUrl: string,
+  token: string | null,
+): Promise<{ sprites: SpriteRow[] }> {
   return apiFetch<{ sprites: SpriteRow[] }>(baseUrl, token, '/sprites');
 }
 
@@ -166,11 +173,19 @@ export function getSprite(baseUrl: string, token: string | null, id: string): Pr
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}`);
 }
 
-export function suspendSprite(baseUrl: string, token: string | null, id: string): Promise<SpriteRow> {
+export function suspendSprite(
+  baseUrl: string,
+  token: string | null,
+  id: string,
+): Promise<SpriteRow> {
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}/suspend`, { method: 'POST' });
 }
 
-export function resumeSprite(baseUrl: string, token: string | null, id: string): Promise<SpriteRow> {
+export function resumeSprite(
+  baseUrl: string,
+  token: string | null,
+  id: string,
+): Promise<SpriteRow> {
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}/resume`, { method: 'POST' });
 }
 
@@ -191,7 +206,10 @@ export function registerPushToken(
   });
 }
 
-export function getPushTokens(baseUrl: string, token: string | null): Promise<{ tokens: PushTokenRow[] }> {
+export function getPushTokens(
+  baseUrl: string,
+  token: string | null,
+): Promise<{ tokens: PushTokenRow[] }> {
   return apiFetch<{ tokens: PushTokenRow[] }>(baseUrl, token, '/push/tokens');
 }
 

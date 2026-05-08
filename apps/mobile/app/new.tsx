@@ -160,9 +160,7 @@ export default function NewRunScreen() {
             />
           </Input>
           <FormControlHelper>
-            <FormControlHelperText>
-              Absolute path on the sprite (optional).
-            </FormControlHelperText>
+            <FormControlHelperText>Absolute path on the sprite (optional).</FormControlHelperText>
           </FormControlHelper>
         </FormControl>
 

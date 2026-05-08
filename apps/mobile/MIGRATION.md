@@ -8,14 +8,14 @@ documents why so we don't re-litigate the choices on every upgrade.
 
 ## Stack pin matrix
 
-| Piece                         | What we ship                  | What's "current"               | Why we're not on current                                                                  |
-| ----------------------------- | ----------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
-| `@gluestack-ui/core`          | `5.0.0-alpha.0`               | v5 (alpha)                     | gluestack moved the v4 CLI/components into a v5 shape and stopped publishing new v4. Upstream `create-gluestack` only emits v5 sources, so the path of least friction is vendoring v5 components and adapting them. |
-| `@gluestack-ui/utils`         | `5.0.1-alpha.0`               | matches core                   | Bundled with v5 component sources.                                                        |
-| `nativewind`                  | `^4.2.3`                      | NativeWind v5 alpha            | NativeWind v5 requires Metro 0.84+ and a different Babel setup. Expo SDK 53 still pins Metro 0.82.x as a peer of `@expo/cli@0.24.x`, so v5 won't load under our Expo. |
-| `tailwindcss`                 | `^3.4.19`                     | Tailwind v4                    | NativeWind v4 is built against Tailwind v3's `tailwind.config.js` shape; Tailwind v4's CSS-first config is incompatible. |
-| `expo`                        | `~53.0.27`                    | SDK 54                         | We're holding to SDK 53 until SDK 54 lands stable + NativeWind v5 ships stable. The two need to advance together. |
-| `metro` (and 12 friends)      | `0.82.5`                      | 0.84+                          | `react-native-css-interop@0.2.3` (NativeWind 4's runtime) declares `metro@^0.84` as a peer. `@expo/cli@0.24.24` calls APIs only available in Metro 0.82.x. The peer mismatch breaks the web export. We pin Metro to 0.82.5 inside `react-native-css-interop` only (see "Scoped overrides" below). |
+| Piece                    | What we ship    | What's "current"    | Why we're not on current                                                                                                                                                                                                                                                                          |
+| ------------------------ | --------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@gluestack-ui/core`     | `5.0.0-alpha.0` | v5 (alpha)          | gluestack moved the v4 CLI/components into a v5 shape and stopped publishing new v4. Upstream `create-gluestack` only emits v5 sources, so the path of least friction is vendoring v5 components and adapting them.                                                                               |
+| `@gluestack-ui/utils`    | `5.0.1-alpha.0` | matches core        | Bundled with v5 component sources.                                                                                                                                                                                                                                                                |
+| `nativewind`             | `^4.2.3`        | NativeWind v5 alpha | NativeWind v5 requires Metro 0.84+ and a different Babel setup. Expo SDK 53 still pins Metro 0.82.x as a peer of `@expo/cli@0.24.x`, so v5 won't load under our Expo.                                                                                                                             |
+| `tailwindcss`            | `^3.4.19`       | Tailwind v4         | NativeWind v4 is built against Tailwind v3's `tailwind.config.js` shape; Tailwind v4's CSS-first config is incompatible.                                                                                                                                                                          |
+| `expo`                   | `~53.0.27`      | SDK 54              | We're holding to SDK 53 until SDK 54 lands stable + NativeWind v5 ships stable. The two need to advance together.                                                                                                                                                                                 |
+| `metro` (and 12 friends) | `0.82.5`        | 0.84+               | `react-native-css-interop@0.2.3` (NativeWind 4's runtime) declares `metro@^0.84` as a peer. `@expo/cli@0.24.24` calls APIs only available in Metro 0.82.x. The peer mismatch breaks the web export. We pin Metro to 0.82.5 inside `react-native-css-interop` only (see "Scoped overrides" below). |
 
 ## The `nativewind-shim.ts`
 
@@ -105,7 +105,7 @@ Re-evaluate the whole stack when **all** of the following land:
 3. **Tailwind v4 supported by NativeWind v5.** If yes, migrate
    `tailwind.config.js` to the v4 CSS-first shape simultaneously; this
    is also when we'd swap the design tokens out of `global.css` `@layer
-   base` blocks into the v4 `@theme` directive.
+base` blocks into the v4 `@theme` directive.
 
 When in doubt, do steps 1+2 together as one PR; do not partial-upgrade
 NativeWind without bumping Expo. Mismatching Metro versions is the most

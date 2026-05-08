@@ -58,9 +58,7 @@ export class PushDispatcher {
         console.warn(`[push] expo HTTP ${res.status}: ${body.slice(0, 200)}`);
       } else {
         // body shape: {"data":[{"status":"ok","id":"<ticket>"} or {"status":"error","message":"...","details":{"error":"DeviceNotRegistered"}}]}
-        console.log(
-          `[push] expo HTTP 200 (${messages.length} msg) tickets=${body.slice(0, 250)}`,
-        );
+        console.log(`[push] expo HTTP 200 (${messages.length} msg) tickets=${body.slice(0, 250)}`);
       }
     } catch (err) {
       console.warn(`[push] send failed:`, err);

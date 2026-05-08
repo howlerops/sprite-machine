@@ -150,9 +150,7 @@ export default function LoginScreen() {
             Need a token?
           </Text>
           <Link
-            onPress={() =>
-              void Linking.openURL('https://fly.io/dashboard/account/access-tokens')
-            }
+            onPress={() => void Linking.openURL('https://fly.io/dashboard/account/access-tokens')}
           >
             <LinkText size="xs">Get one from fly.io</LinkText>
           </Link>

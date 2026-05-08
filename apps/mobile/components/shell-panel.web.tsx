@@ -137,7 +137,9 @@ export default function ShellPanel({ spriteId, runId: _runId, sprite }: ShellPan
     return (
       <Box className="flex-1 items-center justify-center bg-background p-6">
         <VStack space="md" className="max-w-sm items-center">
-          <Heading size="md" className="text-foreground">Session expired</Heading>
+          <Heading size="md" className="text-foreground">
+            Session expired
+          </Heading>
           <Button variant="default" onPress={() => void handleAuthError()}>
             <ButtonText>Sign in again</ButtonText>
           </Button>

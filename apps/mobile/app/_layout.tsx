@@ -145,8 +145,7 @@ function DesktopRail() {
 
   const inSettings = segments.includes('settings');
   const runIdx = segments.indexOf('run');
-  const activeRunId =
-    runIdx >= 0 && runIdx + 1 < segments.length ? segments[runIdx + 1] : null;
+  const activeRunId = runIdx >= 0 && runIdx + 1 < segments.length ? segments[runIdx + 1] : null;
   const inRuns = !inSettings && !activeRunId;
 
   return (
@@ -193,9 +192,7 @@ function DesktopRail() {
         <Box className="border-t border-border">
           <Pressable
             onPress={() => router.push('/(tabs)')}
-            className={
-              inRuns ? 'px-4 py-3 bg-accent' : 'px-4 py-3 data-[hover=true]:bg-accent'
-            }
+            className={inRuns ? 'px-4 py-3 bg-accent' : 'px-4 py-3 data-[hover=true]:bg-accent'}
           >
             <Text size="sm" className="text-foreground">
               Runs
@@ -203,11 +200,7 @@ function DesktopRail() {
           </Pressable>
           <Pressable
             onPress={() => router.push('/(tabs)/settings')}
-            className={
-              inSettings
-                ? 'px-4 py-3 bg-accent'
-                : 'px-4 py-3 data-[hover=true]:bg-accent'
-            }
+            className={inSettings ? 'px-4 py-3 bg-accent' : 'px-4 py-3 data-[hover=true]:bg-accent'}
           >
             <Text size="sm" className="text-foreground">
               Settings
@@ -237,9 +230,7 @@ function ResponsiveShell({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   const systemScheme = useColorScheme();
-  const [initialThemeOverride] = useState<ThemeOverride | null>(() =>
-    readThemeOverrideSync(),
-  );
+  const [initialThemeOverride] = useState<ThemeOverride | null>(() => readThemeOverrideSync());
   const [hydrated, setHydrated] = useState<Hydrated | null>(null);
 
   useEffect(() => {
@@ -269,8 +260,7 @@ export default function RootLayout() {
   }, []);
 
   const resolved: 'light' | 'dark' = useMemo(() => {
-    const override =
-      hydrated?.themeOverride ?? initialThemeOverride ?? 'system';
+    const override = hydrated?.themeOverride ?? initialThemeOverride ?? 'system';
     if (override === 'system') return systemScheme === 'dark' ? 'dark' : 'light';
     return override;
   }, [hydrated?.themeOverride, initialThemeOverride, systemScheme]);
@@ -303,18 +293,12 @@ export default function RootLayout() {
             <ResponsiveShell>
               <Stack>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen
-                  name="run/[id]"
-                  options={{ title: 'Run', headerBackTitle: 'Runs' }}
-                />
+                <Stack.Screen name="run/[id]" options={{ title: 'Run', headerBackTitle: 'Runs' }} />
                 <Stack.Screen
                   name="new"
                   options={{ title: 'New Run', presentation: 'modal', headerBackTitle: 'Cancel' }}
                 />
-                <Stack.Screen
-                  name="login"
-                  options={{ headerShown: false }}
-                />
+                <Stack.Screen name="login" options={{ headerShown: false }} />
               </Stack>
             </ResponsiveShell>
           </RouteGuard>

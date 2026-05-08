@@ -127,11 +127,7 @@ function EventCard({
             <Text size="2xs" bold className="uppercase text-muted-foreground">
               Tool: {event.name}
             </Text>
-            <Text
-              size="xs"
-              numberOfLines={4}
-              className="text-foreground/80 font-mono"
-            >
+            <Text size="xs" numberOfLines={4} className="text-foreground/80 font-mono">
               {JSON.stringify(event.input, null, 2)}
             </Text>
           </VStack>
@@ -146,11 +142,7 @@ function EventCard({
               Result{event.name ? `: ${event.name}` : ''}
               {event.isError === true ? ' (error)' : ''}
             </Text>
-            <Text
-              size="xs"
-              numberOfLines={6}
-              className="text-foreground/80 font-mono"
-            >
+            <Text size="xs" numberOfLines={6} className="text-foreground/80 font-mono">
               {typeof event.output === 'string'
                 ? event.output
                 : JSON.stringify(event.output, null, 2)}
@@ -166,11 +158,7 @@ function EventCard({
             <Text size="2xs" bold className="uppercase text-muted-foreground">
               Permission Required: {event.toolName}
             </Text>
-            <Text
-              size="xs"
-              numberOfLines={4}
-              className="text-foreground/80 font-mono"
-            >
+            <Text size="xs" numberOfLines={4} className="text-foreground/80 font-mono">
               {JSON.stringify(event.input, null, 2)}
             </Text>
             <HStack space="sm">
@@ -327,11 +315,7 @@ export default function RunDetailScreen() {
             </Box>
             <HStack space="xs" className="ml-auto">
               {isActive ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onPress={() => setConfirmCancel(true)}
-                >
+                <Button variant="outline" size="sm" onPress={() => setConfirmCancel(true)}>
                   <ButtonText>Cancel</ButtonText>
                 </Button>
               ) : null}
@@ -345,11 +329,7 @@ export default function RunDetailScreen() {
                 </Button>
               ) : null}
               {canResume ? (
-                <Button
-                  variant="default"
-                  size="sm"
-                  onPress={() => void resumeSprite.mutateAsync()}
-                >
+                <Button variant="default" size="sm" onPress={() => void resumeSprite.mutateAsync()}>
                   <ButtonText>Resume</ButtonText>
                 </Button>
               ) : null}
@@ -456,18 +436,10 @@ export default function RunDetailScreen() {
             </Text>
           </AlertDialogBody>
           <AlertDialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onPress={() => setConfirmCancel(false)}
-            >
+            <Button variant="outline" size="sm" onPress={() => setConfirmCancel(false)}>
               <ButtonText>Keep running</ButtonText>
             </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onPress={() => void performCancel()}
-            >
+            <Button variant="destructive" size="sm" onPress={() => void performCancel()}>
               <ButtonText>Cancel run</ButtonText>
             </Button>
           </AlertDialogFooter>

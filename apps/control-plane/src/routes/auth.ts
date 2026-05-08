@@ -60,15 +60,10 @@ export function buildAuthRoutes(deps: AuthRoutesDeps): Hono {
   const app = new Hono();
 
   app.post('/login', async (c) => {
-    const ip =
-      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
     const limit = loginRateLimit(ip);
     if (!limit.allowed) {
-      return c.json(
-        { error: 'rate_limited' },
-        429,
-        { 'Retry-After': String(limit.retryAfterSec) },
-      );
+      return c.json({ error: 'rate_limited' }, 429, { 'Retry-After': String(limit.retryAfterSec) });
     }
 
     const body = await c.req.json().catch(() => null);
