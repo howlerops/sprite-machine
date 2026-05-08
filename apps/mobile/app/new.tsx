@@ -1,15 +1,26 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
 import { useRouter } from 'expo-router';
+
+import { Box } from '@/components/ui/box';
+import { Text } from '@/components/ui/text';
+import { Pressable } from '@/components/ui/pressable';
+import { ScrollView } from '@/components/ui/scroll-view';
+import { VStack } from '@/components/ui/vstack';
+import { HStack } from '@/components/ui/hstack';
+import { Input, InputField } from '@/components/ui/input';
+import { Textarea, TextareaInput } from '@/components/ui/textarea';
+import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
+import {
+  FormControl,
+  FormControlLabel,
+  FormControlLabelText,
+  FormControlError,
+  FormControlErrorText,
+  FormControlHelper,
+  FormControlHelperText,
+} from '@/components/ui/form-control';
+import { useToast, Toast, ToastTitle, ToastDescription } from '@/components/ui/toast';
+
 import { useCreateRun } from '../src/hooks/useRuns';
 import type { CreateRunRequest } from '../src/api';
 
@@ -19,21 +30,75 @@ type Harness = 'claude' | 'codex' | 'pi' | 'mock';
 const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 const HARNESSES: Harness[] = ['claude', 'codex', 'pi', 'mock'];
 
+function ChipGroup<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <HStack space="sm" className="flex-wrap">
+      {options.map((opt) => {
+        const active = value === opt;
+        return (
+          <Pressable
+            key={opt}
+            onPress={() => onChange(opt)}
+            className={
+              active
+                ? 'px-3 py-2 rounded-[10px] border border-primary bg-primary'
+                : 'px-3 py-2 rounded-[10px] border border-border bg-background data-[hover=true]:bg-accent'
+            }
+          >
+            <Text
+              size="sm"
+              bold={active}
+              className={active ? 'text-primary-foreground' : 'text-foreground'}
+            >
+              {opt}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </HStack>
+  );
+}
+
 export default function NewRunScreen() {
   const router = useRouter();
   const createRun = useCreateRun();
+  const toast = useToast();
 
   const [prompt, setPrompt] = useState('');
   const [workdir, setWorkdir] = useState('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [harness, setHarness] = useState<Harness>('claude');
+  const [submitted, setSubmitted] = useState(false);
+
+  const promptInvalid = submitted && !prompt.trim();
+
+  function showError(message: string) {
+    const id = String(Math.random());
+    toast.show({
+      id,
+      placement: 'top',
+      duration: 3000,
+      render: () => (
+        <Toast nativeID={`toast-${id}`} action="error" variant="solid">
+          <ToastTitle>Error</ToastTitle>
+          <ToastDescription>{message}</ToastDescription>
+        </Toast>
+      ),
+    });
+  }
 
   async function handleSubmit() {
+    setSubmitted(true);
     const trimmed = prompt.trim();
-    if (!trimmed) {
-      Alert.alert('Prompt required', 'Please enter a prompt for the run.');
-      return;
-    }
+    if (!trimmed) return;
 
     const body: CreateRunRequest = {
       prompt: trimmed,
@@ -47,116 +112,84 @@ export default function NewRunScreen() {
       router.back();
       router.push(`/run/${run.id}`);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to create run.');
+      showError(e instanceof Error ? e.message : 'Failed to create run.');
     }
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={styles.label}>Prompt *</Text>
-      <TextInput
-        style={[styles.input, styles.promptInput]}
-        value={prompt}
-        onChangeText={setPrompt}
-        multiline
-        autoFocus
-        placeholder="What should the agent do?"
-        placeholderTextColor="#9CA3AF"
-        textAlignVertical="top"
-      />
+    <ScrollView className="flex-1 bg-background" keyboardShouldPersistTaps="handled">
+      <VStack space="lg" className="p-5 md:p-8 w-full max-w-2xl mx-auto">
+        <FormControl isInvalid={promptInvalid} isRequired>
+          <FormControlLabel>
+            <FormControlLabelText>Prompt</FormControlLabelText>
+          </FormControlLabel>
+          <Textarea className="min-h-32">
+            <TextareaInput
+              value={prompt}
+              onChangeText={setPrompt}
+              autoFocus
+              placeholder="What should the agent do?"
+              textAlignVertical="top"
+            />
+          </Textarea>
+          {promptInvalid ? (
+            <FormControlError>
+              <FormControlErrorText>Prompt is required</FormControlErrorText>
+            </FormControlError>
+          ) : null}
+        </FormControl>
 
-      <Text style={styles.label}>Harness</Text>
-      <View style={styles.modeRow}>
-        {HARNESSES.map((h) => (
-          <Pressable
-            key={h}
-            style={[styles.modeBtn, harness === h && styles.modeBtnActive]}
-            onPress={() => setHarness(h)}
+        <FormControl>
+          <FormControlLabel>
+            <FormControlLabelText>Harness</FormControlLabelText>
+          </FormControlLabel>
+          <ChipGroup options={HARNESSES} value={harness} onChange={setHarness} />
+        </FormControl>
+
+        <FormControl>
+          <FormControlLabel>
+            <FormControlLabelText>Working Directory</FormControlLabelText>
+          </FormControlLabel>
+          <Input>
+            <InputField
+              value={workdir}
+              onChangeText={setWorkdir}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="/path/to/project"
+            />
+          </Input>
+          <FormControlHelper>
+            <FormControlHelperText>
+              Absolute path on the sprite (optional).
+            </FormControlHelperText>
+          </FormControlHelper>
+        </FormControl>
+
+        <FormControl>
+          <FormControlLabel>
+            <FormControlLabelText>Permission Mode</FormControlLabelText>
+          </FormControlLabel>
+          <ChipGroup
+            options={PERMISSION_MODES}
+            value={permissionMode}
+            onChange={setPermissionMode}
+          />
+        </FormControl>
+
+        <Box className="mt-2">
+          <Button
+            variant="default"
+            size="lg"
+            isDisabled={createRun.isPending}
+            onPress={() => void handleSubmit()}
+            className="w-full"
           >
-            <Text style={[styles.modeBtnText, harness === h && styles.modeBtnTextActive]}>{h}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Text style={styles.label}>Working Directory (optional)</Text>
-      <TextInput
-        style={styles.input}
-        value={workdir}
-        onChangeText={setWorkdir}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="/path/to/project"
-        placeholderTextColor="#9CA3AF"
-      />
-
-      <Text style={styles.label}>Permission Mode</Text>
-      <View style={styles.modeRow}>
-        {PERMISSION_MODES.map((mode) => (
-          <Pressable
-            key={mode}
-            style={[styles.modeBtn, permissionMode === mode && styles.modeBtnActive]}
-            onPress={() => setPermissionMode(mode)}
-          >
-            <Text style={[styles.modeBtnText, permissionMode === mode && styles.modeBtnTextActive]}>
-              {mode}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Pressable
-        style={[styles.submitBtn, createRun.isPending && styles.btnDisabled]}
-        onPress={() => void handleSubmit()}
-        disabled={createRun.isPending}
-      >
-        {createRun.isPending ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.submitBtnText}>Start Run</Text>
-        )}
-      </Pressable>
+            {createRun.isPending ? <ButtonSpinner /> : null}
+            <ButtonText>Start Run</ButtonText>
+          </Button>
+        </Box>
+      </VStack>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  content: { padding: 20, gap: 14 },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#111827',
-  },
-  promptInput: { minHeight: 120 },
-  modeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  modeBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    backgroundColor: '#FFFFFF',
-  },
-  modeBtnActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
-  modeBtnText: { fontSize: 13, color: '#374151' },
-  modeBtnTextActive: { color: '#FFFFFF', fontWeight: '600' },
-  submitBtn: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  submitBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  btnDisabled: { opacity: 0.5 },
-});

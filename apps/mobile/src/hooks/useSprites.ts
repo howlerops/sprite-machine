@@ -16,7 +16,7 @@ export function useSprite(id: string) {
   return useQuery({
     queryKey: ['sprite', id],
     queryFn: () => getSprite(baseUrl, token!, id),
-    enabled: !!token,
+    enabled: !!token && !!id,
   });
 }
 

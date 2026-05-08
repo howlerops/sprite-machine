@@ -1,27 +1,51 @@
 import { useState, useEffect } from 'react';
+
+import { Box } from '@/components/ui/box';
+import { Text } from '@/components/ui/text';
+import { Pressable } from '@/components/ui/pressable';
+import { ScrollView } from '@/components/ui/scroll-view';
+import { VStack } from '@/components/ui/vstack';
+import { HStack } from '@/components/ui/hstack';
+import { Heading } from '@/components/ui/heading';
+import { Divider } from '@/components/ui/divider';
 import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+  Input,
+  InputField,
+  InputSlot,
+} from '@/components/ui/input';
+import { Icon, EyeIcon, EyeOffIcon } from '@/components/ui/icon';
+import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
+import {
+  FormControl,
+  FormControlLabel,
+  FormControlLabelText,
+} from '@/components/ui/form-control';
+import { useToast, Toast, ToastTitle, ToastDescription } from '@/components/ui/toast';
+
 import { useAppConfig } from '../../src/config-store';
-import { setToken, setBaseUrl } from '../../src/storage';
+import { setToken, setBaseUrl, type ThemeOverride } from '../../src/storage';
 import {
   usePushTokens,
   useRegisterPushToken,
   useTickIdleScheduler,
 } from '../../src/hooks/usePushTokens';
 
-export default function SettingsScreen() {
-  const { token, baseUrl, setToken: setTokenCtx, setBaseUrl: setBaseUrlCtx } = useAppConfig();
+const THEME_OPTIONS: ThemeOverride[] = ['system', 'light', 'dark'];
 
+export default function SettingsScreen() {
+  const {
+    token,
+    baseUrl,
+    themeOverride,
+    setToken: setTokenCtx,
+    setBaseUrl: setBaseUrlCtx,
+    setThemeOverride,
+  } = useAppConfig();
+
+  const toast = useToast();
   const [urlDraft, setUrlDraft] = useState(baseUrl);
   const [tokenDraft, setTokenDraft] = useState(token ?? '');
+  const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
     setUrlDraft(baseUrl);
@@ -35,157 +59,228 @@ export default function SettingsScreen() {
   const registerMutation = useRegisterPushToken();
   const tickMutation = useTickIdleScheduler();
 
+  function showToast(opts: {
+    title: string;
+    description?: string;
+    action?: 'success' | 'error' | 'info';
+  }) {
+    const id = String(Math.random());
+    toast.show({
+      id,
+      placement: 'top',
+      duration: 3000,
+      render: () => (
+        <Toast nativeID={`toast-${id}`} action={opts.action ?? 'info'} variant="solid">
+          <ToastTitle>{opts.title}</ToastTitle>
+          {opts.description ? <ToastDescription>{opts.description}</ToastDescription> : null}
+        </Toast>
+      ),
+    });
+  }
+
   async function handleSave() {
     await Promise.all([setToken(tokenDraft.trim()), setBaseUrl(urlDraft.trim())]);
     setTokenCtx(tokenDraft.trim() || null);
     setBaseUrlCtx(urlDraft.trim());
-    Alert.alert('Saved', 'Settings saved successfully.');
+    showToast({ title: 'Saved', description: 'Settings saved successfully.', action: 'success' });
   }
 
   async function handleRegisterPush() {
     try {
       await registerMutation.mutateAsync();
       await refetchPushTokens();
-      Alert.alert('Registered', 'Push token registered successfully.');
+      showToast({
+        title: 'Registered',
+        description: 'Push token registered successfully.',
+        action: 'success',
+      });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to register push token.');
+      showToast({
+        title: 'Error',
+        description: e instanceof Error ? e.message : 'Failed to register push token.',
+        action: 'error',
+      });
     }
   }
 
   async function handleTickIdle() {
     try {
       const result = await tickMutation.mutateAsync();
-      Alert.alert(
-        'Idle Tick',
-        `Evaluated: ${result.evaluated}\nSuspended: ${result.suspended}\nErrors: ${result.errors}`,
-      );
+      showToast({
+        title: 'Idle tick',
+        description: `Evaluated: ${result.evaluated}, Suspended: ${result.suspended}, Errors: ${result.errors}`,
+        action: 'info',
+      });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to tick idle scheduler.');
+      showToast({
+        title: 'Error',
+        description: e instanceof Error ? e.message : 'Failed to tick idle scheduler.',
+        action: 'error',
+      });
     }
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.sectionTitle}>Control Plane</Text>
-
-      <Text style={styles.label}>Base URL</Text>
-      <TextInput
-        style={styles.input}
-        value={urlDraft}
-        onChangeText={setUrlDraft}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        placeholder="http://localhost:8787"
-        placeholderTextColor="#9CA3AF"
-      />
-
-      <Text style={styles.label}>Bearer Token</Text>
-      <TextInput
-        style={styles.input}
-        value={tokenDraft}
-        onChangeText={setTokenDraft}
-        secureTextEntry
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="Paste your token here"
-        placeholderTextColor="#9CA3AF"
-      />
-
-      <Pressable style={styles.primaryBtn} onPress={() => void handleSave()}>
-        <Text style={styles.primaryBtnText}>Save</Text>
-      </Pressable>
-
-      <View style={styles.divider} />
-
-      <Text style={styles.sectionTitle}>Push Notifications</Text>
-
-      <Pressable
-        style={[styles.secondaryBtn, registerMutation.isPending && styles.btnDisabled]}
-        onPress={() => void handleRegisterPush()}
-        disabled={registerMutation.isPending}
+    <ScrollView className="flex-1 bg-background">
+      <VStack
+        space="2xl"
+        className="p-5 md:p-8 w-full max-w-2xl mx-auto"
       >
-        {registerMutation.isPending ? (
-          <ActivityIndicator color="#2563EB" />
-        ) : (
-          <Text style={styles.secondaryBtnText}>Register Push Token</Text>
-        )}
-      </Pressable>
+        {/* Control Plane */}
+        <VStack space="md">
+          <Heading size="md" bold className="text-foreground">
+            Control Plane
+          </Heading>
 
-      {(pushTokensData?.tokens ?? []).length > 0 && (
-        <View style={styles.tokenList}>
-          <Text style={styles.label}>Registered Tokens</Text>
-          {pushTokensData?.tokens.map((t) => (
-            <View key={t.id} style={styles.tokenRow}>
-              <Text style={styles.tokenLabel}>{t.label ?? 'Unnamed'}</Text>
-              <Text style={styles.tokenValue} numberOfLines={1}>
-                {t.token.slice(0, 32)}…
+          <FormControl>
+            <FormControlLabel>
+              <FormControlLabelText>Base URL</FormControlLabelText>
+            </FormControlLabel>
+            <Input>
+              <InputField
+                value={urlDraft}
+                onChangeText={setUrlDraft}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                placeholder="http://localhost:8787"
+              />
+            </Input>
+          </FormControl>
+
+          <FormControl>
+            <FormControlLabel>
+              <FormControlLabelText>Bearer Token</FormControlLabelText>
+            </FormControlLabel>
+            <Input>
+              <InputField
+                value={tokenDraft}
+                onChangeText={setTokenDraft}
+                secureTextEntry={!showToken}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="Paste your token here"
+              />
+              <InputSlot onPress={() => setShowToken((v) => !v)} className="pr-3">
+                <Icon
+                  as={showToken ? EyeOffIcon : EyeIcon}
+                  size="sm"
+                  className="text-muted-foreground"
+                />
+              </InputSlot>
+            </Input>
+          </FormControl>
+
+          <Button
+            variant="default"
+            size="lg"
+            className="self-start"
+            onPress={() => void handleSave()}
+          >
+            <ButtonText>Save</ButtonText>
+          </Button>
+        </VStack>
+
+        <Divider />
+
+        {/* Push Notifications */}
+        <VStack space="md">
+          <Heading size="md" bold className="text-foreground">
+            Push Notifications
+          </Heading>
+
+          <Button
+            variant="outline"
+            size="default"
+            isDisabled={registerMutation.isPending}
+            onPress={() => void handleRegisterPush()}
+            className="self-start"
+          >
+            {registerMutation.isPending ? <ButtonSpinner /> : null}
+            <ButtonText>Register Push Token</ButtonText>
+          </Button>
+
+          {(pushTokensData?.tokens ?? []).length > 0 ? (
+            <VStack space="sm">
+              <Text size="xs" bold className="text-muted-foreground uppercase">
+                Registered Tokens
               </Text>
-            </View>
-          ))}
-        </View>
-      )}
+              {pushTokensData?.tokens.map((t) => (
+                <Box
+                  key={t.id}
+                  className="bg-card border border-border rounded-[10px] p-3"
+                >
+                  <Text size="sm" bold className="text-foreground">
+                    {t.label ?? 'Unnamed'}
+                  </Text>
+                  <Text
+                    size="xs"
+                    isTruncated
+                    className="text-muted-foreground font-mono"
+                  >
+                    {t.token.slice(0, 32)}…
+                  </Text>
+                </Box>
+              ))}
+            </VStack>
+          ) : null}
+        </VStack>
 
-      <View style={styles.divider} />
+        <Divider />
 
-      <Text style={styles.sectionTitle}>Admin</Text>
+        {/* Appearance */}
+        <VStack space="md">
+          <Heading size="md" bold className="text-foreground">
+            Appearance
+          </Heading>
+          <Text size="xs" className="text-muted-foreground">
+            Override the system theme. Changes apply immediately.
+          </Text>
+          <HStack space="sm" className="flex-wrap">
+            {THEME_OPTIONS.map((opt) => {
+              const active = themeOverride === opt;
+              return (
+                <Pressable
+                  key={opt}
+                  onPress={() => setThemeOverride(opt)}
+                  className={
+                    active
+                      ? 'px-3 py-2 rounded-[10px] border border-primary bg-primary'
+                      : 'px-3 py-2 rounded-[10px] border border-border bg-background data-[hover=true]:bg-accent'
+                  }
+                >
+                  <Text
+                    size="sm"
+                    bold={active}
+                    className={active ? 'text-primary-foreground' : 'text-foreground'}
+                  >
+                    {opt}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </HStack>
+        </VStack>
 
-      <Pressable
-        style={[styles.secondaryBtn, tickMutation.isPending && styles.btnDisabled]}
-        onPress={() => void handleTickIdle()}
-        disabled={tickMutation.isPending}
-      >
-        {tickMutation.isPending ? (
-          <ActivityIndicator color="#2563EB" />
-        ) : (
-          <Text style={styles.secondaryBtnText}>Tick Idle Scheduler</Text>
-        )}
-      </Pressable>
+        <Divider />
+
+        {/* Admin */}
+        <VStack space="md">
+          <Heading size="md" bold className="text-foreground">
+            Admin
+          </Heading>
+          <Button
+            variant="outline"
+            size="default"
+            isDisabled={tickMutation.isPending}
+            onPress={() => void handleTickIdle()}
+            className="self-start"
+          >
+            {tickMutation.isPending ? <ButtonSpinner /> : null}
+            <ButtonText>Tick Idle Scheduler</ButtonText>
+          </Button>
+        </VStack>
+      </VStack>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  content: { padding: 20, gap: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 8 },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#111827',
-  },
-  primaryBtn: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  primaryBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 16 },
-  secondaryBtn: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#2563EB',
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: 'center',
-  },
-  secondaryBtnText: { color: '#2563EB', fontWeight: '600', fontSize: 15 },
-  btnDisabled: { opacity: 0.5 },
-  divider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 8 },
-  tokenList: { gap: 8 },
-  tokenRow: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
-    gap: 2,
-  },
-  tokenLabel: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  tokenValue: { fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace' },
-});

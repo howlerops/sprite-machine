@@ -3,6 +3,13 @@ import * as SecureStore from 'expo-secure-store';
 
 const TOKEN_KEY = 'sprite_machine_token';
 const BASE_URL_KEY = 'sprite_machine_base_url';
+const THEME_OVERRIDE_KEY = 'sprite_machine_theme_override';
+
+export type ThemeOverride = 'system' | 'light' | 'dark';
+
+function isThemeOverride(value: string | null): value is ThemeOverride {
+  return value === 'system' || value === 'light' || value === 'dark';
+}
 
 /**
  * Same-origin default for web (so the dashboard at https://...fly.dev/app/
@@ -60,7 +67,17 @@ export async function setBaseUrl(url: string): Promise<void> {
   await kv.set(BASE_URL_KEY, url);
 }
 
+export async function getThemeOverride(): Promise<ThemeOverride> {
+  const v = await kv.get(THEME_OVERRIDE_KEY);
+  return isThemeOverride(v) ? v : 'system';
+}
+
+export async function setThemeOverride(value: ThemeOverride): Promise<void> {
+  await kv.set(THEME_OVERRIDE_KEY, value);
+}
+
 export async function clearAll(): Promise<void> {
   await kv.del(TOKEN_KEY);
   await kv.del(BASE_URL_KEY);
+  await kv.del(THEME_OVERRIDE_KEY);
 }

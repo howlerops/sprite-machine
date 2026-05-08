@@ -17,9 +17,16 @@ export function truncate(text: string, maxLen: number): string {
   return text.slice(0, maxLen - 1) + '…';
 }
 
+/**
+ * Status badge styling, returned as Tailwind/NativeWind className strings
+ * referencing semantic tokens declared in apps/mobile/global.css.
+ *
+ * Consumers (`(tabs)/index.tsx`, `run/[id].tsx`) compose `bgClass` on the
+ * pill background and `textClass` on the label.
+ */
 export type StatusColor = {
-  bg: string;
-  text: string;
+  bgClass: string;
+  textClass: string;
   label: string;
 };
 
@@ -27,19 +34,35 @@ export function statusColor(status: string): StatusColor {
   switch (status) {
     case 'running':
     case 'starting':
-      return { bg: '#DBEAFE', text: '#1D4ED8', label: status };
+      return {
+        bgClass: 'bg-status-running-muted',
+        textClass: 'text-status-running-foreground',
+        label: status,
+      };
     case 'awaiting_input':
-      return { bg: '#FEF3C7', text: '#D97706', label: 'waiting' };
+      return {
+        bgClass: 'bg-status-warning-muted',
+        textClass: 'text-status-warning-foreground',
+        label: 'waiting',
+      };
     case 'completed':
-      return { bg: '#D1FAE5', text: '#065F46', label: 'done' };
+      return {
+        bgClass: 'bg-status-success-muted',
+        textClass: 'text-status-success-foreground',
+        label: 'done',
+      };
     case 'failed':
-      return { bg: '#FEE2E2', text: '#991B1B', label: 'failed' };
+      return {
+        bgClass: 'bg-destructive/10',
+        textClass: 'text-destructive',
+        label: 'failed',
+      };
     case 'cancelled':
-      return { bg: '#F3F4F6', text: '#6B7280', label: 'cancelled' };
+      return { bgClass: 'bg-muted', textClass: 'text-muted-foreground', label: 'cancelled' };
     case 'queued':
     case 'idle':
     default:
-      return { bg: '#F3F4F6', text: '#374151', label: status };
+      return { bgClass: 'bg-muted', textClass: 'text-foreground', label: status };
   }
 }
 

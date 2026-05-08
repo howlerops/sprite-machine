@@ -1,35 +1,59 @@
 import { useState, useRef, useCallback } from 'react';
+import type { FlatList as RNFlatListType } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+import { tva } from '@gluestack-ui/utils/nativewind-utils';
+
+import { Box } from '@/components/ui/box';
+import { Text } from '@/components/ui/text';
+import { Pressable } from '@/components/ui/pressable';
+import { RNFlatList as FlatList } from '@/components/ui/flat-list';
+import { VStack } from '@/components/ui/vstack';
+import { HStack } from '@/components/ui/hstack';
+import { Spinner } from '@/components/ui/spinner';
+import { Input, InputField } from '@/components/ui/input';
+import { Textarea, TextareaInput } from '@/components/ui/textarea';
+import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
 import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  FlatList,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-} from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+  AlertDialog,
+  AlertDialogBackdrop,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogBody,
+  AlertDialogFooter,
+} from '@/components/ui/alert-dialog';
+import { Heading } from '@/components/ui/heading';
+import { useToast, Toast, ToastTitle, ToastDescription } from '@/components/ui/toast';
+
 import {
   useRun,
   useSendMessage,
   useCancelRun,
   useResolvePermission,
 } from '../../src/hooks/useRuns';
-import { useSuspendSprite, useResumeSprite } from '../../src/hooks/useSprites';
+import { useSprite, useSuspendSprite, useResumeSprite } from '../../src/hooks/useSprites';
 import { useRunEventStream } from '../../src/sse';
 import { statusColor, formatCost } from '../../src/utils';
 import type { RunEventRow } from '../../src/api';
-import type { RunEvent } from '@sprite-machine/shared';
+
+const eventCardStyle = tva({
+  base: 'rounded-[10px] p-3 border-l-4',
+  variants: {
+    kind: {
+      assistant: 'bg-card border border-border border-l-primary',
+      user: 'bg-status-running-muted border-l-status-running',
+      error: 'bg-destructive/10 border-l-destructive',
+      tool: 'bg-muted border-l-status-tool',
+      toolResult: 'bg-status-success-muted border-l-status-success',
+      permission: 'bg-status-warning-muted border-l-status-warning',
+    },
+  },
+});
 
 function EventCard({
   row,
-  runId,
   onResolve,
 }: {
   row: RunEventRow;
-  runId: string;
   onResolve: (requestId: string, decision: 'allow' | 'deny') => void;
 }) {
   const { event } = row;
@@ -37,99 +61,145 @@ function EventCard({
   switch (event.type) {
     case 'assistant_text':
       return (
-        <View style={[styles.eventCard, styles.assistantCard]}>
-          <Text style={styles.eventRole}>Assistant</Text>
-          <Text style={styles.eventText}>{event.text}</Text>
-        </View>
+        <Box className={eventCardStyle({ kind: 'assistant' })}>
+          <VStack space="xs">
+            <Text size="2xs" bold className="uppercase text-muted-foreground">
+              Assistant
+            </Text>
+            <Text size="sm" className="text-foreground">
+              {event.text}
+            </Text>
+          </VStack>
+        </Box>
       );
 
     case 'user_message':
       return (
-        <View style={[styles.eventCard, styles.userCard]}>
-          <Text style={styles.eventRole}>You</Text>
-          <Text style={styles.eventText}>{event.text}</Text>
-        </View>
+        <Box className={eventCardStyle({ kind: 'user' })}>
+          <VStack space="xs">
+            <Text size="2xs" bold className="uppercase text-muted-foreground">
+              You
+            </Text>
+            <Text size="sm" className="text-foreground">
+              {event.text}
+            </Text>
+          </VStack>
+        </Box>
       );
 
     case 'error':
       return (
-        <View style={[styles.eventCard, styles.errorCard]}>
-          <Text style={styles.eventRole}>Error</Text>
-          <Text style={[styles.eventText, styles.errorText]}>{event.message}</Text>
-        </View>
+        <Box className={eventCardStyle({ kind: 'error' })}>
+          <VStack space="xs">
+            <Text size="2xs" bold className="uppercase text-muted-foreground">
+              Error
+            </Text>
+            <Text size="sm" className="text-destructive">
+              {event.message}
+            </Text>
+          </VStack>
+        </Box>
       );
 
     case 'tool_use':
       return (
-        <View style={[styles.eventCard, styles.toolCard]}>
-          <Text style={styles.eventRole}>Tool: {event.name}</Text>
-          <Text style={styles.codeText} numberOfLines={4}>
-            {JSON.stringify(event.input, null, 2)}
-          </Text>
-        </View>
+        <Box className={eventCardStyle({ kind: 'tool' })}>
+          <VStack space="xs">
+            <Text size="2xs" bold className="uppercase text-muted-foreground">
+              Tool: {event.name}
+            </Text>
+            <Text
+              size="xs"
+              numberOfLines={4}
+              className="text-foreground/80 font-mono"
+            >
+              {JSON.stringify(event.input, null, 2)}
+            </Text>
+          </VStack>
+        </Box>
       );
 
     case 'tool_result':
       return (
-        <View style={[styles.eventCard, styles.toolResultCard]}>
-          <Text style={styles.eventRole}>
-            Result{event.name ? `: ${event.name}` : ''}
-            {event.isError === true ? ' (error)' : ''}
-          </Text>
-          <Text style={styles.codeText} numberOfLines={6}>
-            {typeof event.output === 'string'
-              ? event.output
-              : JSON.stringify(event.output, null, 2)}
-          </Text>
-        </View>
+        <Box className={eventCardStyle({ kind: 'toolResult' })}>
+          <VStack space="xs">
+            <Text size="2xs" bold className="uppercase text-muted-foreground">
+              Result{event.name ? `: ${event.name}` : ''}
+              {event.isError === true ? ' (error)' : ''}
+            </Text>
+            <Text
+              size="xs"
+              numberOfLines={6}
+              className="text-foreground/80 font-mono"
+            >
+              {typeof event.output === 'string'
+                ? event.output
+                : JSON.stringify(event.output, null, 2)}
+            </Text>
+          </VStack>
+        </Box>
       );
 
     case 'permission_requested':
       return (
-        <View style={[styles.eventCard, styles.permissionCard]}>
-          <Text style={styles.eventRole}>Permission Required: {event.toolName}</Text>
-          <Text style={styles.codeText} numberOfLines={4}>
-            {JSON.stringify(event.input, null, 2)}
-          </Text>
-          <View style={styles.permissionBtns}>
-            <Pressable
-              style={[styles.permissionBtn, styles.allowBtn]}
-              onPress={() => onResolve(event.requestId, 'allow')}
+        <Box className={eventCardStyle({ kind: 'permission' })}>
+          <VStack space="sm">
+            <Text size="2xs" bold className="uppercase text-muted-foreground">
+              Permission Required: {event.toolName}
+            </Text>
+            <Text
+              size="xs"
+              numberOfLines={4}
+              className="text-foreground/80 font-mono"
             >
-              <Text style={styles.allowBtnText}>Allow</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.permissionBtn, styles.denyBtn]}
-              onPress={() => onResolve(event.requestId, 'deny')}
-            >
-              <Text style={styles.denyBtnText}>Deny</Text>
-            </Pressable>
-          </View>
-        </View>
+              {JSON.stringify(event.input, null, 2)}
+            </Text>
+            <HStack space="sm">
+              <Button
+                variant="default"
+                size="sm"
+                className="flex-1"
+                onPress={() => onResolve(event.requestId, 'allow')}
+              >
+                <ButtonText>Allow</ButtonText>
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="flex-1"
+                onPress={() => onResolve(event.requestId, 'deny')}
+              >
+                <ButtonText>Deny</ButtonText>
+              </Button>
+            </HStack>
+          </VStack>
+        </Box>
       );
 
-    case 'status':
+    case 'status': {
+      const color = statusColor(event.status);
       return (
-        <View style={styles.statusRow}>
-          <View style={[styles.statusPill, { backgroundColor: statusColor(event.status).bg }]}>
-            <Text style={[styles.statusPillText, { color: statusColor(event.status).text }]}>
+        <Box className="items-center py-1">
+          <Box className={`px-2.5 py-0.5 rounded-full ${color.bgClass}`}>
+            <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
               {event.status}
             </Text>
-          </View>
-        </View>
+          </Box>
+        </Box>
       );
+    }
 
     case 'turn_complete':
       return (
-        <View style={styles.statusRow}>
-          <Text style={styles.metaText}>
+        <Box className="items-center py-1">
+          <Text size="2xs" className="text-muted-foreground">
             Turn complete
             {event.costUsd !== undefined ? ` · ${formatCost(event.costUsd)}` : ''}
             {event.inputTokens !== undefined
               ? ` · ${event.inputTokens}↑ ${event.outputTokens ?? 0}↓ tokens`
               : ''}
           </Text>
-        </View>
+        </Box>
       );
 
     default:
@@ -139,9 +209,10 @@ function EventCard({
 
 export default function RunDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const [message, setMessage] = useState('');
-  const flatListRef = useRef<FlatList<RunEventRow>>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const flatListRef = useRef<RNFlatListType<RunEventRow>>(null);
+  const toast = useToast();
 
   const { data: run, isLoading } = useRun(id);
   useRunEventStream(id);
@@ -149,12 +220,34 @@ export default function RunDetailScreen() {
   const sendMsg = useSendMessage(id);
   const cancelRun = useCancelRun(id);
   const resolvePermission = useResolvePermission(id);
-  const suspendSprite = useSuspendSprite(run?.spriteId ?? '');
-  const resumeSprite = useResumeSprite(run?.spriteId ?? '');
+  const spriteId = run?.spriteId ?? '';
+  const { data: sprite } = useSprite(spriteId);
+  const suspendSprite = useSuspendSprite(spriteId);
+  const resumeSprite = useResumeSprite(spriteId);
 
   const isActive =
     run?.status === 'running' || run?.status === 'starting' || run?.status === 'awaiting_input';
   const canSend = run?.status === 'awaiting_input';
+  const canSuspend =
+    !!run?.spriteId &&
+    sprite?.status !== 'suspended' &&
+    (run?.status === 'running' || run?.status === 'awaiting_input');
+  const canResume = !!run?.spriteId && sprite?.status === 'suspended';
+
+  function showError(messageText: string) {
+    const tid = String(Math.random());
+    toast.show({
+      id: tid,
+      placement: 'top',
+      duration: 3000,
+      render: () => (
+        <Toast nativeID={`toast-${tid}`} action="error" variant="solid">
+          <ToastTitle>Error</ToastTitle>
+          <ToastDescription>{messageText}</ToastDescription>
+        </Toast>
+      ),
+    });
+  }
 
   async function handleSend() {
     const text = message.trim();
@@ -163,25 +256,17 @@ export default function RunDetailScreen() {
     try {
       await sendMsg.mutateAsync(text);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to send message.');
+      showError(e instanceof Error ? e.message : 'Failed to send message.');
     }
   }
 
-  async function handleCancel() {
-    Alert.alert('Cancel Run', 'Are you sure you want to cancel this run?', [
-      { text: 'No', style: 'cancel' },
-      {
-        text: 'Cancel Run',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await cancelRun.mutateAsync();
-          } catch (e) {
-            Alert.alert('Error', e instanceof Error ? e.message : 'Failed to cancel.');
-          }
-        },
-      },
-    ]);
+  async function performCancel() {
+    setConfirmCancel(false);
+    try {
+      await cancelRun.mutateAsync();
+    } catch (e) {
+      showError(e instanceof Error ? e.message : 'Failed to cancel.');
+    }
   }
 
   function handleResolve(requestId: string, decision: 'allow' | 'deny') {
@@ -189,9 +274,7 @@ export default function RunDetailScreen() {
   }
 
   const renderItem = useCallback(
-    ({ item }: { item: RunEventRow }) => (
-      <EventCard row={item} runId={id} onResolve={handleResolve} />
-    ),
+    ({ item }: { item: RunEventRow }) => <EventCard row={item} onResolve={handleResolve} />,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [id],
   );
@@ -200,52 +283,65 @@ export default function RunDetailScreen() {
 
   if (isLoading || !run) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2563EB" />
-      </View>
+      <Box className="flex-1 items-center justify-center bg-background">
+        <Spinner size="large" />
+      </Box>
     );
   }
 
   const color = statusColor(run.status);
 
   return (
-    <View style={styles.container}>
+    <Box className="flex-1 bg-background lg:max-w-3xl lg:mx-auto lg:w-full">
       {/* Header info */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View style={[styles.badge, { backgroundColor: color.bg }]}>
-            <Text style={[styles.badgeText, { color: color.text }]}>{color.label}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            {isActive && (
-              <Pressable style={styles.actionBtn} onPress={() => void handleCancel()}>
-                <Text style={styles.actionBtnText}>Cancel</Text>
-              </Pressable>
-            )}
-            {run.spriteId && run.status !== 'running' && (
-              <Pressable style={styles.actionBtn} onPress={() => void suspendSprite.mutateAsync()}>
-                <Text style={styles.actionBtnText}>Suspend</Text>
-              </Pressable>
-            )}
-            {run.spriteId && (
-              <Pressable
-                style={[styles.actionBtn, styles.actionBtnBlue]}
-                onPress={() => void resumeSprite.mutateAsync()}
-              >
-                <Text style={[styles.actionBtnText, styles.actionBtnBlueText]}>Resume</Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-        <Text style={styles.promptText} numberOfLines={3}>
-          {run.prompt}
-        </Text>
-        {run.totalCostUsd > 0 && (
-          <Text style={styles.totals}>
-            {formatCost(run.totalCostUsd)} · {run.totalInputTokens}↑ {run.totalOutputTokens}↓
+      <Box className="bg-card border-b border-border px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-6">
+        <VStack space="sm">
+          <HStack space="sm" className="items-center">
+            <Box className={`px-2 py-0.5 rounded-full ${color.bgClass}`}>
+              <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
+                {color.label}
+              </Text>
+            </Box>
+            <HStack space="xs" className="ml-auto">
+              {isActive ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={() => setConfirmCancel(true)}
+                >
+                  <ButtonText>Cancel</ButtonText>
+                </Button>
+              ) : null}
+              {canSuspend ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={() => void suspendSprite.mutateAsync()}
+                >
+                  <ButtonText>Suspend</ButtonText>
+                </Button>
+              ) : null}
+              {canResume ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onPress={() => void resumeSprite.mutateAsync()}
+                >
+                  <ButtonText>Resume</ButtonText>
+                </Button>
+              ) : null}
+            </HStack>
+          </HStack>
+          <Text size="sm" className="text-foreground" numberOfLines={3}>
+            {run.prompt}
           </Text>
-        )}
-      </View>
+          {run.totalCostUsd > 0 ? (
+            <Text size="xs" className="text-muted-foreground">
+              {formatCost(run.totalCostUsd)} · {run.totalInputTokens}↑ {run.totalOutputTokens}↓
+            </Text>
+          ) : null}
+        </VStack>
+      </Box>
 
       {/* Events list */}
       <FlatList
@@ -253,124 +349,70 @@ export default function RunDetailScreen() {
         data={run.events}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        contentContainerStyle={styles.eventsList}
+        contentContainerStyle={{ padding: 12, gap: 10 }}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         ListEmptyComponent={
-          <Text style={styles.emptyEvents}>No events yet. The run is starting…</Text>
+          <Text size="sm" className="text-muted-foreground text-center pt-10">
+            No events yet. The run is starting…
+          </Text>
         }
       />
 
       {/* Composer */}
-      <View style={styles.composer}>
-        <TextInput
-          style={styles.composerInput}
-          value={message}
-          onChangeText={setMessage}
-          multiline
-          placeholder={canSend ? 'Send a message…' : 'Waiting for agent…'}
-          placeholderTextColor="#9CA3AF"
-          editable={canSend}
-        />
-        <Pressable
-          style={[styles.sendBtn, (!canSend || !message.trim()) && styles.sendBtnDisabled]}
+      <HStack space="sm" className="p-3 bg-card border-t border-border items-end">
+        <Box className="flex-1">
+          <Input>
+            <InputField
+              value={message}
+              onChangeText={setMessage}
+              multiline
+              placeholder={canSend ? 'Send a message…' : 'Waiting for agent…'}
+              editable={canSend}
+              className="max-h-32"
+            />
+          </Input>
+        </Box>
+        <Button
+          variant="default"
+          isDisabled={!canSend || !message.trim() || sendMsg.isPending}
           onPress={() => void handleSend()}
-          disabled={!canSend || !message.trim() || sendMsg.isPending}
         >
-          {sendMsg.isPending ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <Text style={styles.sendBtnText}>Send</Text>
-          )}
-        </Pressable>
-      </View>
-    </View>
+          {sendMsg.isPending ? <ButtonSpinner /> : null}
+          <ButtonText>Send</ButtonText>
+        </Button>
+      </HStack>
+
+      <AlertDialog isOpen={confirmCancel} onClose={() => setConfirmCancel(false)}>
+        <AlertDialogBackdrop />
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <Heading size="md" bold className="text-foreground">
+              Cancel run?
+            </Heading>
+          </AlertDialogHeader>
+          <AlertDialogBody>
+            <Text size="sm" className="text-muted-foreground">
+              Are you sure you want to cancel this run? Any in-flight work will be lost.
+            </Text>
+          </AlertDialogBody>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onPress={() => setConfirmCancel(false)}
+            >
+              <ButtonText>Keep running</ButtonText>
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onPress={() => void performCancel()}
+            >
+              <ButtonText>Cancel run</ButtonText>
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Box>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    gap: 8,
-  },
-  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerActions: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  badgeText: { fontSize: 12, fontWeight: '600' },
-  actionBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-  },
-  actionBtnBlue: { borderColor: '#2563EB' },
-  actionBtnText: { fontSize: 12, color: '#374151', fontWeight: '500' },
-  actionBtnBlueText: { color: '#2563EB' },
-  promptText: { fontSize: 14, color: '#111827', lineHeight: 20 },
-  totals: { fontSize: 12, color: '#9CA3AF' },
-  eventsList: { padding: 12, gap: 10 },
-  eventCard: { borderRadius: 10, padding: 12, gap: 6 },
-  assistantCard: { backgroundColor: '#FFFFFF', borderLeftWidth: 3, borderLeftColor: '#2563EB' },
-  userCard: { backgroundColor: '#EFF6FF', borderLeftWidth: 3, borderLeftColor: '#60A5FA' },
-  errorCard: { backgroundColor: '#FEF2F2', borderLeftWidth: 3, borderLeftColor: '#EF4444' },
-  toolCard: { backgroundColor: '#F3F4F6', borderLeftWidth: 3, borderLeftColor: '#8B5CF6' },
-  toolResultCard: {
-    backgroundColor: '#F0FDF4',
-    borderLeftWidth: 3,
-    borderLeftColor: '#22C55E',
-  },
-  permissionCard: {
-    backgroundColor: '#FFFBEB',
-    borderLeftWidth: 3,
-    borderLeftColor: '#F59E0B',
-  },
-  eventRole: { fontSize: 11, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase' },
-  eventText: { fontSize: 14, color: '#111827', lineHeight: 20 },
-  errorText: { color: '#DC2626' },
-  codeText: { fontSize: 12, color: '#374151', fontFamily: 'monospace', lineHeight: 18 },
-  permissionBtns: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  permissionBtn: { flex: 1, paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
-  allowBtn: { backgroundColor: '#D1FAE5' },
-  denyBtn: { backgroundColor: '#FEE2E2' },
-  allowBtnText: { color: '#065F46', fontWeight: '600', fontSize: 13 },
-  denyBtnText: { color: '#991B1B', fontWeight: '600', fontSize: 13 },
-  statusRow: { alignItems: 'center', paddingVertical: 4 },
-  statusPill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999 },
-  statusPillText: { fontSize: 11, fontWeight: '600' },
-  metaText: { fontSize: 11, color: '#9CA3AF' },
-  emptyEvents: { textAlign: 'center', color: '#9CA3AF', paddingTop: 40 },
-  composer: {
-    flexDirection: 'row',
-    padding: 12,
-    gap: 8,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  composerInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: '#111827',
-    maxHeight: 120,
-  },
-  sendBtn: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 60,
-  },
-  sendBtnDisabled: { backgroundColor: '#BFDBFE' },
-  sendBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
-});

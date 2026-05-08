@@ -1,0 +1,59 @@
+{
+  "task": "Visual sweep of sprite-machine dashboard at desktop and mobile widths until every screen renders cleanly with zero console errors and the design spec is honored",
+  "stories": [
+    {
+      "id": "VIS-1",
+      "title": "Desktop runs list renders without duplication",
+      "passes": true,
+      "evidence": "desktop-welcome-after-fix.png — rail (sprite-machine, +New run, runs list, Runs/Settings) + welcome state in main pane (no list duplication). Implemented via useWindowDimensions+LG_BREAKPOINT in (tabs)/index.tsx."
+    },
+    {
+      "id": "VIS-2",
+      "title": "Desktop run detail renders",
+      "passes": true,
+      "evidence": "desktop-run-detail-current.png — header with Run/IDLE/Resume button, event timeline (STARTING/RUNNING/ASSISTANT/Turn complete/IDLE), composer at bottom. Resume only shows when sprite.status==='suspended' (verified via API: sprite-machine is genuinely suspended so Resume shows correctly)."
+    },
+    {
+      "id": "VIS-3",
+      "title": "Desktop new-run screen renders",
+      "passes": true,
+      "evidence": "desktop-new-run-current.png — Prompt textarea, Harness chips (claude/codex/pi/mock), Working Directory input + helper, Permission Mode chips (default/acceptEdits/bypassPermissions/plan), Start Run button. Note: claude-sdk chip intentionally not exposed (API-key fallback)."
+    },
+    {
+      "id": "VIS-4",
+      "title": "Desktop settings renders",
+      "passes": true,
+      "evidence": "desktop-settings-current.png — Control Plane (Base URL, Bearer Token w/ eye-toggle InputSlot, Save), Push Notifications, Appearance (system/light/dark chips), Admin (Tick Idle Scheduler). Dividers between sections."
+    },
+    {
+      "id": "VIS-5",
+      "title": "Mobile runs list renders",
+      "passes": true,
+      "evidence": "mobile-runs.png — single column run cards, FAB bottom-right, bottom tab bar (Runs/Settings). No desktop rail."
+    },
+    {
+      "id": "VIS-6",
+      "title": "Mobile run detail renders",
+      "passes": true,
+      "evidence": "mobile-run-detail.png — header with Run/IDLE/Resume, event timeline scrollable, composer pinned to bottom."
+    },
+    {
+      "id": "VIS-7",
+      "title": "Mobile new-run renders",
+      "passes": true,
+      "evidence": "mobile-new-run.png — header, prompt, harness chips on one row, permission chips wrap (plan on second row), Start Run full-width button. No horizontal overflow."
+    },
+    {
+      "id": "VIS-8",
+      "title": "Mobile settings renders",
+      "passes": true,
+      "evidence": "mobile-settings.png — sections stack cleanly, eye-toggle, Save buttons accessible, bottom tab bar with Runs/Settings."
+    },
+    {
+      "id": "VIS-9",
+      "title": "Dark mode renders correctly",
+      "passes": true,
+      "evidence": "desktop-dark.png — background flips to neuco dark hsl(0 0% 3.9%), text white/muted, IDLE badge dark variant, +New run button inverted. Toggle from settings or via localStorage.setItem('sprite_machine_theme_override', 'dark')."
+    }
+  ]
+}

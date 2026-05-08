@@ -37,3 +37,9 @@ android/
 .playwright-mcp/
 .omx/
 .claude/
+
+# Playwright/visual-sweep screenshots dumped at repo root
+/*.png
+
+# skills CLI lockfile (per-machine)
+/skills-lock.json
