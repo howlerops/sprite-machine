@@ -107,15 +107,15 @@ export function getHealth(baseUrl: string): Promise<HealthResponse> {
 }
 
 // Runs
-export function getRuns(baseUrl: string, token: string): Promise<{ runs: RunRow[] }> {
+export function getRuns(baseUrl: string, token: string | null): Promise<{ runs: RunRow[] }> {
   return apiFetch<{ runs: RunRow[] }>(baseUrl, token, '/runs');
 }
 
-export function getRun(baseUrl: string, token: string, id: string): Promise<RunDetail> {
+export function getRun(baseUrl: string, token: string | null, id: string): Promise<RunDetail> {
   return apiFetch<RunDetail>(baseUrl, token, `/runs/${id}`);
 }
 
-export function createRun(baseUrl: string, token: string, body: CreateRunRequest): Promise<RunRow> {
+export function createRun(baseUrl: string, token: string | null, body: CreateRunRequest): Promise<RunRow> {
   return apiFetch<RunRow>(baseUrl, token, '/runs', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -124,7 +124,7 @@ export function createRun(baseUrl: string, token: string, body: CreateRunRequest
 
 export function sendMessage(
   baseUrl: string,
-  token: string,
+  token: string | null,
   runId: string,
   text: string,
 ): Promise<{ accepted: true }> {
@@ -136,7 +136,7 @@ export function sendMessage(
 
 export function cancelRun(
   baseUrl: string,
-  token: string,
+  token: string | null,
   runId: string,
 ): Promise<{ cancelled: true }> {
   return apiFetch<{ cancelled: true }>(baseUrl, token, `/runs/${runId}/cancel`, {
@@ -146,7 +146,7 @@ export function cancelRun(
 
 export function resolvePermission(
   baseUrl: string,
-  token: string,
+  token: string | null,
   runId: string,
   requestId: string,
   body: ResolvePermissionRequest,
@@ -158,26 +158,26 @@ export function resolvePermission(
 }
 
 // Sprites
-export function getSprites(baseUrl: string, token: string): Promise<{ sprites: SpriteRow[] }> {
+export function getSprites(baseUrl: string, token: string | null): Promise<{ sprites: SpriteRow[] }> {
   return apiFetch<{ sprites: SpriteRow[] }>(baseUrl, token, '/sprites');
 }
 
-export function getSprite(baseUrl: string, token: string, id: string): Promise<SpriteRow> {
+export function getSprite(baseUrl: string, token: string | null, id: string): Promise<SpriteRow> {
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}`);
 }
 
-export function suspendSprite(baseUrl: string, token: string, id: string): Promise<SpriteRow> {
+export function suspendSprite(baseUrl: string, token: string | null, id: string): Promise<SpriteRow> {
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}/suspend`, { method: 'POST' });
 }
 
-export function resumeSprite(baseUrl: string, token: string, id: string): Promise<SpriteRow> {
+export function resumeSprite(baseUrl: string, token: string | null, id: string): Promise<SpriteRow> {
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}/resume`, { method: 'POST' });
 }
 
 // Push
 export function registerPushToken(
   baseUrl: string,
-  token: string,
+  token: string | null,
   pushToken: string,
   label?: string,
 ): Promise<PushTokenRow> {
@@ -191,14 +191,14 @@ export function registerPushToken(
   });
 }
 
-export function getPushTokens(baseUrl: string, token: string): Promise<{ tokens: PushTokenRow[] }> {
+export function getPushTokens(baseUrl: string, token: string | null): Promise<{ tokens: PushTokenRow[] }> {
   return apiFetch<{ tokens: PushTokenRow[] }>(baseUrl, token, '/push/tokens');
 }
 
 // Admin
 export function tickIdleScheduler(
   baseUrl: string,
-  token: string,
+  token: string | null,
 ): Promise<{ evaluated: number; suspended: number; errors: number }> {
   return apiFetch<{ evaluated: number; suspended: number; errors: number }>(
     baseUrl,

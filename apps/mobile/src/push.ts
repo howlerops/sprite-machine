@@ -15,7 +15,7 @@ Notifications.setNotificationHandler({
 
 export async function requestAndRegisterPushToken(
   baseUrl: string,
-  token: string,
+  token: string | null,
   label?: string,
 ): Promise<string> {
   if (Platform.OS === 'android') {
