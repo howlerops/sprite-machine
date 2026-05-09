@@ -19,6 +19,7 @@ export interface RunRow {
   status: RunStatus;
   harness: Harness;
   prompt: string;
+  title: string | null;
   workdir: string | null;
   sessionId: string | null;
   createdAt: string;
@@ -60,6 +61,7 @@ export interface NewRun {
   status: RunStatus;
   harness: Harness;
   prompt: string;
+  title?: string;
   workdir: string | null;
   metadata?: Record<string, unknown>;
 }
@@ -73,6 +75,7 @@ export interface SpritePatch {
 export interface RunPatch {
   status?: RunStatus;
   sessionId?: string | null;
+  title?: string;
   totalCostUsd?: number;
   totalInputTokens?: number;
   totalOutputTokens?: number;

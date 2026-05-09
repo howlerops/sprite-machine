@@ -5,8 +5,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "ios": "expo start --ios",
-    "android": "expo start --android",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
     "web": "expo start --web --port 19006",
     "export:web": "expo export --platform web --output-dir dist-web",
     "export:ios": "expo export --platform ios --output-dir dist-ios",

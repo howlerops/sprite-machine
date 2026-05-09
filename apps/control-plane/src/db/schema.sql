@@ -19,6 +19,7 @@ create table if not exists runs (
   sidecar_run_id text not null,
   status text not null,
   prompt text not null,
+  title text,
   workdir text,
   session_id text,
   created_at text not null,

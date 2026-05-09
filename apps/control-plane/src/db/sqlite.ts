@@ -3,6 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { nowIso, type RunEvent } from '@sprite-machine/shared';
 import { SCHEMA_SQL } from './schema.js';
+import { deriveTitle } from '../title.js';
 import type {
   NewRun,
   NewSprite,
@@ -30,6 +31,28 @@ export class SqliteStorage implements Storage {
       this.db.exec(`alter table runs add column harness text not null default 'claude'`);
     } catch {
       // column already exists
+    }
+    // Idempotent migration for the title column (auto-title v1).
+    try {
+      this.db.exec(`alter table runs add column title text`);
+    } catch {
+      // column already exists
+    }
+    // Backfill any rows that lack a title using the deriveTitle heuristic.
+    // Done in JS (not pure SQL) so the heuristic stays single-sourced.
+    try {
+      const rows = this.db
+        .prepare(`select id, prompt from runs where title is null`)
+        .all() as Array<{ id: string; prompt: string }>;
+      if (rows.length > 0) {
+        const update = this.db.prepare(`update runs set title = ? where id = ?`);
+        const tx = this.db.transaction((items: typeof rows) => {
+          for (const r of items) update.run(deriveTitle(r.prompt ?? ''), r.id);
+        });
+        tx(rows);
+      }
+    } catch {
+      // backfill is best-effort; never block startup
     }
   }
 
@@ -97,10 +120,11 @@ export class SqliteStorage implements Storage {
 
   async createRun(r: NewRun): Promise<RunRow> {
     const now = nowIso();
+    const title = r.title ?? deriveTitle(r.prompt);
     this.db
       .prepare(
-        `insert into runs (id, sprite_id, sidecar_run_id, status, harness, prompt, workdir, created_at, updated_at, metadata)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `insert into runs (id, sprite_id, sidecar_run_id, status, harness, prompt, title, workdir, created_at, updated_at, metadata)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         r.id,
@@ -109,6 +133,7 @@ export class SqliteStorage implements Storage {
         r.status,
         r.harness,
         r.prompt,
+        title,
         r.workdir,
         now,
         now,
@@ -157,6 +182,10 @@ export class SqliteStorage implements Storage {
     if (patch.sessionId !== undefined) {
       sets.push('session_id = ?');
       vals.push(patch.sessionId);
+    }
+    if (patch.title !== undefined) {
+      sets.push('title = ?');
+      vals.push(patch.title);
     }
     if (patch.totalCostUsd !== undefined) {
       sets.push('total_cost_usd = ?');
@@ -313,6 +342,7 @@ function toRunRow(r: Record<string, unknown>): RunRow {
     status: r.status as RunRow['status'],
     harness: ((r.harness as string | null) ?? 'claude') as RunRow['harness'],
     prompt: r.prompt as string,
+    title: (r.title as string | null) ?? null,
     workdir: (r.workdir as string | null) ?? null,
     sessionId: (r.session_id as string | null) ?? null,
     createdAt: r.created_at as string,

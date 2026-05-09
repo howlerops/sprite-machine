@@ -34,6 +34,8 @@ import {
 import { useSprite, useSuspendSprite, useResumeSprite } from '../../src/hooks/useSprites';
 import { useRunEventStream } from '../../src/sse';
 import { statusColor, formatCost } from '../../src/utils';
+import { usePulse, CrossfadePill, TabCrossfade } from '../../src/animations';
+import Animated from 'react-native-reanimated';
 import type { RunEventRow } from '../../src/api';
 
 // Platform-split shell panel: Metro's platform-extension resolver picks
@@ -298,6 +300,7 @@ export default function RunDetailScreen() {
   }
 
   const color = statusColor(run.status);
+  const pulseStyle = usePulse(run.status === 'running');
 
   // Shell tab is only rendered on web; on native it shows the placeholder.
   const showShellTab = Platform.OS === 'web';
@@ -308,11 +311,16 @@ export default function RunDetailScreen() {
       <Box className="bg-card border-b border-border px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-6">
         <VStack space="sm">
           <HStack space="sm" className="items-center">
-            <Box className={`px-2 py-0.5 rounded-full ${color.bgClass}`}>
-              <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
-                {color.label}
-              </Text>
-            </Box>
+            <CrossfadePill contentKey={run.status}>
+              <Animated.View
+                style={pulseStyle}
+                className={`px-2 py-0.5 rounded-full ${color.bgClass}`}
+              >
+                <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
+                  {color.label}
+                </Text>
+              </Animated.View>
+            </CrossfadePill>
             <HStack space="xs" className="ml-auto">
               {isActive ? (
                 <Button variant="outline" size="sm" onPress={() => setConfirmCancel(true)}>
@@ -335,9 +343,20 @@ export default function RunDetailScreen() {
               ) : null}
             </HStack>
           </HStack>
-          <Text size="sm" className="text-foreground" numberOfLines={3}>
-            {run.prompt}
-          </Text>
+          {run.title ? (
+            <VStack space="xs">
+              <Text size="sm" bold className="text-foreground">
+                {run.title}
+              </Text>
+              <Text size="xs" className="text-muted-foreground">
+                {run.prompt}
+              </Text>
+            </VStack>
+          ) : (
+            <Text size="sm" className="text-foreground" numberOfLines={3}>
+              {run.prompt}
+            </Text>
+          )}
           {run.totalCostUsd > 0 ? (
             <Text size="xs" className="text-muted-foreground">
               {formatCost(run.totalCostUsd)} · {run.totalInputTokens}↑ {run.totalOutputTokens}↓
@@ -377,50 +396,52 @@ export default function RunDetailScreen() {
       </Box>
 
       {/* Tab content */}
-      {activeTab === 'shell' ? (
-        <ShellPanel spriteId={spriteId} runId={id} sprite={sprite ?? null} />
-      ) : (
-        <>
-          {/* Events list */}
-          <FlatList
-            ref={flatListRef}
-            data={run.events}
-            renderItem={renderItem}
-            keyExtractor={keyExtractor}
-            contentContainerStyle={{ padding: 12, gap: 10 }}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            ListEmptyComponent={
-              <Text size="sm" className="text-muted-foreground text-center pt-10">
-                No events yet. The run is starting…
-              </Text>
-            }
-          />
+      <TabCrossfade contentKey={activeTab}>
+        {activeTab === 'shell' ? (
+          <ShellPanel spriteId={spriteId} runId={id} sprite={sprite ?? null} />
+        ) : (
+          <>
+            {/* Events list */}
+            <FlatList
+              ref={flatListRef}
+              data={run.events}
+              renderItem={renderItem}
+              keyExtractor={keyExtractor}
+              contentContainerStyle={{ padding: 12, gap: 10 }}
+              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              ListEmptyComponent={
+                <Text size="sm" className="text-muted-foreground text-center pt-10">
+                  No events yet. The run is starting…
+                </Text>
+              }
+            />
 
-          {/* Composer */}
-          <HStack space="sm" className="p-3 bg-card border-t border-border items-end">
-            <Box className="flex-1">
-              <Input>
-                <InputField
-                  value={message}
-                  onChangeText={setMessage}
-                  multiline
-                  placeholder={canSend ? 'Send a message…' : 'Waiting for agent…'}
-                  editable={canSend}
-                  className="max-h-32"
-                />
-              </Input>
-            </Box>
-            <Button
-              variant="default"
-              isDisabled={!canSend || !message.trim() || sendMsg.isPending}
-              onPress={() => void handleSend()}
-            >
-              {sendMsg.isPending ? <ButtonSpinner /> : null}
-              <ButtonText>Send</ButtonText>
-            </Button>
-          </HStack>
-        </>
-      )}
+            {/* Composer */}
+            <HStack space="sm" className="p-3 bg-card border-t border-border items-end">
+              <Box className="flex-1">
+                <Input>
+                  <InputField
+                    value={message}
+                    onChangeText={setMessage}
+                    multiline
+                    placeholder={canSend ? 'Send a message…' : 'Waiting for agent…'}
+                    editable={canSend}
+                    className="max-h-32"
+                  />
+                </Input>
+              </Box>
+              <Button
+                variant="default"
+                isDisabled={!canSend || !message.trim() || sendMsg.isPending}
+                onPress={() => void handleSend()}
+              >
+                {sendMsg.isPending ? <ButtonSpinner /> : null}
+                <ButtonText>Send</ButtonText>
+              </Button>
+            </HStack>
+          </>
+        )}
+      </TabCrossfade>
 
       <AlertDialog isOpen={confirmCancel} onClose={() => setConfirmCancel(false)}>
         <AlertDialogBackdrop />

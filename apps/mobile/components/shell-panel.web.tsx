@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Terminal, type TerminalHandle } from '@wterm/react';
+import { useReduceMotion } from '../src/animations';
 
 import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
@@ -47,6 +48,13 @@ export default function ShellPanel({ spriteId, runId: _runId, sprite }: ShellPan
   const [reconnectKey, setReconnectKey] = useState(0);
   const termRef = useRef<TerminalHandle>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const reduceMotion = useReduceMotion();
+  // Track whether the very first connect for this mount has happened. Only the
+  // first ever stream gets the typewriter reveal; reconnects skip it.
+  const firstConnectDoneRef = useRef(false);
+  const typewriterBufferRef = useRef<Uint8Array | null>(null);
+  const typewriterIdxRef = useRef(0);
+  const typewriterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const spriteStatus = sprite?.status ?? 'running';
   const isSuspended = spriteStatus === 'suspended';
@@ -62,6 +70,26 @@ export default function ShellPanel({ spriteId, runId: _runId, sprite }: ShellPan
     wsRef.current = ws;
     ws.binaryType = 'arraybuffer';
 
+    // Buffer until we've decided whether to typewriter-reveal or stream raw.
+    let typewriterActive = !firstConnectDoneRef.current && !reduceMotion;
+    let writtenBytes = 0;
+    const TYPEWRITER_LIMIT = 30;
+    const INTERVAL_MS = 18;
+
+    const flushTypewriter = () => {
+      const term = termRef.current;
+      const buf = typewriterBufferRef.current;
+      if (!term || !buf) return;
+      const remaining = buf.subarray(typewriterIdxRef.current);
+      if (remaining.length > 0) term.write(remaining);
+      typewriterIdxRef.current = buf.length;
+      typewriterActive = false;
+      if (typewriterTimerRef.current) {
+        clearInterval(typewriterTimerRef.current);
+        typewriterTimerRef.current = null;
+      }
+    };
+
     ws.onopen = () => {
       setPaneState('open');
     };
@@ -69,10 +97,48 @@ export default function ShellPanel({ spriteId, runId: _runId, sprite }: ShellPan
     ws.onmessage = (evt: MessageEvent) => {
       const term = termRef.current;
       if (!term) return;
-      if (evt.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(evt.data));
-      } else if (typeof evt.data === 'string') {
-        term.write(evt.data);
+      const chunk =
+        evt.data instanceof ArrayBuffer
+          ? new Uint8Array(evt.data)
+          : typeof evt.data === 'string'
+            ? new TextEncoder().encode(evt.data)
+            : null;
+      if (!chunk) return;
+
+      if (!typewriterActive) {
+        term.write(chunk);
+        return;
+      }
+
+      // Accumulate into the typewriter buffer; reveal one byte every 18ms
+      // until we hit TYPEWRITER_LIMIT, then flush the rest and switch to
+      // raw-stream mode.
+      const prev = typewriterBufferRef.current;
+      if (prev) {
+        const next = new Uint8Array(prev.length + chunk.length);
+        next.set(prev, 0);
+        next.set(chunk, prev.length);
+        typewriterBufferRef.current = next;
+      } else {
+        typewriterBufferRef.current = chunk;
+      }
+
+      if (!typewriterTimerRef.current) {
+        firstConnectDoneRef.current = true;
+        typewriterTimerRef.current = setInterval(() => {
+          const buf = typewriterBufferRef.current;
+          const t = termRef.current;
+          if (!buf || !t) return;
+          if (writtenBytes >= TYPEWRITER_LIMIT) {
+            flushTypewriter();
+            return;
+          }
+          if (typewriterIdxRef.current < buf.length) {
+            t.write(buf.subarray(typewriterIdxRef.current, typewriterIdxRef.current + 1));
+            typewriterIdxRef.current += 1;
+            writtenBytes += 1;
+          }
+        }, INTERVAL_MS);
       }
     };
 
@@ -89,10 +155,16 @@ export default function ShellPanel({ spriteId, runId: _runId, sprite }: ShellPan
     };
 
     return () => {
+      if (typewriterTimerRef.current) {
+        clearInterval(typewriterTimerRef.current);
+        typewriterTimerRef.current = null;
+      }
+      typewriterBufferRef.current = null;
+      typewriterIdxRef.current = 0;
       ws.close();
       wsRef.current = null;
     };
-  }, [spriteId, reconnectKey, isSuspended]);
+  }, [spriteId, reconnectKey, isSuspended, reduceMotion]);
 
   async function handleAuthError() {
     await clearEmail();

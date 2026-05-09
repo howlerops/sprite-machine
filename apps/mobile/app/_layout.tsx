@@ -16,6 +16,8 @@ import { Button, ButtonText } from '@/components/ui/button';
 import '@/global.css';
 
 import { AppConfigContext, useAppConfig } from '../src/config-store';
+import { StaggerEnter, usePulse } from '../src/animations';
+import Animated from 'react-native-reanimated';
 import {
   getToken,
   getBaseUrl,
@@ -103,37 +105,45 @@ function RailRunItem({
   run,
   isActive,
   onPress,
+  index,
 }: {
   run: RunRow;
   isActive: boolean;
   onPress: () => void;
+  index: number;
 }) {
   const color = statusColor(run.status);
+  const pulseStyle = usePulse(run.status === 'running');
   return (
-    <Pressable
-      onPress={onPress}
-      className={
-        isActive
-          ? 'p-3 border-b border-border bg-accent'
-          : 'p-3 border-b border-border data-[hover=true]:bg-accent data-[active=true]:bg-accent/80'
-      }
-    >
-      <VStack space="xs">
-        <HStack space="sm" className="items-center">
-          <Box className={`px-2 py-0.5 rounded-full ${color.bgClass}`}>
-            <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
-              {color.label}
+    <StaggerEnter delay={Math.min(index, 8) * 35}>
+      <Pressable
+        onPress={onPress}
+        className={
+          isActive
+            ? 'p-3 border-b border-border bg-accent'
+            : 'p-3 border-b border-border data-[hover=true]:bg-accent data-[active=true]:bg-accent/80'
+        }
+      >
+        <VStack space="xs">
+          <HStack space="sm" className="items-center">
+            <Animated.View
+              style={pulseStyle}
+              className={`px-2 py-0.5 rounded-full ${color.bgClass}`}
+            >
+              <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
+                {color.label}
+              </Text>
+            </Animated.View>
+            <Text size="2xs" className="text-muted-foreground ml-auto">
+              {relativeTime(run.updatedAt)}
             </Text>
-          </Box>
-          <Text size="2xs" className="text-muted-foreground ml-auto">
-            {relativeTime(run.updatedAt)}
+          </HStack>
+          <Text size="xs" className="text-foreground" numberOfLines={2}>
+            {run.title ?? truncate(run.prompt, 80)}
           </Text>
-        </HStack>
-        <Text size="xs" className="text-foreground" numberOfLines={2}>
-          {truncate(run.prompt, 80)}
-        </Text>
-      </VStack>
-    </Pressable>
+        </VStack>
+      </Pressable>
+    </StaggerEnter>
   );
 }
 
@@ -177,10 +187,11 @@ function DesktopRail() {
                 </Text>
               </Box>
             ) : (
-              runs.map((run) => (
+              runs.map((run, idx) => (
                 <RailRunItem
                   key={run.id}
                   run={run}
+                  index={idx}
                   isActive={activeRunId === run.id}
                   onPress={() => router.push(`/run/${run.id}`)}
                 />

@@ -23,6 +23,7 @@ create table if not exists runs (
   status text not null,
   harness text not null default 'claude',
   prompt text not null,
+  title text,
   workdir text,
   session_id text,
   created_at text not null,

@@ -22,6 +22,7 @@ import { Link, LinkText } from '@/components/ui/link';
 import { useAppConfig } from '../src/config-store';
 import { setEmail } from '../src/storage';
 import { login } from '../src/api';
+import { StaggerEnter } from '../src/animations';
 
 type LoginError = 'invalid_token' | 'not_allowed' | 'network' | null;
 
@@ -84,66 +85,76 @@ export default function LoginScreen() {
     <Box className="flex-1 bg-background items-center justify-center px-4 md:px-8">
       <VStack space="xl" className={cardClass}>
         {/* Brand */}
-        <HStack space="sm" className="items-center">
-          <Heading size="lg" bold className="text-foreground">
-            sprite-machine
-          </Heading>
-          <Box className="w-2 h-2 rounded-full bg-status-running" />
-        </HStack>
+        <StaggerEnter delay={60}>
+          <HStack space="sm" className="items-center">
+            <Heading size="lg" bold className="text-foreground">
+              sprite-machine
+            </Heading>
+            <Box className="w-2 h-2 rounded-full bg-status-running" />
+          </HStack>
+        </StaggerEnter>
 
-        <VStack space="xs">
-          <Heading size="xl" className="text-foreground">
-            Sign in
-          </Heading>
-          <Text size="sm" className="text-muted-foreground">
-            Paste your Fly personal access token. Run{' '}
-            <Text size="sm" className="font-mono text-foreground">
-              flyctl auth token
-            </Text>{' '}
-            in your terminal, or generate one at fly.io. We exchange it for a session and discard
-            the token.
-          </Text>
-        </VStack>
+        <StaggerEnter delay={220}>
+          <VStack space="xs">
+            <Heading size="xl" className="text-foreground">
+              Sign in
+            </Heading>
+            <Text size="sm" className="text-muted-foreground">
+              Paste your Fly personal access token. Run{' '}
+              <Text size="sm" className="font-mono text-foreground">
+                flyctl auth token
+              </Text>{' '}
+              in your terminal, or generate one at fly.io. We exchange it for a session and discard
+              the token.
+            </Text>
+          </VStack>
+        </StaggerEnter>
 
-        <FormControl isInvalid={hasError}>
-          <Input>
-            <InputField
-              value={flyToken}
-              onChangeText={setFlyToken}
-              secureTextEntry={!showToken}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="fo1_xxx..."
-            />
-            <InputSlot onPress={() => setShowToken((v) => !v)} className="pr-3">
-              <Icon
-                as={showToken ? EyeOffIcon : EyeIcon}
-                size="sm"
-                className="text-muted-foreground"
+        <StaggerEnter delay={280}>
+          <FormControl isInvalid={hasError}>
+            <Input>
+              <InputField
+                value={flyToken}
+                onChangeText={setFlyToken}
+                secureTextEntry={!showToken}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="fo1_xxx..."
               />
-            </InputSlot>
-          </Input>
-          {hasError ? (
-            <FormControlError>
-              <FormControlErrorText>{errorMessage(error)}</FormControlErrorText>
-            </FormControlError>
-          ) : (
-            <FormControlHelper>
-              <FormControlHelperText>Your token is never stored server-side.</FormControlHelperText>
-            </FormControlHelper>
-          )}
-        </FormControl>
+              <InputSlot onPress={() => setShowToken((v) => !v)} className="pr-3">
+                <Icon
+                  as={showToken ? EyeOffIcon : EyeIcon}
+                  size="sm"
+                  className="text-muted-foreground"
+                />
+              </InputSlot>
+            </Input>
+            {hasError ? (
+              <FormControlError>
+                <FormControlErrorText>{errorMessage(error)}</FormControlErrorText>
+              </FormControlError>
+            ) : (
+              <FormControlHelper>
+                <FormControlHelperText>
+                  Your token is never stored server-side.
+                </FormControlHelperText>
+              </FormControlHelper>
+            )}
+          </FormControl>
+        </StaggerEnter>
 
-        <Button
-          size="lg"
-          variant="default"
-          className="w-full"
-          isDisabled={pending || !flyToken.trim()}
-          onPress={() => void handleContinue()}
-        >
-          {pending ? <ButtonSpinner /> : null}
-          <ButtonText>Continue</ButtonText>
-        </Button>
+        <StaggerEnter delay={350}>
+          <Button
+            size="lg"
+            variant="default"
+            className="w-full"
+            isDisabled={pending || !flyToken.trim()}
+            onPress={() => void handleContinue()}
+          >
+            {pending ? <ButtonSpinner /> : null}
+            <ButtonText>Continue</ButtonText>
+          </Button>
+        </StaggerEnter>
 
         <HStack space="xs" className="justify-center items-center">
           <Text size="xs" className="text-muted-foreground">

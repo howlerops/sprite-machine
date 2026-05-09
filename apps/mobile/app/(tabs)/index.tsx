@@ -12,40 +12,48 @@ import { HStack } from '@/components/ui/hstack';
 
 import { useRuns } from '../../src/hooks/useRuns';
 import { relativeTime, truncate, statusColor, formatCost } from '../../src/utils';
+import { StaggerEnter, usePulse } from '../../src/animations';
+import Animated from 'react-native-reanimated';
 import type { RunRow } from '../../src/api';
 
 const LG_BREAKPOINT = 1024;
 
-function RunCard({ run }: { run: RunRow }) {
+function RunCard({ run, index }: { run: RunRow; index: number }) {
   const router = useRouter();
   const color = statusColor(run.status);
+  const pulseStyle = usePulse(run.status === 'running');
 
   return (
-    <Pressable
-      onPress={() => router.push(`/run/${run.id}`)}
-      className="bg-card border border-border rounded-[10px] p-4 data-[hover=true]:bg-accent data-[active=true]:bg-accent/80"
-    >
-      <VStack space="sm">
-        <HStack space="sm" className="items-center">
-          <Box className={`px-2 py-0.5 rounded-full ${color.bgClass}`}>
-            <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
-              {color.label}
+    <StaggerEnter delay={Math.min(index, 8) * 35}>
+      <Pressable
+        onPress={() => router.push(`/run/${run.id}`)}
+        className="bg-card border border-border rounded-[10px] p-4 data-[hover=true]:bg-accent data-[active=true]:bg-accent/80"
+      >
+        <VStack space="sm">
+          <HStack space="sm" className="items-center">
+            <Animated.View
+              style={pulseStyle}
+              className={`px-2 py-0.5 rounded-full ${color.bgClass}`}
+            >
+              <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
+                {color.label}
+              </Text>
+            </Animated.View>
+            <Text size="xs" className="text-muted-foreground ml-auto">
+              {relativeTime(run.updatedAt)}
             </Text>
-          </Box>
-          <Text size="xs" className="text-muted-foreground ml-auto">
-            {relativeTime(run.updatedAt)}
+          </HStack>
+          <Text size="sm" className="text-foreground">
+            {run.title ?? truncate(run.prompt, 120)}
           </Text>
-        </HStack>
-        <Text size="sm" className="text-foreground">
-          {truncate(run.prompt, 120)}
-        </Text>
-        {run.totalCostUsd > 0 && (
-          <Text size="xs" className="text-muted-foreground">
-            {formatCost(run.totalCostUsd)}
-          </Text>
-        )}
-      </VStack>
-    </Pressable>
+          {run.totalCostUsd > 0 && (
+            <Text size="xs" className="text-muted-foreground">
+              {formatCost(run.totalCostUsd)}
+            </Text>
+          )}
+        </VStack>
+      </Pressable>
+    </StaggerEnter>
   );
 }
 
@@ -55,7 +63,10 @@ export default function RunsScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= LG_BREAKPOINT;
 
-  const renderItem = useCallback(({ item }: { item: RunRow }) => <RunCard run={item} />, []);
+  const renderItem = useCallback(
+    ({ item, index }: { item: RunRow; index: number }) => <RunCard run={item} index={index} />,
+    [],
+  );
   const keyExtractor = useCallback((item: RunRow) => item.id, []);
 
   if (isDesktop) {

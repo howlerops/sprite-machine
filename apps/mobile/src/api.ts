@@ -10,6 +10,7 @@ export interface RunRow {
   id: string;
   status: string;
   prompt: string;
+  title?: string | null;
   workdir?: string;
   model?: string;
   permissionMode?: string;
