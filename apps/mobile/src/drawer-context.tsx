@@ -28,11 +28,7 @@ const DrawerContext = createContext<DrawerContextValue>({
 
 export function DrawerProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  return (
-    <DrawerContext.Provider value={{ open, setOpen }}>
-      {children}
-    </DrawerContext.Provider>
-  );
+  return <DrawerContext.Provider value={{ open, setOpen }}>{children}</DrawerContext.Provider>;
 }
 
 export function useDrawer(): DrawerContextValue {

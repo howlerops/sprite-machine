@@ -60,18 +60,19 @@ function parseStatusParam(raw: string | string[] | undefined): ReadonlySet<RunSt
   if (!raw || (Array.isArray(raw) && raw.length === 0)) return new Set();
   const str = Array.isArray(raw) ? (raw[0] ?? '') : raw;
   if (!str) return new Set();
-  return new Set(str.split(',').map((s) => s.trim()).filter(Boolean) as RunStatus[]);
+  return new Set(
+    str
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) as RunStatus[],
+  );
 }
 
 function serializeStatuses(statuses: ReadonlySet<RunStatus>): string | undefined {
   return statuses.size === 0 ? undefined : Array.from(statuses).join(',');
 }
 
-function applyRunFilter(
-  runs: RunRow[],
-  query: string,
-  statuses: ReadonlySet<RunStatus>,
-): RunRow[] {
+function applyRunFilter(runs: RunRow[], query: string, statuses: ReadonlySet<RunStatus>): RunRow[] {
   const q = query.trim().toLowerCase();
   return runs.filter((run) => {
     if (statuses.size > 0 && !statuses.has(run.status as RunStatus)) return false;
@@ -115,7 +116,8 @@ function persistCollapsed(value: boolean): void {
 }
 
 function readFavoritesSync(): ReadonlySet<string> {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.localStorage) return new Set();
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.localStorage)
+    return new Set();
   try {
     const raw = window.localStorage.getItem(FAVORITES_KEY);
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
@@ -191,21 +193,34 @@ export function RailRunItem({
         onPress={onPress}
         className={
           isActive
-            ? 'group mx-2 mb-1.5 px-3 py-2.5 rounded-2xl border-l-2 border-l-primary bg-sidebar-accent'
-            : 'group mx-2 mb-1.5 px-3 py-2.5 rounded-2xl border-l-2 border-l-transparent data-[hover=true]:bg-sidebar-accent data-[active=true]:bg-sidebar-accent/80'
+            ? 'group mx-2 mb-1 h-16 px-3 rounded-xl border-l-2 border-l-primary bg-sidebar-accent justify-center'
+            : 'group mx-2 mb-1 h-16 px-3 rounded-xl border-l-2 border-l-transparent justify-center data-[hover=true]:bg-sidebar-accent data-[active=true]:bg-sidebar-accent/80'
         }
       >
         <VStack space="xs">
-          <Text size="xs" bold={isActive} className="text-foreground leading-tight" numberOfLines={1}>
+          <Text
+            size="sm"
+            bold={isActive}
+            className="text-foreground leading-tight"
+            numberOfLines={1}
+          >
             {displayTitle}
           </Text>
 
           <HStack space="xs" className="items-center">
-            <Animated.View style={pulseStyle} className={`w-1.5 h-1.5 rounded-full ${color.dotClass}`} />
-            <Text size="2xs" className="text-muted-foreground lowercase" numberOfLines={1}>
+            <Animated.View
+              style={pulseStyle}
+              className={`w-1.5 h-1.5 rounded-full ${color.dotClass}`}
+            />
+            <Text
+              size="2xs"
+              className="text-muted-foreground lowercase leading-none"
+              style={{ fontSize: 11, lineHeight: 13 }}
+              numberOfLines={1}
+            >
               {color.label} • {relativeTime(run.updatedAt).replace(' ago', '')}
             </Text>
-            <HStack className="ml-auto opacity-60 md:opacity-0 md:group-hover:opacity-100" space="xs">
+            <HStack className="ml-auto opacity-60" space="xs">
               <Pressable
                 onPress={onToggleFavorite}
                 accessibilityLabel={favorite ? 'Unfavorite chat' : 'Favorite chat'}
@@ -306,17 +321,16 @@ function SidebarContent({
   const inSettings = segs.includes('settings');
   const inSprites = segs.includes('sprites');
   const runIdx = segs.indexOf('run');
-  const activeRunId =
-    runIdx >= 0 && runIdx + 1 < segs.length ? segs[runIdx + 1] : null;
+  const activeRunId = runIdx >= 0 && runIdx + 1 < segs.length ? segs[runIdx + 1] : null;
   const inRuns = !inSettings && !inSprites && !activeRunId;
 
   // Filter state — seeded from URL params so back-nav restores them
   const params = useLocalSearchParams<{ q?: string; status?: string }>();
-  const [query, setQuery] = useState<string>(
-    () => (Array.isArray(params.q) ? (params.q[0] ?? '') : (params.q ?? '')),
+  const [query, setQuery] = useState<string>(() =>
+    Array.isArray(params.q) ? (params.q[0] ?? '') : (params.q ?? ''),
   );
-  const [selectedStatuses, setSelectedStatuses] = useState<ReadonlySet<RunStatus>>(
-    () => parseStatusParam(params.status),
+  const [selectedStatuses, setSelectedStatuses] = useState<ReadonlySet<RunStatus>>(() =>
+    parseStatusParam(params.status),
   );
   const [favoriteIds, setFavoriteIds] = useState<ReadonlySet<string>>(() => readFavoritesSync());
   const [pendingDeleteRun, setPendingDeleteRun] = useState<RunRow | null>(null);
@@ -392,7 +406,10 @@ function SidebarContent({
   if (collapsed) {
     // Mini-rail: icons only
     return (
-      <VStack className="h-full bg-sidebar border-r border-sidebar-border" style={{ width: RAIL_COLLAPSED }}>
+      <VStack
+        className="h-full bg-sidebar border-r border-sidebar-border"
+        style={{ width: RAIL_COLLAPSED }}
+      >
         <SidebarHeader
           collapsed
           onToggleCollapse={onToggleCollapse}
@@ -469,151 +486,149 @@ function SidebarContent({
 
   return (
     <>
-    <VStack className="h-full bg-sidebar border-r border-sidebar-border" style={{ width: collapsed ? RAIL_COLLAPSED : undefined }}>
-      <SidebarHeader
-        collapsed={false}
-        onToggleCollapse={onToggleCollapse}
-        showCollapseToggle={showCollapseToggle}
-      />
+      <VStack
+        className="h-full bg-sidebar border-r border-sidebar-border"
+        style={{ width: collapsed ? RAIL_COLLAPSED : undefined }}
+      >
+        <SidebarHeader
+          collapsed={false}
+          onToggleCollapse={onToggleCollapse}
+          showCollapseToggle={showCollapseToggle}
+        />
 
-      {/* New chat button */}
-      <Box className="px-3 pb-3">
-        <Button
-          variant="default"
-          size="sm"
-          onPress={() => nav('/new')}
-          className="w-full"
-        >
-          <ButtonText>+ New chat</ButtonText>
-        </Button>
-      </Box>
-
-      {/* Sidebar search — navigation-only, no dashboard filters here. */}
-      <Box className="px-3 pb-3">
-        <Input className="h-10 bg-background border-border">
-          <InputField
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search chats…"
-            clearButtonMode="while-editing"
-            autoCapitalize="none"
-            autoCorrect={false}
-            className="text-sm"
-          />
-        </Input>
-      </Box>
-
-      {/* Chat list */}
-      <Box className="flex-1">
-        <ScrollView className="flex-1">
-          {filteredRuns.length === 0 ? (
-            <VStack className="p-4" space="xs">
-              <Text size="xs" className="text-muted-foreground">
-                {isFiltered
-                  ? `No chats match${debouncedQuery.trim() ? ` "${debouncedQuery.trim()}"` : ' the selected filters'}.`
-                  : 'No chats yet.'}
-              </Text>
-              {isFiltered && (
-                <Pressable onPress={handleClearFilters}>
-                  <Text size="xs" className="text-primary underline">
-                    Clear filters
-                  </Text>
-                </Pressable>
-              )}
-            </VStack>
-          ) : (
-            filteredRuns.map((run, idx) => (
-              <RailRunItem
-                key={run.id}
-                run={run}
-                index={idx}
-                isActive={activeRunId === run.id}
-                onPress={() => nav(`/run/${run.id}`)}
-                favorite={favoriteIds.has(run.id)}
-                onToggleFavorite={() => toggleFavorite(run.id)}
-                onDelete={() => setPendingDeleteRun(run)}
-              />
-            ))
-          )}
-        </ScrollView>
-      </Box>
-
-      {/* Bottom nav */}
-      <Box className="border-t border-sidebar-border">
-        <Pressable
-          onPress={() => nav('/(tabs)')}
-          className={
-            inRuns
-              ? 'px-4 py-3 bg-sidebar-accent'
-              : 'px-4 py-3 data-[hover=true]:bg-sidebar-accent'
-          }
-        >
-          <HStack space="sm" className="items-center">
-            <Feather name="list" size={16} color={iconColor} />
-            <Text size="sm" className="text-sidebar-foreground">
-              Chats
-            </Text>
-          </HStack>
-        </Pressable>
-        <Pressable
-          onPress={() => nav('/sprites')}
-          className={
-            inSprites
-              ? 'px-4 py-3 bg-sidebar-accent'
-              : 'px-4 py-3 data-[hover=true]:bg-sidebar-accent'
-          }
-        >
-          <HStack space="sm" className="items-center">
-            <Feather name="cpu" size={16} color={iconColor} />
-            <Text size="sm" className="text-sidebar-foreground">
-              Sprites
-            </Text>
-          </HStack>
-        </Pressable>
-        <Pressable
-          onPress={() => nav('/(tabs)/settings')}
-          className={
-            inSettings
-              ? 'px-4 py-3 bg-sidebar-accent'
-              : 'px-4 py-3 data-[hover=true]:bg-sidebar-accent'
-          }
-        >
-          <HStack space="sm" className="items-center">
-            <Feather name="settings" size={16} color={iconColor} />
-            <Text size="sm" className="text-sidebar-foreground">
-              Settings
-            </Text>
-          </HStack>
-        </Pressable>
-      </Box>
-    </VStack>
-    <AlertDialog isOpen={!!pendingDeleteRun} onClose={() => setPendingDeleteRun(null)}>
-      <AlertDialogBackdrop />
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <Heading size="md" className="text-foreground">
-            Delete chat?
-          </Heading>
-        </AlertDialogHeader>
-        <AlertDialogBody>
-          <Text size="sm" className="text-muted-foreground">
-            This removes the chat and its timeline. This cannot be undone.
-          </Text>
-        </AlertDialogBody>
-        <AlertDialogFooter>
-          <Button variant="outline" onPress={() => setPendingDeleteRun(null)}>
-            <ButtonText>Cancel</ButtonText>
+        {/* New chat button */}
+        <Box className="px-3 pb-3">
+          <Button variant="default" size="sm" onPress={() => nav('/new')} className="w-full">
+            <ButtonText>+ New chat</ButtonText>
           </Button>
-          <Button
-            variant="destructive"
-            isDisabled={deleteRun.isPending}
-            onPress={() => pendingDeleteRun && performDelete(pendingDeleteRun)}
+        </Box>
+
+        {/* Sidebar search — navigation-only, no dashboard filters here. */}
+        <Box className="px-3 pb-3">
+          <Input className="h-10 bg-background border-border">
+            <InputField
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search chats…"
+              clearButtonMode="while-editing"
+              autoCapitalize="none"
+              autoCorrect={false}
+              className="text-sm"
+            />
+          </Input>
+        </Box>
+
+        {/* Chat list */}
+        <Box className="flex-1">
+          <ScrollView className="flex-1">
+            {filteredRuns.length === 0 ? (
+              <VStack className="p-4" space="xs">
+                <Text size="xs" className="text-muted-foreground">
+                  {isFiltered
+                    ? `No chats match${debouncedQuery.trim() ? ` "${debouncedQuery.trim()}"` : ' the selected filters'}.`
+                    : 'No chats yet.'}
+                </Text>
+                {isFiltered && (
+                  <Pressable onPress={handleClearFilters}>
+                    <Text size="xs" className="text-primary underline">
+                      Clear filters
+                    </Text>
+                  </Pressable>
+                )}
+              </VStack>
+            ) : (
+              filteredRuns.map((run, idx) => (
+                <RailRunItem
+                  key={run.id}
+                  run={run}
+                  index={idx}
+                  isActive={activeRunId === run.id}
+                  onPress={() => nav(`/run/${run.id}`)}
+                  favorite={favoriteIds.has(run.id)}
+                  onToggleFavorite={() => toggleFavorite(run.id)}
+                  onDelete={() => setPendingDeleteRun(run)}
+                />
+              ))
+            )}
+          </ScrollView>
+        </Box>
+
+        {/* Bottom nav */}
+        <Box className="border-t border-sidebar-border">
+          <Pressable
+            onPress={() => nav('/(tabs)')}
+            className={
+              inRuns
+                ? 'px-4 py-3 bg-sidebar-accent'
+                : 'px-4 py-3 data-[hover=true]:bg-sidebar-accent'
+            }
           >
-            <ButtonText>{deleteRun.isPending ? 'Deleting…' : 'Delete'}</ButtonText>
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+            <HStack space="sm" className="items-center">
+              <Feather name="list" size={16} color={iconColor} />
+              <Text size="sm" className="text-sidebar-foreground">
+                Chats
+              </Text>
+            </HStack>
+          </Pressable>
+          <Pressable
+            onPress={() => nav('/sprites')}
+            className={
+              inSprites
+                ? 'px-4 py-3 bg-sidebar-accent'
+                : 'px-4 py-3 data-[hover=true]:bg-sidebar-accent'
+            }
+          >
+            <HStack space="sm" className="items-center">
+              <Feather name="cpu" size={16} color={iconColor} />
+              <Text size="sm" className="text-sidebar-foreground">
+                Sprites
+              </Text>
+            </HStack>
+          </Pressable>
+          <Pressable
+            onPress={() => nav('/(tabs)/settings')}
+            className={
+              inSettings
+                ? 'px-4 py-3 bg-sidebar-accent'
+                : 'px-4 py-3 data-[hover=true]:bg-sidebar-accent'
+            }
+          >
+            <HStack space="sm" className="items-center">
+              <Feather name="settings" size={16} color={iconColor} />
+              <Text size="sm" className="text-sidebar-foreground">
+                Settings
+              </Text>
+            </HStack>
+          </Pressable>
+        </Box>
+      </VStack>
+      <AlertDialog isOpen={!!pendingDeleteRun} onClose={() => setPendingDeleteRun(null)}>
+        <AlertDialogBackdrop />
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <Heading size="md" className="text-foreground">
+              Delete chat?
+            </Heading>
+          </AlertDialogHeader>
+          <AlertDialogBody>
+            <Text size="sm" className="text-muted-foreground">
+              This removes the chat and its timeline. This cannot be undone.
+            </Text>
+          </AlertDialogBody>
+          <AlertDialogFooter>
+            <Button variant="outline" onPress={() => setPendingDeleteRun(null)}>
+              <ButtonText>Cancel</ButtonText>
+            </Button>
+            <Button
+              variant="destructive"
+              isDisabled={deleteRun.isPending}
+              onPress={() => pendingDeleteRun && performDelete(pendingDeleteRun)}
+            >
+              <ButtonText>{deleteRun.isPending ? 'Deleting…' : 'Delete'}</ButtonText>
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -658,9 +673,7 @@ export function Sidebar({ mode, open = false, onClose }: SidebarProps) {
   }
 
   // ------- mobile-drawer mode -------
-  return (
-    <MobileDrawer open={open} onClose={onClose} reduceMotion={reduceMotion} />
-  );
+  return <MobileDrawer open={open} onClose={onClose} reduceMotion={reduceMotion} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -768,17 +781,10 @@ function MobileDrawer({
   };
 
   return (
-    <Animated.View
-      style={containerStyle}
-      pointerEvents={open ? 'auto' : 'none'}
-    >
+    <Animated.View style={containerStyle} pointerEvents={open ? 'auto' : 'none'}>
       {/* Dimmed backdrop */}
       <Animated.View style={backdropStyle} pointerEvents={open ? 'auto' : 'none'}>
-        <Pressable
-          onPress={onClose}
-          style={{ flex: 1 }}
-          accessibilityLabel="Close navigation"
-        />
+        <Pressable onPress={onClose} style={{ flex: 1 }} accessibilityLabel="Close navigation" />
       </Animated.View>
 
       {/* Drawer panel */}

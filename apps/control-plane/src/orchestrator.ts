@@ -235,7 +235,10 @@ export class Orchestrator {
     gitUserEmail: string;
   }): Promise<{ applied: string[]; errors: Array<{ spriteId: string; message: string }> }> {
     const sprites = await this.opts.storage.listActiveSprites();
-    const result = { applied: [] as string[], errors: [] as Array<{ spriteId: string; message: string }> };
+    const result = {
+      applied: [] as string[],
+      errors: [] as Array<{ spriteId: string; message: string }>,
+    };
     for (const sprite of sprites) {
       if (sprite.status === 'destroyed') continue;
       try {
@@ -254,7 +257,11 @@ export class Orchestrator {
   ): Promise<void> {
     await this.resumeSprite(spriteId);
     const hosts = `github.com:\n    oauth_token: ${input.token}\n    git_protocol: https\n    users:\n        ${input.username}:\n            oauth_token: ${input.token}\n    user: ${input.username}\n`;
-    await this.opts.sprites.exec(spriteId, ['bash', '-lc', 'mkdir -p ~/.config/gh && chmod 700 ~/.config/gh'], { timeoutMs: 60_000 });
+    await this.opts.sprites.exec(
+      spriteId,
+      ['bash', '-lc', 'mkdir -p ~/.config/gh && chmod 700 ~/.config/gh'],
+      { timeoutMs: 60_000 },
+    );
     await this.opts.sprites.writeFile(spriteId, '/home/sprite/.config/gh/hosts.yml', hosts);
     const res = await this.opts.sprites.exec(
       spriteId,

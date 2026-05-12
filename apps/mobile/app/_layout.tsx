@@ -218,7 +218,7 @@ export default function RootLayout() {
         <AppConfigContext.Provider value={ctx}>
           {hydrated.token ? <PushSetup /> : null}
           <RouteGuard>
-            <StatusBar style="auto" />
+            <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
             <DrawerProvider>
               <ResponsiveShell>
                 <Stack
@@ -226,6 +226,13 @@ export default function RootLayout() {
                     animation: 'slide_from_right',
                     animationDuration: 240,
                     contentStyle: { backgroundColor: 'transparent' },
+                    headerStyle: {
+                      backgroundColor: resolved === 'dark' ? '#0a0a0a' : '#F7F5F1',
+                    },
+                    headerTintColor: resolved === 'dark' ? '#fafafa' : '#1D1B18',
+                    headerTitleStyle: {
+                      color: resolved === 'dark' ? '#fafafa' : '#1D1B18',
+                    },
                     // Desktop: sidebar rail is always visible; no hamburger needed.
                     // Mobile: hamburger lives in the Stack/Tabs header via DrawerProvider.
                     headerShown: false,

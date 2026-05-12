@@ -74,7 +74,7 @@ const eventCardStyle = tva({
 });
 
 const tabChipStyle = tva({
-  base: 'px-3 py-1.5 rounded-full border',
+  base: 'px-2.5 py-1 rounded-full border',
   variants: {
     active: {
       true: 'border-primary bg-primary',
@@ -147,8 +147,7 @@ function tokenizeBlocks(raw: string): BlockToken[] {
 function tokenizeInline(text: string): InlineToken[] {
   const tokens: InlineToken[] = [];
   // Order matters: bold before italic so **b** isn't grabbed as *b*
-  const inlineRe =
-    /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\n/g;
+  const inlineRe = /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\n/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = inlineRe.exec(text)) !== null) {
@@ -205,11 +204,7 @@ function InlineSpan({
       );
     case 'code':
       return (
-        <Text
-          key={index}
-          size="sm"
-          className={`bg-muted/50 px-1 rounded font-mono ${textClass}`}
-        >
+        <Text key={index} size="sm" className={`bg-muted/50 px-1 rounded font-mono ${textClass}`}>
           {token.value}
         </Text>
       );
@@ -229,18 +224,17 @@ function InlineSpan({
           {token.label}
         </Text>
       ) : (
-        <Text
-          key={index}
-          size="sm"
-          className="underline text-primary"
-          onPress={handlePress}
-        >
+        <Text key={index} size="sm" className="underline text-primary" onPress={handlePress}>
           {token.label}
         </Text>
       );
     }
     case 'linebreak':
-      return <Text key={index} size="sm" className={textClass}>{'\n'}</Text>;
+      return (
+        <Text key={index} size="sm" className={textClass}>
+          {'\n'}
+        </Text>
+      );
     default:
       return null;
   }
@@ -282,8 +276,7 @@ function ChatText({ text, role }: { text: string; role: 'user' | 'assistant' }) 
           // is acceptable for the rare case of user-submitted code.
           // Syntax coloring is skipped for user role to avoid contrast issues
           // with the gold bubble background.
-          const syntaxTokens =
-            role === 'assistant' ? tokenizeCode(block.code, block.lang) : null;
+          const syntaxTokens = role === 'assistant' ? tokenizeCode(block.code, block.lang) : null;
           return (
             <ScrollView
               key={i}
@@ -303,11 +296,11 @@ function ChatText({ text, role }: { text: string; role: 'user' | 'assistant' }) 
                     // punct   → text-foreground/60   (slightly dimmed punctuation)
                     // text    → text-foreground       (default)
                     let cls = 'text-foreground';
-                    if (tok.kind === 'kw')      cls = 'text-primary';
+                    if (tok.kind === 'kw') cls = 'text-primary';
                     else if (tok.kind === 'str') cls = 'text-status-success';
                     else if (tok.kind === 'num') cls = 'text-status-running';
                     else if (tok.kind === 'comment') cls = 'text-muted-foreground italic';
-                    else if (tok.kind === 'punct')   cls = 'text-foreground/60';
+                    else if (tok.kind === 'punct') cls = 'text-foreground/60';
                     return (
                       <Text key={ti} size="xs" className={`font-mono ${cls}`}>
                         {tok.value}
@@ -510,7 +503,9 @@ function WorkProgressCard({ events }: { events: RunEventRow[] }) {
             >
               <Text
                 size="2xs"
-                className={i === tick % steps.length ? 'text-primary-foreground' : 'text-muted-foreground'}
+                className={
+                  i === tick % steps.length ? 'text-primary-foreground' : 'text-muted-foreground'
+                }
               >
                 {step}
               </Text>
@@ -737,7 +732,8 @@ export default function RunDetailScreen() {
   }
 
   const color = statusColor(run.status);
-  const canSubmit = canSend && !sendMsg.isPending && (!!message.trim() || attachedImages.length > 0);
+  const canSubmit =
+    canSend && !sendMsg.isPending && (!!message.trim() || attachedImages.length > 0);
   const emptyEventsText =
     run.status === 'failed'
       ? 'This chat failed before emitting timeline events. Send a message to wake the sprite and try again.'
@@ -753,20 +749,21 @@ export default function RunDetailScreen() {
           header on mobile without competing with it. On web/desktop the Stack
           header is hidden so insets.top is 0 and there is no extra padding. */}
       <Box
-        className="bg-card border-b border-border px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-6"
+        className="bg-card border-b border-border px-4 py-2 md:px-6 md:py-3"
         style={{ paddingTop: insets.top > 0 ? insets.top : undefined }}
       >
-        <VStack space="sm">
+        <VStack space="xs">
           <HStack space="sm" className="items-center">
             <CrossfadePill contentKey={run.status}>
-              <Animated.View
-                style={pulseStyle}
-                className={`px-2 py-0.5 rounded-full ${color.bgClass}`}
-              >
+              <HStack space="xs" className="items-center">
+                <Animated.View
+                  style={pulseStyle}
+                  className={`w-2 h-2 rounded-full ${color.dotClass}`}
+                />
                 <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
                   {color.label}
                 </Text>
-              </Animated.View>
+              </HStack>
             </CrossfadePill>
             <HStack space="xs" className="ml-auto">
               {isActive ? (
@@ -792,15 +789,15 @@ export default function RunDetailScreen() {
           </HStack>
           {run.title ? (
             <VStack space="xs">
-              <Text size="sm" bold className="text-foreground">
+              <Text size="sm" bold className="text-foreground" numberOfLines={1}>
                 {run.title}
               </Text>
-              <Text size="xs" className="text-muted-foreground">
+              <Text size="xs" className="text-muted-foreground" numberOfLines={1}>
                 {run.prompt}
               </Text>
             </VStack>
           ) : (
-            <Text size="sm" className="text-foreground" numberOfLines={3}>
+            <Text size="sm" className="text-foreground" numberOfLines={2}>
               {run.prompt}
             </Text>
           )}
@@ -811,7 +808,7 @@ export default function RunDetailScreen() {
           ) : null}
 
           {/* Tab segment: Timeline | Shell */}
-          <HStack space="sm" className="pt-1">
+          <HStack space="sm" className="pt-0.5">
             <Pressable
               onPress={() => setActiveTab('timeline')}
               className={tabChipStyle({ active: activeTab === 'timeline' })}
@@ -853,7 +850,13 @@ export default function RunDetailScreen() {
               <ScrollView
                 ref={webScrollRef}
                 className="flex-1"
-                contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 960, width: '100%', alignSelf: 'center' }}
+                contentContainerStyle={{
+                  padding: 16,
+                  gap: 12,
+                  maxWidth: 960,
+                  width: '100%',
+                  alignSelf: 'center',
+                }}
                 onContentSizeChange={() => webScrollRef.current?.scrollToEnd({ animated: true })}
               >
                 {visibleEvents.length > 0 ? (
@@ -880,13 +883,18 @@ export default function RunDetailScreen() {
                     {emptyEventsText}
                   </Text>
                 }
-                ListFooterComponent={showWorkLoader ? <WorkProgressCard events={visibleEvents} /> : null}
+                ListFooterComponent={
+                  showWorkLoader ? <WorkProgressCard events={visibleEvents} /> : null
+                }
               />
             )}
 
             {/* Composer */}
             <VStack className="p-3 md:p-4 bg-card border-t border-border shadow-xs" space="sm">
-              <VStack className="w-full max-w-[960px] self-center rounded-3xl border border-border bg-background px-3 py-3 shadow-xs" space="sm">
+              <VStack
+                className="w-full max-w-[960px] self-center rounded-3xl border border-border bg-background px-3 py-3 shadow-xs"
+                space="sm"
+              >
                 {attachedImages.length > 0 ? (
                   <HStack space="xs" className="flex-wrap">
                     {attachedImages.map((src, i) => (
@@ -897,7 +905,9 @@ export default function RunDetailScreen() {
                           style={{ width: 56, height: 56, borderRadius: 10 }}
                         />
                         <Pressable
-                          onPress={() => setAttachedImages((prev) => prev.filter((_, j) => j !== i))}
+                          onPress={() =>
+                            setAttachedImages((prev) => prev.filter((_, j) => j !== i))
+                          }
                           className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive items-center justify-center"
                         >
                           <Text size="2xs" bold className="text-destructive-foreground">

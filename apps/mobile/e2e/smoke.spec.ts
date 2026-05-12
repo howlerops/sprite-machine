@@ -76,10 +76,7 @@ test('login → runs dashboard', async ({ page }) => {
   });
 
   // Fail the test if the browser emitted any console errors during the flow.
-  expect(
-    consoleErrors,
-    `Console errors detected:\n${consoleErrors.join('\n')}`,
-  ).toHaveLength(0);
+  expect(consoleErrors, `Console errors detected:\n${consoleErrors.join('\n')}`).toHaveLength(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -114,7 +111,10 @@ test('run detail renders title or status pill', async ({ page }) => {
     has: page.locator('text=/running|starting|completed|failed|cancelled|awaiting/i'),
   });
 
-  const hasRuns = await runCard.first().isVisible().catch(() => false);
+  const hasRuns = await runCard
+    .first()
+    .isVisible()
+    .catch(() => false);
   if (!hasRuns) {
     test.skip(true, 'No chats present; skipping chat-detail check');
     return;
@@ -127,15 +127,14 @@ test('run detail renders title or status pill', async ({ page }) => {
   // The run detail header always shows a status pill.
   const statusPill = page
     .locator('[class*="rounded-full"]')
-    .filter({ has: page.locator('text=/running|starting|completed|failed|cancelled|awaiting|idle/i') })
+    .filter({
+      has: page.locator('text=/running|starting|completed|failed|cancelled|awaiting|idle/i'),
+    })
     .first();
 
   await expect(statusPill).toBeVisible({ timeout: 5_000 });
 
-  expect(
-    consoleErrors,
-    `Console errors detected:\n${consoleErrors.join('\n')}`,
-  ).toHaveLength(0);
+  expect(consoleErrors, `Console errors detected:\n${consoleErrors.join('\n')}`).toHaveLength(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -191,8 +190,5 @@ test('chat message lands in timeline', async ({ page }) => {
   // The message should appear in the timeline (as a user bubble).
   await expect(page.locator(`text=${probe}`)).toBeVisible({ timeout: 10_000 });
 
-  expect(
-    consoleErrors,
-    `Console errors detected:\n${consoleErrors.join('\n')}`,
-  ).toHaveLength(0);
+  expect(consoleErrors, `Console errors detected:\n${consoleErrors.join('\n')}`).toHaveLength(0);
 });

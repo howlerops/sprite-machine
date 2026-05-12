@@ -63,11 +63,21 @@ export function statusColor(status: string): StatusColor {
         label: 'failed',
       };
     case 'cancelled':
-      return { bgClass: 'bg-muted', textClass: 'text-muted-foreground', dotClass: 'bg-muted-foreground', label: 'cancelled' };
+      return {
+        bgClass: 'bg-muted',
+        textClass: 'text-muted-foreground',
+        dotClass: 'bg-muted-foreground',
+        label: 'cancelled',
+      };
     case 'queued':
     case 'idle':
     default:
-      return { bgClass: 'bg-muted', textClass: 'text-muted-foreground', dotClass: 'bg-muted-foreground', label: status };
+      return {
+        bgClass: 'bg-muted',
+        textClass: 'text-muted-foreground',
+        dotClass: 'bg-muted-foreground',
+        label: status,
+      };
   }
 }
 

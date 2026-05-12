@@ -177,7 +177,10 @@ export default function NewRunScreen() {
         <FileExplorer
           visible={explorerOpen}
           selected={workdirs}
-          onConfirm={(paths) => { setWorkdirs(paths); setExplorerOpen(false); }}
+          onConfirm={(paths) => {
+            setWorkdirs(paths);
+            setExplorerOpen(false);
+          }}
           onCancel={() => setExplorerOpen(false)}
         />
 

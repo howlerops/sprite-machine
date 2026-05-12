@@ -39,7 +39,9 @@ export async function requestAndRegisterPushToken(
 ): Promise<string> {
   const Notifications = await getNotifications();
   if (!Notifications) {
-    throw new Error('Push notifications require a development build or installed app, not Expo Go.');
+    throw new Error(
+      'Push notifications require a development build or installed app, not Expo Go.',
+    );
   }
 
   if (Platform.OS === 'android') {

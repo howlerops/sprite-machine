@@ -24,12 +24,7 @@ import { VStack } from '@/components/ui/vstack';
 // Types
 // ---------------------------------------------------------------------------
 
-export type RunStatus =
-  | 'running'
-  | 'awaiting_input'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+export type RunStatus = 'running' | 'awaiting_input' | 'completed' | 'failed' | 'cancelled';
 
 export const ALL_STATUSES: RunStatus[] = [
   'running',

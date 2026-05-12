@@ -20,8 +20,12 @@ export function useSaveGithubIntegration() {
   const { baseUrl, token } = useAppConfig();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { token?: string; username: string; gitUserName: string; gitUserEmail: string }) =>
-      saveGithubIntegration(baseUrl, token, body),
+    mutationFn: (body: {
+      token?: string;
+      username: string;
+      gitUserName: string;
+      gitUserEmail: string;
+    }) => saveGithubIntegration(baseUrl, token, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['integration', 'github'] });
       void queryClient.invalidateQueries({ queryKey: ['sprites'] });

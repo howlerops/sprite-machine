@@ -28,7 +28,9 @@ function HamburgerButton() {
 
 export default function TabsLayout() {
   const { width } = useWindowDimensions();
+  const colorScheme = useColorScheme();
   const isDesktop = width >= LG_BREAKPOINT;
+  const isDark = colorScheme === 'dark';
 
   // At lg+, the root layout renders the persistent sidebar rail and the
   // bottom-tab bar is replaced by sidebar nav items. Pass children through.
@@ -47,6 +49,9 @@ export default function TabsLayout() {
       screenOptions={{
         headerLeft: () => <HamburgerButton />,
         headerRight: () => null,
+        headerStyle: { backgroundColor: isDark ? '#0a0a0a' : '#F7F5F1' },
+        headerTintColor: isDark ? '#fafafa' : '#1D1B18',
+        headerTitleStyle: { color: isDark ? '#fafafa' : '#1D1B18' },
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Chats' }} />

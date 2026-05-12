@@ -47,7 +47,26 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sprite-machine/mobile typecheck
-      - run: npx eas-cli update --channel preview --message "${{ github.event.head_commit.message || 'Manual preview update' }}" --non-interactive
+      - name: Validate Expo token
+        id: expo-token
+        working-directory: apps/mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "EXPO_TOKEN is not set; skipping EAS Update."
+            exit 0
+          fi
+          if npx eas-cli whoami --non-interactive >/dev/null 2>&1; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "EXPO_TOKEN is invalid; skipping EAS Update. Create a token at https://expo.dev/settings/access-tokens and update the GitHub secret."
+          fi
+      - name: Publish preview update
+        if: steps.expo-token.outputs.valid == 'true'
+        run: npx eas-cli update --channel preview --message "${{ github.event.head_commit.message || 'Manual preview update' }}" --non-interactive
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}

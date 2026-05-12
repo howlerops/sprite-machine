@@ -20,7 +20,12 @@ import {
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog';
 
-import { useSprites, useSuspendSprite, useResumeSprite, useDeleteSprite } from '../src/hooks/useSprites';
+import {
+  useSprites,
+  useSuspendSprite,
+  useResumeSprite,
+  useDeleteSprite,
+} from '../src/hooks/useSprites';
 import { statusColor, relativeTime, truncate, formatCost } from '../src/utils';
 import { StaggerEnter, usePulse } from '../src/animations';
 import type { SpriteRow } from '../src/api';
@@ -67,11 +72,7 @@ function SpriteCard({
         <VStack space="sm">
           {/* Top row: ID + status pill */}
           <HStack space="sm" className="items-center">
-            <Text
-              size="xs"
-              className="text-muted-foreground font-mono flex-1"
-              numberOfLines={1}
-            >
+            <Text size="xs" className="text-muted-foreground font-mono flex-1" numberOfLines={1}>
               {truncate(sprite.id, 28)}
             </Text>
             <StatusPill status={sprite.status} />
@@ -163,8 +164,8 @@ function DeleteConfirmDialog({
         <AlertDialogBody>
           <VStack space="sm">
             <Text size="sm" className="text-muted-foreground">
-              This will permanently destroy the sprite and free its resources. Any chats attached
-              to this sprite will remain in your history but can no longer resume.
+              This will permanently destroy the sprite and free its resources. Any chats attached to
+              this sprite will remain in your history but can no longer resume.
             </Text>
             {sprite ? (
               <Text size="xs" className="font-mono text-muted-foreground">
@@ -177,12 +178,7 @@ function DeleteConfirmDialog({
           <Button variant="outline" size="sm" onPress={onClose} isDisabled={isPending}>
             <ButtonText>Keep sprite</ButtonText>
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            isDisabled={isPending}
-            onPress={onConfirm}
-          >
+          <Button variant="destructive" size="sm" isDisabled={isPending} onPress={onConfirm}>
             {isPending ? <ButtonSpinner /> : null}
             <ButtonText>Delete</ButtonText>
           </Button>

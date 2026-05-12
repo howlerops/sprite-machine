@@ -330,7 +330,11 @@ export default function SettingsScreen() {
                     secureTextEntry
                     autoCapitalize="none"
                     autoCorrect={false}
-                    placeholder={githubIntegration?.connected ? 'Leave blank to keep existing token' : 'ghp_… or github_pat_…'}
+                    placeholder={
+                      githubIntegration?.connected
+                        ? 'Leave blank to keep existing token'
+                        : 'ghp_… or github_pat_…'
+                    }
                   />
                 </Input>
               </FormControl>
@@ -342,7 +346,11 @@ export default function SettingsScreen() {
                       <FormControlLabelText>GitHub username</FormControlLabelText>
                     </FormControlLabel>
                     <Input>
-                      <InputField value={ghUsername} onChangeText={setGhUsername} autoCapitalize="none" />
+                      <InputField
+                        value={ghUsername}
+                        onChangeText={setGhUsername}
+                        autoCapitalize="none"
+                      />
                     </Input>
                   </FormControl>
                 </Box>

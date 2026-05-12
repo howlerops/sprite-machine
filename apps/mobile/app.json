@@ -17,9 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.howlerforge.mobile",
       "infoPlist": {
-        "UIBackgroundModes": [
-          "remote-notification"
-        ],
+        "UIBackgroundModes": ["remote-notification"],
         "ITSAppUsesNonExemptEncryption": false
       }
     },

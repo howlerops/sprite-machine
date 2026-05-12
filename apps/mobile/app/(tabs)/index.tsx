@@ -24,18 +24,19 @@ function parseStatusParam(raw: string | string[] | undefined): ReadonlySet<RunSt
   if (!raw || (Array.isArray(raw) && raw.length === 0)) return new Set();
   const str = Array.isArray(raw) ? raw[0] : raw;
   if (!str) return new Set();
-  return new Set(str.split(',').map((s) => s.trim()).filter(Boolean) as RunStatus[]);
+  return new Set(
+    str
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) as RunStatus[],
+  );
 }
 
 function serializeStatuses(statuses: ReadonlySet<RunStatus>): string | undefined {
   return statuses.size === 0 ? undefined : Array.from(statuses).join(',');
 }
 
-function filterRuns(
-  runs: RunRow[],
-  query: string,
-  statuses: ReadonlySet<RunStatus>,
-): RunRow[] {
+function filterRuns(runs: RunRow[], query: string, statuses: ReadonlySet<RunStatus>): RunRow[] {
   const q = query.trim().toLowerCase();
   return runs.filter((run) => {
     if (statuses.size > 0 && !statuses.has(run.status as RunStatus)) return false;
@@ -92,7 +93,11 @@ function RunRowItem({ run, index }: { run: RunRow; index: number }) {
               </Text>
             ) : null}
           </VStack>
-          <Text size="xs" className="hidden md:flex w-[128px] text-muted-foreground" numberOfLines={1}>
+          <Text
+            size="xs"
+            className="hidden md:flex w-[128px] text-muted-foreground"
+            numberOfLines={1}
+          >
             {agent}
           </Text>
           <Text size="xs" className="w-[72px] text-muted-foreground">
@@ -114,11 +119,11 @@ export default function RunsScreen() {
   const showWideColumns = width >= 820;
 
   const params = useLocalSearchParams<{ q?: string; status?: string }>();
-  const [query, setQuery] = useState<string>(
-    () => (Array.isArray(params.q) ? (params.q[0] ?? '') : (params.q ?? '')),
+  const [query, setQuery] = useState<string>(() =>
+    Array.isArray(params.q) ? (params.q[0] ?? '') : (params.q ?? ''),
   );
-  const [selectedStatuses, setSelectedStatuses] = useState<ReadonlySet<RunStatus>>(
-    () => parseStatusParam(params.status),
+  const [selectedStatuses, setSelectedStatuses] = useState<ReadonlySet<RunStatus>>(() =>
+    parseStatusParam(params.status),
   );
 
   const debouncedQuery = useDebounced(query, 200);
@@ -170,15 +175,21 @@ export default function RunsScreen() {
         data={filteredRuns}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        refreshControl={<RefreshControl refreshing={isRefetching || isLoading} onRefresh={refetch} />}
-        contentContainerStyle={{ padding: 24, paddingBottom: 96, maxWidth: 1240, width: '100%', alignSelf: 'center' }}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching || isLoading} onRefresh={refetch} />
+        }
+        contentContainerStyle={{
+          padding: 24,
+          paddingBottom: 96,
+          maxWidth: 1240,
+          width: '100%',
+          alignSelf: 'center',
+        }}
         ListHeaderComponent={
           <VStack space="xl" className="mb-8">
             <HStack className="items-start justify-between gap-4">
               <VStack space="xs" className="flex-1">
-                <Heading className="text-foreground text-5xl leading-tight">
-                  Chats
-                </Heading>
+                <Heading className="text-foreground text-5xl leading-tight">Chats</Heading>
                 <Text size="md" className="text-muted-foreground">
                   Search, filter, and resume every active HowlerForge session.
                 </Text>
@@ -200,11 +211,21 @@ export default function RunsScreen() {
             <Box className="bg-card border border-border rounded-2xl overflow-hidden">
               {showWideColumns ? (
                 <HStack className="px-5 py-4 items-center">
-                  <Text size="xs" className="w-[96px] text-muted-foreground">Status</Text>
-                  <Text size="xs" className="flex-1 text-muted-foreground">Title</Text>
-                  <Text size="xs" className="w-[128px] text-muted-foreground">Agent</Text>
-                  <Text size="xs" className="w-[72px] text-muted-foreground">Updated</Text>
-                  <Text size="xs" className="w-[72px] text-muted-foreground">Cost</Text>
+                  <Text size="xs" className="w-[96px] text-muted-foreground">
+                    Status
+                  </Text>
+                  <Text size="xs" className="flex-1 text-muted-foreground">
+                    Title
+                  </Text>
+                  <Text size="xs" className="w-[128px] text-muted-foreground">
+                    Agent
+                  </Text>
+                  <Text size="xs" className="w-[72px] text-muted-foreground">
+                    Updated
+                  </Text>
+                  <Text size="xs" className="w-[72px] text-muted-foreground">
+                    Cost
+                  </Text>
                 </HStack>
               ) : null}
             </Box>

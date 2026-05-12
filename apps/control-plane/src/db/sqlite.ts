@@ -326,7 +326,11 @@ export class SqliteStorage implements Storage {
       | { key: string; value: string; updated_at: string }
       | undefined;
     return r
-      ? { key: r.key, value: JSON.parse(r.value) as Record<string, unknown>, updatedAt: r.updated_at }
+      ? {
+          key: r.key,
+          value: JSON.parse(r.value) as Record<string, unknown>,
+          updatedAt: r.updated_at,
+        }
       : null;
   }
 

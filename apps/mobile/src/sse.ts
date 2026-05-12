@@ -26,9 +26,7 @@ export function useRunEventStream(runId: string): void {
       const url = `${baseUrl}/runs/${runId}/events?after=${after}`;
       const es = new EventSource(
         url,
-        token
-          ? { headers: { Authorization: `Bearer ${token}` } }
-          : { withCredentials: true },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : { withCredentials: true },
       );
       esRef.current = es;
 

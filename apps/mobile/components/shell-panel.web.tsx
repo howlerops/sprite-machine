@@ -27,7 +27,14 @@ import { useAppConfig } from '../src/config-store';
 import { useResumeSprite } from '../src/hooks/useSprites';
 import type { SpriteRow } from '../src/api';
 
-type PaneState = 'connecting' | 'open' | 'suspended' | 'cold' | 'disconnected' | 'auth_error' | 'sprite_unavailable';
+type PaneState =
+  | 'connecting'
+  | 'open'
+  | 'suspended'
+  | 'cold'
+  | 'disconnected'
+  | 'auth_error'
+  | 'sprite_unavailable';
 
 interface ShellPanelProps {
   spriteId: string;
@@ -44,7 +51,10 @@ function buildWsUrl(spriteId: string): string {
   // Sprites exec API accepts repeated cmd params as argv.
   params.append('cmd', 'bash');
   params.append('cmd', '-lc');
-  params.append('cmd', 'cd "${SPRITE_AGENT_WORKDIR:-$PWD}" 2>/dev/null || cd "$HOME"; exec bash -l');
+  params.append(
+    'cmd',
+    'cd "${SPRITE_AGENT_WORKDIR:-$PWD}" 2>/dev/null || cd "$HOME"; exec bash -l',
+  );
   params.set('tty', 'true');
   return `${wsOrigin}/sprites/${encodeURIComponent(spriteId)}/exec?${params.toString()}`;
 }
@@ -244,8 +254,8 @@ export default function ShellPanel({ spriteId, runId: _runId, sprite }: ShellPan
             Sprite no longer available
           </Heading>
           <Text size="sm" className="text-muted-foreground text-center">
-            The shell endpoint did not accept a connection. Try waking the sprite;
-            if it still fails, start a new chat to provision a fresh session.
+            The shell endpoint did not accept a connection. Try waking the sprite; if it still
+            fails, start a new chat to provision a fresh session.
           </Text>
           <HStack space="sm">
             <Button
