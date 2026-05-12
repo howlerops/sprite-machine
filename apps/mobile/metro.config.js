@@ -7,8 +7,8 @@ const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch all packages in the monorepo
-config.watchFolders = [workspaceRoot];
+// Watch all packages in the monorepo while preserving Expo SDK defaults.
+config.watchFolders = Array.from(new Set([...(config.watchFolders ?? []), workspaceRoot]));
 
 // Allow Metro to resolve modules from both the project and workspace roots,
 // with the project-local node_modules listed first so it wins for packages
