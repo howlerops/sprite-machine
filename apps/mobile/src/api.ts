@@ -12,6 +12,7 @@ export interface RunRow {
   prompt: string;
   title?: string | null;
   workdir?: string;
+  workdirs?: string[] | null;
   model?: string;
   permissionMode?: string;
   metadata?: Record<string, unknown>;
@@ -60,6 +61,14 @@ export interface HealthResponse {
   role?: string;
   backend?: string;
   template?: string;
+}
+
+export interface GithubIntegration {
+  connected: boolean;
+  username: string | null;
+  gitUserName: string | null;
+  gitUserEmail: string | null;
+  apply?: { applied: string[]; errors: Array<{ spriteId: string; message: string }> };
 }
 
 export interface ApiError extends Error {
@@ -149,6 +158,16 @@ export function cancelRun(
   });
 }
 
+export function deleteRun(
+  baseUrl: string,
+  token: string | null,
+  runId: string,
+): Promise<{ deleted: true }> {
+  return apiFetch<{ deleted: true }>(baseUrl, token, `/runs/${runId}`, {
+    method: 'DELETE',
+  });
+}
+
 export function resolvePermission(
   baseUrl: string,
   token: string | null,
@@ -190,6 +209,42 @@ export function resumeSprite(
   return apiFetch<SpriteRow>(baseUrl, token, `/sprites/${id}/resume`, { method: 'POST' });
 }
 
+export function deleteSprite(
+  baseUrl: string,
+  token: string | null,
+  id: string,
+): Promise<{ deleted: true }> {
+  return apiFetch<{ deleted: true }>(baseUrl, token, `/sprites/${id}`, { method: 'DELETE' });
+}
+
+// Integrations
+export function getGithubIntegration(
+  baseUrl: string,
+  token: string | null,
+): Promise<GithubIntegration> {
+  return apiFetch<GithubIntegration>(baseUrl, token, '/integrations/github');
+}
+
+export function saveGithubIntegration(
+  baseUrl: string,
+  token: string | null,
+  body: { token?: string; username: string; gitUserName: string; gitUserEmail: string },
+): Promise<GithubIntegration> {
+  return apiFetch<GithubIntegration>(baseUrl, token, '/integrations/github', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function applyGithubIntegration(
+  baseUrl: string,
+  token: string | null,
+): Promise<GithubIntegration> {
+  return apiFetch<GithubIntegration>(baseUrl, token, '/integrations/github/apply', {
+    method: 'POST',
+  });
+}
+
 // Push
 export function registerPushToken(
   baseUrl: string,
@@ -212,6 +267,56 @@ export function getPushTokens(
   token: string | null,
 ): Promise<{ tokens: PushTokenRow[] }> {
   return apiFetch<{ tokens: PushTokenRow[] }>(baseUrl, token, '/push/tokens');
+}
+
+// Attachments
+export interface AttachmentResponse {
+  id: string;
+  url: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+/**
+ * Upload an image file as a run attachment.
+ * Uses raw fetch (not apiFetch) because the body is multipart/form-data,
+ * not JSON. On web, `file` is a browser File; on native it can be a Blob
+ * produced from an image picker result.
+ */
+export async function uploadAttachment(
+  baseUrl: string,
+  token: string | null,
+  runId: string,
+  file: File | Blob,
+  filename?: string,
+): Promise<AttachmentResponse> {
+  const form = new FormData();
+  if (file instanceof File) {
+    form.append('file', file);
+  } else {
+    // React Native Blob — wrap with an explicit name so the server gets a
+    // Content-Disposition filename and can derive the extension.
+    form.append('file', file, filename ?? 'image.jpg');
+  }
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${baseUrl}/runs/${runId}/attachments`, {
+    method: 'POST',
+    headers,
+    body: form,
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    const err = new Error(text) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
+
+  return res.json() as Promise<AttachmentResponse>;
 }
 
 // Admin
@@ -241,6 +346,28 @@ export function logout(baseUrl: string): Promise<{ ok: true }> {
 
 export function getMe(baseUrl: string): Promise<{ email: string }> {
   return apiFetch<{ email: string }>(baseUrl, null, '/me');
+}
+
+// File system browser
+export interface FsEntry {
+  name: string;
+  isDir: boolean;
+  path: string;
+}
+
+export interface FsListResponse {
+  root: string;
+  path: string;
+  entries: FsEntry[];
+}
+
+export function listFsDir(
+  baseUrl: string,
+  token: string | null,
+  dirPath?: string,
+): Promise<FsListResponse> {
+  const qs = dirPath !== undefined ? `?path=${encodeURIComponent(dirPath)}` : '';
+  return apiFetch<FsListResponse>(baseUrl, token, `/fs/list${qs}`);
 }
 
 // Re-export shared types used by consumers

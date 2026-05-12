@@ -2,6 +2,12 @@
 **/dist
 !apps/control-plane/dist/
 !apps/mobile/dist-web/
+# Expo bundles transitive node_modules paths into dist-web (font assets live
+# under assets/__node_modules/.pnpm/.../node_modules/...). Without this
+# explicit allowlist the **/node_modules rule strips those files out of the
+# image and font/icon requests 404 on the deployed server.
+!apps/mobile/dist-web/**/node_modules
+!apps/mobile/dist-web/**/node_modules/**
 **/*.log
 .env
 .env.*

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import EventSource from 'react-native-sse';
 import type { RunDetail } from './api';
@@ -7,12 +8,14 @@ import { useAppConfig } from './config-store';
 
 export function useRunEventStream(runId: string): void {
   const queryClient = useQueryClient();
-  const { baseUrl, token } = useAppConfig();
-  const lastSeqRef = useRef<number>(0);
+  const { baseUrl, token, email } = useAppConfig();
+  const lastSeqRef = useRef<number>(-1);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    // Native iOS uses bearer token; web/PWA uses cookie session keyed on
+    // email. We need at least one of the two to attempt a connection.
+    if (!token && !email) return;
 
     function connect(after: number): void {
       if (esRef.current) {
@@ -21,11 +24,12 @@ export function useRunEventStream(runId: string): void {
       }
 
       const url = `${baseUrl}/runs/${runId}/events?after=${after}`;
-      const es = new EventSource(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const es = new EventSource(
+        url,
+        token
+          ? { headers: { Authorization: `Bearer ${token}` } }
+          : { withCredentials: true },
+      );
       esRef.current = es;
 
       es.addEventListener('message', (e) => {
@@ -82,11 +86,16 @@ export function useRunEventStream(runId: string): void {
       lastSeqRef.current = maxSeq;
     }
 
-    connect(lastSeqRef.current);
+    // iOS Safari PWA: the session cookie sometimes isn't yet visible to the
+    // first XHR opened after login. A short delay lets the browser commit
+    // the cookie before SSE opens. Native bearer auth doesn't need this.
+    const initialDelay = Platform.OS === 'web' && !token ? 200 : 0;
+    const t = setTimeout(() => connect(lastSeqRef.current), initialDelay);
 
     return () => {
+      clearTimeout(t);
       esRef.current?.close();
       esRef.current = null;
     };
-  }, [runId, baseUrl, token, queryClient]);
+  }, [runId, baseUrl, token, email, queryClient]);
 }

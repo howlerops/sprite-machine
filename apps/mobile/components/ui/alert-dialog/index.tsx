@@ -8,7 +8,7 @@ import {
   withStyleContext,
 } from '@gluestack-ui/utils/nativewind-utils';
 import React from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -136,10 +136,14 @@ const AlertDialogContent = React.forwardRef<
   return (
     <UIAccessibleAlertDialog.Content
       pointerEvents="auto"
-      entering={ZoomIn.duration(200).withInitialValues({
-        transform: [{ scale: 0.9 }],
-        opacity: 0,
-      })}
+      entering={
+        Platform.OS === 'web'
+          ? FadeIn.duration(200)
+          : ZoomIn.duration(200).withInitialValues({
+              transform: [{ scale: 0.9 }],
+              opacity: 0,
+            })
+      }
       exiting={FadeOut.duration(200)}
       ref={ref}
       {...props}

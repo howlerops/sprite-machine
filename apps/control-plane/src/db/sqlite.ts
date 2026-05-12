@@ -5,6 +5,9 @@ import { nowIso, type RunEvent } from '@sprite-machine/shared';
 import { SCHEMA_SQL } from './schema.js';
 import { deriveTitle } from '../title.js';
 import type {
+  AttachmentRow,
+  IntegrationRow,
+  NewAttachment,
   NewRun,
   NewSprite,
   PushTokenRow,
@@ -37,6 +40,47 @@ export class SqliteStorage implements Storage {
       this.db.exec(`alter table runs add column title text`);
     } catch {
       // column already exists
+    }
+    // Idempotent migration for the workdirs column (multi-folder support v1).
+    try {
+      this.db.exec(`alter table runs add column workdirs text`);
+    } catch {
+      // column already exists
+    }
+    // Idempotent migration for app-level integrations (GitHub, etc.).
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS integrations (
+          key        TEXT NOT NULL PRIMARY KEY,
+          value      TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    } catch {
+      // table already exists
+    }
+    // Idempotent migration for the attachments table (file upload v1).
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS attachments (
+          id          TEXT    NOT NULL PRIMARY KEY,
+          run_id      TEXT    NOT NULL,
+          content_type TEXT   NOT NULL,
+          size_bytes  INTEGER NOT NULL,
+          path        TEXT    NOT NULL,
+          created_at  INTEGER NOT NULL
+        )
+      `);
+    } catch {
+      // table already exists (should not happen with IF NOT EXISTS, but be safe)
+    }
+    // One-time cleanup: nullify bogus sprite_ids that were written as the Fly
+    // app name instead of a real sprites.dev sprite ID.  Safe to re-run on
+    // every startup because subsequent runs are written with the correct value.
+    try {
+      this.db.exec(`update runs set sprite_id = null where sprite_id = 'sprite-machine'`);
+    } catch {
+      // best-effort; sprite_id column is guaranteed to exist at this point
     }
     // Backfill any rows that lack a title using the deriveTitle heuristic.
     // Done in JS (not pure SQL) so the heuristic stays single-sourced.
@@ -123,8 +167,8 @@ export class SqliteStorage implements Storage {
     const title = r.title ?? deriveTitle(r.prompt);
     this.db
       .prepare(
-        `insert into runs (id, sprite_id, sidecar_run_id, status, harness, prompt, title, workdir, created_at, updated_at, metadata)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `insert into runs (id, sprite_id, sidecar_run_id, status, harness, prompt, title, workdir, workdirs, created_at, updated_at, metadata)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         r.id,
@@ -135,6 +179,7 @@ export class SqliteStorage implements Storage {
         r.prompt,
         title,
         r.workdir,
+        r.workdirs != null ? JSON.stringify(r.workdirs) : null,
         now,
         now,
         JSON.stringify(r.metadata ?? {}),
@@ -210,6 +255,14 @@ export class SqliteStorage implements Storage {
     return row;
   }
 
+  async deleteRun(id: string): Promise<void> {
+    this.db.transaction(() => {
+      this.db.prepare(`delete from run_events where run_id = ?`).run(id);
+      this.db.prepare(`delete from attachments where run_id = ?`).run(id);
+      this.db.prepare(`delete from runs where id = ?`).run(id);
+    })();
+  }
+
   async appendRunEvent(runId: string, event: RunEvent): Promise<{ seq: number }> {
     const now = nowIso();
     return this.db.transaction(() => {
@@ -266,6 +319,52 @@ export class SqliteStorage implements Storage {
 
   async removePushToken(token: string): Promise<void> {
     this.db.prepare(`delete from push_tokens where expo_token = ?`).run(token);
+  }
+
+  async getIntegration(key: string): Promise<IntegrationRow | null> {
+    const r = this.db.prepare(`select * from integrations where key = ?`).get(key) as
+      | { key: string; value: string; updated_at: string }
+      | undefined;
+    return r
+      ? { key: r.key, value: JSON.parse(r.value) as Record<string, unknown>, updatedAt: r.updated_at }
+      : null;
+  }
+
+  async setIntegration(key: string, value: Record<string, unknown>): Promise<IntegrationRow> {
+    const now = nowIso();
+    this.db
+      .prepare(
+        `insert into integrations (key, value, updated_at) values (?, ?, ?)
+         on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .run(key, JSON.stringify(value), now);
+    const row = await this.getIntegration(key);
+    if (!row) throw new Error('integration vanished after insert');
+    return row;
+  }
+
+  async removeIntegration(key: string): Promise<void> {
+    this.db.prepare(`delete from integrations where key = ?`).run(key);
+  }
+
+  async createAttachment(a: NewAttachment): Promise<AttachmentRow> {
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO attachments (id, run_id, content_type, size_bytes, path, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(a.id, a.runId, a.contentType, a.sizeBytes, a.path, now);
+    const row = await this.getAttachment(a.runId, a.id);
+    if (!row) throw new Error('attachment vanished after insert');
+    return row;
+  }
+
+  async getAttachment(runId: string, attachmentId: string): Promise<AttachmentRow | null> {
+    const r = this.db
+      .prepare(`SELECT * FROM attachments WHERE run_id = ? AND id = ?`)
+      .get(runId, attachmentId) as Record<string, unknown> | undefined;
+    return r ? toAttachmentRow(r) : null;
   }
 
   async getStats(sinceIso?: string): Promise<Stats> {
@@ -335,6 +434,7 @@ function toSpriteRow(r: Record<string, unknown>): SpriteRow {
 }
 
 function toRunRow(r: Record<string, unknown>): RunRow {
+  const workdirsRaw = r.workdirs as string | null | undefined;
   return {
     id: r.id as string,
     spriteId: r.sprite_id as string,
@@ -344,6 +444,7 @@ function toRunRow(r: Record<string, unknown>): RunRow {
     prompt: r.prompt as string,
     title: (r.title as string | null) ?? null,
     workdir: (r.workdir as string | null) ?? null,
+    workdirs: workdirsRaw ? (JSON.parse(workdirsRaw) as string[]) : null,
     sessionId: (r.session_id as string | null) ?? null,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
@@ -361,5 +462,16 @@ function toPushTokenRow(r: Record<string, unknown>): PushTokenRow {
     label: (r.label as string | null) ?? null,
     createdAt: r.created_at as string,
     lastUsedAt: (r.last_used_at as string | null) ?? null,
+  };
+}
+
+function toAttachmentRow(r: Record<string, unknown>): AttachmentRow {
+  return {
+    id: r.id as string,
+    runId: r.run_id as string,
+    contentType: r.content_type as string,
+    sizeBytes: r.size_bytes as number,
+    path: r.path as string,
+    createdAt: r.created_at as number,
   };
 }

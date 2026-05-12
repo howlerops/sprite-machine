@@ -24,6 +24,11 @@ import {
   useRegisterPushToken,
   useTickIdleScheduler,
 } from '../../src/hooks/usePushTokens';
+import {
+  useApplyGithubIntegration,
+  useGithubIntegration,
+  useSaveGithubIntegration,
+} from '../../src/hooks/useIntegrations';
 
 const THEME_OPTIONS: ThemeOverride[] = ['system', 'light', 'dark'];
 
@@ -45,6 +50,10 @@ export default function SettingsScreen() {
   const [tokenDraft, setTokenDraft] = useState(token ?? '');
   const [showToken, setShowToken] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [ghToken, setGhToken] = useState('');
+  const [ghUsername, setGhUsername] = useState('jbeck018');
+  const [gitName, setGitName] = useState('Jacob Beck');
+  const [gitEmail, setGitEmail] = useState('jacob.beck.018@gmail.com');
 
   useEffect(() => {
     setUrlDraft(baseUrl);
@@ -55,8 +64,18 @@ export default function SettingsScreen() {
   }, [token]);
 
   const { data: pushTokensData, refetch: refetchPushTokens } = usePushTokens();
+  const { data: githubIntegration } = useGithubIntegration();
+  const saveGithubMutation = useSaveGithubIntegration();
+  const applyGithubMutation = useApplyGithubIntegration();
   const registerMutation = useRegisterPushToken();
   const tickMutation = useTickIdleScheduler();
+
+  useEffect(() => {
+    if (!githubIntegration) return;
+    if (githubIntegration.username) setGhUsername(githubIntegration.username);
+    if (githubIntegration.gitUserName) setGitName(githubIntegration.gitUserName);
+    if (githubIntegration.gitUserEmail) setGitEmail(githubIntegration.gitUserEmail);
+  }, [githubIntegration]);
 
   function showToast(opts: {
     title: string;
@@ -114,6 +133,48 @@ export default function SettingsScreen() {
       showToast({
         title: 'Error',
         description: e instanceof Error ? e.message : 'Failed to tick idle scheduler.',
+        action: 'error',
+      });
+    }
+  }
+
+  async function handleSaveGithub() {
+    try {
+      const result = await saveGithubMutation.mutateAsync({
+        ...(ghToken.trim() ? { token: ghToken.trim() } : {}),
+        username: ghUsername.trim(),
+        gitUserName: gitName.trim(),
+        gitUserEmail: gitEmail.trim(),
+      });
+      setGhToken('');
+      const applied = result.apply?.applied.length ?? 0;
+      const errors = result.apply?.errors.length ?? 0;
+      showToast({
+        title: 'GitHub saved',
+        description: `Applied to ${applied} sprite(s)${errors ? `, ${errors} error(s)` : ''}.`,
+        action: errors ? 'info' : 'success',
+      });
+    } catch (e) {
+      showToast({
+        title: 'GitHub error',
+        description: e instanceof Error ? e.message : 'Failed to save GitHub integration.',
+        action: 'error',
+      });
+    }
+  }
+
+  async function handleApplyGithub() {
+    try {
+      const result = await applyGithubMutation.mutateAsync();
+      showToast({
+        title: 'GitHub applied',
+        description: `Applied to ${result.apply?.applied.length ?? 0} sprite(s).`,
+        action: 'success',
+      });
+    } catch (e) {
+      showToast({
+        title: 'GitHub error',
+        description: e instanceof Error ? e.message : 'Failed to apply GitHub integration.',
         action: 'error',
       });
     }
@@ -226,6 +287,116 @@ export default function SettingsScreen() {
             <Divider />
           </>
         ) : null}
+
+        {/* Integrations */}
+        <VStack space="md">
+          <Heading size="md" bold className="text-foreground">
+            Integrations
+          </Heading>
+          <Box className="bg-card border border-border rounded-[10px] p-4">
+            <VStack space="md">
+              <HStack className="items-center" space="sm">
+                <VStack className="flex-1" space="xs">
+                  <Text size="sm" bold className="text-foreground">
+                    GitHub
+                  </Text>
+                  <Text size="xs" className="text-muted-foreground">
+                    {githubIntegration?.connected
+                      ? `Connected as ${githubIntegration.username}`
+                      : 'Paste a GitHub token once; sprites pick it up automatically.'}
+                  </Text>
+                </VStack>
+                <Text
+                  size="2xs"
+                  bold
+                  className={
+                    githubIntegration?.connected
+                      ? 'uppercase text-status-success'
+                      : 'uppercase text-muted-foreground'
+                  }
+                >
+                  {githubIntegration?.connected ? 'Connected' : 'Not connected'}
+                </Text>
+              </HStack>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText>GitHub token</FormControlLabelText>
+                </FormControlLabel>
+                <Input>
+                  <InputField
+                    value={ghToken}
+                    onChangeText={setGhToken}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder={githubIntegration?.connected ? 'Leave blank to keep existing token' : 'ghp_… or github_pat_…'}
+                  />
+                </Input>
+              </FormControl>
+
+              <HStack space="sm" className="flex-wrap">
+                <Box className="flex-1 min-w-[180px]">
+                  <FormControl>
+                    <FormControlLabel>
+                      <FormControlLabelText>GitHub username</FormControlLabelText>
+                    </FormControlLabel>
+                    <Input>
+                      <InputField value={ghUsername} onChangeText={setGhUsername} autoCapitalize="none" />
+                    </Input>
+                  </FormControl>
+                </Box>
+                <Box className="flex-1 min-w-[180px]">
+                  <FormControl>
+                    <FormControlLabel>
+                      <FormControlLabelText>Git name</FormControlLabelText>
+                    </FormControlLabel>
+                    <Input>
+                      <InputField value={gitName} onChangeText={setGitName} />
+                    </Input>
+                  </FormControl>
+                </Box>
+              </HStack>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText>Git email</FormControlLabelText>
+                </FormControlLabel>
+                <Input>
+                  <InputField
+                    value={gitEmail}
+                    onChangeText={setGitEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                </Input>
+              </FormControl>
+
+              <HStack space="sm" className="flex-wrap">
+                <Button
+                  variant="default"
+                  size="sm"
+                  isDisabled={saveGithubMutation.isPending}
+                  onPress={() => void handleSaveGithub()}
+                >
+                  {saveGithubMutation.isPending ? <ButtonSpinner /> : null}
+                  <ButtonText>Save & Apply</ButtonText>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  isDisabled={!githubIntegration?.connected || applyGithubMutation.isPending}
+                  onPress={() => void handleApplyGithub()}
+                >
+                  {applyGithubMutation.isPending ? <ButtonSpinner /> : null}
+                  <ButtonText>Apply to sprites</ButtonText>
+                </Button>
+              </HStack>
+            </VStack>
+          </Box>
+        </VStack>
+
+        <Divider />
 
         {/* Push Notifications */}
         <VStack space="md">

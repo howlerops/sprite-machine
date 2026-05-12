@@ -16,6 +16,7 @@ export interface CreateRunInput {
   prompt: string;
   harness?: Harness;
   workdir?: string;
+  workdirs?: string[];
   model?: string;
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
   allowedTools?: string[];
@@ -53,8 +54,9 @@ export class Orchestrator {
     }
 
     const harness: Harness = input.harness ?? 'claude';
+    const effectiveWorkdir = input.workdirs?.[0] ?? input.workdir;
     const sidecarBody: Record<string, unknown> = { prompt: input.prompt, harness };
-    if (input.workdir !== undefined) sidecarBody.workdir = input.workdir;
+    if (effectiveWorkdir !== undefined) sidecarBody.workdir = effectiveWorkdir;
     if (input.model !== undefined) sidecarBody.model = input.model;
     if (input.permissionMode !== undefined) sidecarBody.permissionMode = input.permissionMode;
     if (input.allowedTools !== undefined) sidecarBody.allowedTools = input.allowedTools;
@@ -80,13 +82,70 @@ export class Orchestrator {
       harness,
       prompt: input.prompt,
       workdir: input.workdir ?? null,
+      workdirs: input.workdirs ?? null,
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     });
+  }
+
+  async refreshRunFromSidecar(runId: string): Promise<RunRow> {
+    const { run, sprite } = await this.requireRunAndLiveSprite(runId);
+    if (!sprite.agentBaseUrl) return run;
+
+    const res = await this.callSidecar(
+      sprite.agentBaseUrl,
+      sprite.agentToken,
+      'GET',
+      `/runs/${run.sidecarRunId}`,
+      null,
+    );
+    if (!res.ok) return run;
+
+    const sidecarRun = (await res.json()) as {
+      status?: RunStatus;
+      sessionId?: string;
+      totalCostUsd?: number;
+      totalInputTokens?: number;
+      totalOutputTokens?: number;
+    };
+    const patch: Parameters<Storage['updateRun']>[1] = {};
+    if (sidecarRun.status && sidecarRun.status !== run.status) patch.status = sidecarRun.status;
+    if (sidecarRun.sessionId !== undefined && sidecarRun.sessionId !== run.sessionId) {
+      patch.sessionId = sidecarRun.sessionId;
+    }
+    if (
+      typeof sidecarRun.totalCostUsd === 'number' &&
+      sidecarRun.totalCostUsd !== run.totalCostUsd
+    ) {
+      patch.totalCostUsd = sidecarRun.totalCostUsd;
+    }
+    if (
+      typeof sidecarRun.totalInputTokens === 'number' &&
+      sidecarRun.totalInputTokens !== run.totalInputTokens
+    ) {
+      patch.totalInputTokens = sidecarRun.totalInputTokens;
+    }
+    if (
+      typeof sidecarRun.totalOutputTokens === 'number' &&
+      sidecarRun.totalOutputTokens !== run.totalOutputTokens
+    ) {
+      patch.totalOutputTokens = sidecarRun.totalOutputTokens;
+    }
+    if (Object.keys(patch).length === 0) return run;
+    return await this.opts.storage.updateRun(run.id, patch);
   }
 
   async sendMessage(runId: string, text: string): Promise<void> {
     const { run, sprite } = await this.requireRunAndLiveSprite(runId);
     if (!sprite.agentBaseUrl) throw new Error('sprite has no agentBaseUrl after resume');
+
+    // Persist + publish the user's message immediately from the control plane so
+    // the chat timeline updates before the sidecar/agent turn starts. The
+    // sidecar also emits a user_message; ingestWebhookEvent de-dupes that copy.
+    const userEvent: RunEvent = { type: 'user_message', text, at: nowIso() };
+    const { seq } = await this.opts.storage.appendRunEvent(run.id, userEvent);
+    await this.opts.storage.updateRun(run.id, { lastEventAt: nowIso() });
+    this.opts.sseBus.publish({ runId: run.id, seq, event: userEvent });
+
     const res = await this.callSidecar(
       sprite.agentBaseUrl,
       sprite.agentToken,
@@ -149,13 +208,64 @@ export class Orchestrator {
     const sprite = await this.opts.storage.getSprite(spriteId);
     if (!sprite) throw new Error(`sprite not found: ${spriteId}`);
     if (sprite.status === 'destroyed') throw new Error(`sprite ${spriteId} is destroyed`);
-    if (sprite.status === 'running' && sprite.agentBaseUrl) return sprite;
+    // Always ask the backend to wake/refresh. A sprite can be marked running in
+    // our DB while its shell/sidecar endpoint is stale or no longer reachable.
+    // The Fly/Sprites backend treats resume as observational/idempotent for
+    // already-running sprites, and it gives us a fresh URL/status snapshot.
     const resumed = await this.opts.sprites.resume(spriteId);
     return await this.opts.storage.updateSprite(spriteId, {
       status: 'running',
       agentBaseUrl: resumed.agentBaseUrl,
       lastActiveAt: nowIso(),
     });
+  }
+
+  async destroySprite(spriteId: string): Promise<void> {
+    const sprite = await this.opts.storage.getSprite(spriteId);
+    if (!sprite) throw new Error(`sprite not found: ${spriteId}`);
+    if (sprite.status === 'destroyed') return; // idempotent
+    await this.opts.sprites.destroy(spriteId);
+    await this.opts.storage.updateSprite(spriteId, { status: 'destroyed' });
+  }
+
+  async applyGitHubIntegration(input: {
+    token: string;
+    username: string;
+    gitUserName: string;
+    gitUserEmail: string;
+  }): Promise<{ applied: string[]; errors: Array<{ spriteId: string; message: string }> }> {
+    const sprites = await this.opts.storage.listActiveSprites();
+    const result = { applied: [] as string[], errors: [] as Array<{ spriteId: string; message: string }> };
+    for (const sprite of sprites) {
+      if (sprite.status === 'destroyed') continue;
+      try {
+        await this.configureGitHubOnSprite(sprite.id, input);
+        result.applied.push(sprite.id);
+      } catch (err) {
+        result.errors.push({ spriteId: sprite.id, message: (err as Error).message });
+      }
+    }
+    return result;
+  }
+
+  async configureGitHubOnSprite(
+    spriteId: string,
+    input: { token: string; username: string; gitUserName: string; gitUserEmail: string },
+  ): Promise<void> {
+    await this.resumeSprite(spriteId);
+    const hosts = `github.com:\n    oauth_token: ${input.token}\n    git_protocol: https\n    users:\n        ${input.username}:\n            oauth_token: ${input.token}\n    user: ${input.username}\n`;
+    await this.opts.sprites.exec(spriteId, ['bash', '-lc', 'mkdir -p ~/.config/gh && chmod 700 ~/.config/gh'], { timeoutMs: 60_000 });
+    await this.opts.sprites.writeFile(spriteId, '/home/sprite/.config/gh/hosts.yml', hosts);
+    const res = await this.opts.sprites.exec(
+      spriteId,
+      [
+        'bash',
+        '-lc',
+        `chmod 600 ~/.config/gh/hosts.yml && git config --global user.name ${JSON.stringify(input.gitUserName)} && git config --global user.email ${JSON.stringify(input.gitUserEmail)} && gh auth setup-git`,
+      ],
+      { timeoutMs: 60_000 },
+    );
+    if (res.exitCode !== 0) throw new Error(res.stderr || res.stdout || 'gh auth setup-git failed');
   }
 
   async ingestWebhookEvent(spriteId: string, sidecarRunId: string, event: RunEvent): Promise<void> {
@@ -169,6 +279,14 @@ export class Orchestrator {
       console.warn(`[orchestrator] webhook for unknown run ${spriteId}/${sidecarRunId}`);
       return;
     }
+    if (event.type === 'user_message') {
+      const existing = await this.opts.storage.listRunEvents(run.id);
+      const alreadyIngested = existing.some(
+        (row) => row.event.type === 'user_message' && row.event.text === event.text,
+      );
+      if (alreadyIngested) return;
+    }
+
     const { seq } = await this.opts.storage.appendRunEvent(run.id, event);
     const patch: Parameters<Storage['updateRun']>[1] = { lastEventAt: nowIso() };
     if (event.type === 'status') patch.status = event.status;

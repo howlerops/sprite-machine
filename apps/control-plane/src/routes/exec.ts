@@ -218,8 +218,20 @@ function pipe(
   });
 
   upstream.on('error', (err) => {
-    console.error('[exec-proxy] upstream error:', err.message);
-    if (client.readyState === WsWebSocket.OPEN) client.close(4003, 'upstream_error');
+    // Log the URL (without query/token) so we can correlate failures.
+    const sanitizedUrl = upstreamUrl.split('?')[0];
+    console.error(
+      `[exec-proxy] upstream error: ${err.message} url=${sanitizedUrl} upstreamState=${upstream.readyState}`,
+    );
+    if (client.readyState === WsWebSocket.OPEN) {
+      // Pass a slightly more specific close reason so the Shell UI can hint.
+      const reason = err.message.includes('400')
+        ? 'sprite_unavailable'
+        : err.message.includes('401') || err.message.includes('403')
+          ? 'sprite_unauthorized'
+          : 'upstream_error';
+      client.close(4003, reason);
+    }
   });
 
   client.on('message', (data, isBinary) => {

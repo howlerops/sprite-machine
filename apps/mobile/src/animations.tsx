@@ -1,5 +1,5 @@
 /**
- * Reusable animation primitives for sprite-machine.
+ * Reusable animation primitives for HowlerForge.
  * See `.omc/research/animation-spec.md` for the canonical spec.
  *
  * All animations gate on `useReduceMotion()`; when reduce-motion is on the
@@ -109,10 +109,15 @@ export function StaggerEnter({ delay = 0, children }: { delay?: number; children
     );
   }, [delay, reduceMotion, opacity, translateY]);
 
-  const style = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ translateY: translateY.value }],
-  }));
+  // Web: opacity-only to avoid RN-Web's "indexed property setter" bug with
+  // Reanimated transform arrays. Native keeps the 8→0 px rise.
+  const style = useAnimatedStyle(() => {
+    if (Platform.OS === 'web') return { opacity: opacity.value };
+    return {
+      opacity: opacity.value,
+      transform: [{ translateY: translateY.value }],
+    };
+  });
 
   return <Animated.View style={style}>{children}</Animated.View>;
 }
@@ -186,11 +191,18 @@ export function TabCrossfade({
     translateY.value = withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) });
   }, [contentKey, reduceMotion, opacity, translateY]);
 
-  const style = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ translateY: translateY.value }],
-    flex: 1,
-  }));
+  // RN-Web has a bug where Reanimated `transform: [{translateY}]` inside an
+  // animated style causes "Failed to set indexed property [0] on
+  // CSSStyleDeclaration" during commit. Use opacity-only on web; native still
+  // gets the slight rise via the platform-aware ternary below.
+  const style = useAnimatedStyle(() => {
+    if (Platform.OS === 'web') return { opacity: opacity.value, flex: 1 };
+    return {
+      opacity: opacity.value,
+      transform: [{ translateY: translateY.value }],
+      flex: 1,
+    };
+  });
 
   return <Animated.View style={style}>{children}</Animated.View>;
 }

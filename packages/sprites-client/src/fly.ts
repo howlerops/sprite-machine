@@ -111,13 +111,11 @@ export class FlySpritesClient implements SpritesClient {
   async resume(id: string): Promise<SpriteHandle> {
     let raw = await this.tryGetRaw(id);
     if (!raw) throw new Error(`unknown sprite: ${id}`);
-    if (raw.status === 'cold') {
-      // Wake by hitting the public URL. A simple HTTP GET to /healthz is
-      // enough to pull the sprite into 'warm' / 'running'. We use exec since
-      // it's already in our path and reliably forces wakeup.
-      await this.exec(id, ['true'], { timeoutMs: 60_000 });
-      raw = (await this.tryGetRaw(id)) ?? raw;
-    }
+    // Force a tiny exec even when the API says warm/running. That validates the
+    // shell path and wakes stale/cold workers whose status snapshot lags behind
+    // reality. It is effectively a no-op inside the sprite.
+    await this.exec(id, ['true'], { timeoutMs: 60_000 });
+    raw = (await this.tryGetRaw(id)) ?? raw;
     return this.toHandle(raw);
   }
 

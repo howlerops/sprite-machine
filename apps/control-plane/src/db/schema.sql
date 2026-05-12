@@ -47,6 +47,12 @@ create table if not exists push_tokens (
   last_used_at text
 );
 
+create table if not exists integrations (
+  key text primary key,
+  value text not null,
+  updated_at text not null
+);
+
 create index if not exists idx_runs_sprite on runs(sprite_id);
 create index if not exists idx_runs_status on runs(status);
 create index if not exists idx_runs_updated on runs(updated_at);

@@ -3,21 +3,18 @@ import { Platform, useColorScheme, useWindowDimensions } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
+import { Feather } from '@expo/vector-icons';
+import { useFonts } from 'expo-font';
 
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { Box } from '@/components/ui/box';
-import { Text } from '@/components/ui/text';
 import { Pressable } from '@/components/ui/pressable';
-import { ScrollView } from '@/components/ui/scroll-view';
-import { VStack } from '@/components/ui/vstack';
-import { HStack } from '@/components/ui/hstack';
-import { Heading } from '@/components/ui/heading';
-import { Button, ButtonText } from '@/components/ui/button';
 import '@/global.css';
 
 import { AppConfigContext, useAppConfig } from '../src/config-store';
-import { StaggerEnter, usePulse } from '../src/animations';
-import Animated from 'react-native-reanimated';
+import { Sidebar } from '../components/sidebar';
+import { WolfMark } from '../components/wolf-mark';
+import { DrawerProvider, useDrawer } from '../src/drawer-context';
 import {
   getToken,
   getBaseUrl,
@@ -28,13 +25,11 @@ import {
   type ThemeOverride,
 } from '../src/storage';
 import { usePushRegistration } from '../src/push';
-import { useRuns } from '../src/hooks/useRuns';
-import { relativeTime, truncate, statusColor } from '../src/utils';
-import type { RunRow } from '../src/api';
 
 const LG_BREAKPOINT = 1024;
 
-const THEME_OVERRIDE_KEY = 'sprite_machine_theme_override';
+const THEME_OVERRIDE_KEY = 'howlerforge_theme_override';
+const LEGACY_THEME_OVERRIDE_KEY = 'sprite_machine_theme_override';
 
 /**
  * Synchronously read the persisted theme override on web so the very first
@@ -46,7 +41,9 @@ function readThemeOverrideSync(): ThemeOverride | null {
   if (Platform.OS !== 'web') return null;
   if (typeof window === 'undefined' || !window.localStorage) return null;
   try {
-    const v = window.localStorage.getItem(THEME_OVERRIDE_KEY);
+    const v =
+      window.localStorage.getItem(THEME_OVERRIDE_KEY) ??
+      window.localStorage.getItem(LEGACY_THEME_OVERRIDE_KEY);
     if (v === 'system' || v === 'light' || v === 'dark') return v;
   } catch {
     // localStorage may be unavailable (SSR, privacy mode); fall back to async.
@@ -81,8 +78,9 @@ function RouteGuard({ children }: { children: React.ReactNode }) {
   const { token, email } = useAppConfig();
 
   useEffect(() => {
-    const inSettings = segments.includes('settings');
-    const inLogin = segments.includes('login');
+    const segs = segments as readonly string[];
+    const inSettings = segs.includes('settings');
+    const inLogin = segs.includes('login');
 
     if (Platform.OS === 'web') {
       // Web: guard on email (cookie session). If no email, redirect to /login
@@ -101,124 +99,26 @@ function RouteGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function RailRunItem({
-  run,
-  isActive,
-  onPress,
-  index,
-}: {
-  run: RunRow;
-  isActive: boolean;
-  onPress: () => void;
-  index: number;
-}) {
-  const color = statusColor(run.status);
-  const pulseStyle = usePulse(run.status === 'running');
+/**
+ * Hamburger button used in Stack / Tabs headerLeft. Reads drawer state from
+ * DrawerContext so both layout levels share the same toggle.
+ */
+function HamburgerButton() {
+  const { width } = useWindowDimensions();
+  const { setOpen } = useDrawer();
+  const colorScheme = useColorScheme();
+  const iconColor = colorScheme === 'dark' ? '#fafafa' : '#171717';
+  if (width >= LG_BREAKPOINT) return null;
   return (
-    <StaggerEnter delay={Math.min(index, 8) * 35}>
+    <Box className="flex-row items-center gap-3 pl-1">
       <Pressable
-        onPress={onPress}
-        className={
-          isActive
-            ? 'p-3 border-b border-border bg-accent'
-            : 'p-3 border-b border-border data-[hover=true]:bg-accent data-[active=true]:bg-accent/80'
-        }
+        onPress={() => setOpen(true)}
+        accessibilityLabel="Open navigation"
+        style={{ paddingHorizontal: 8, paddingVertical: 4 }}
       >
-        <VStack space="xs">
-          <HStack space="sm" className="items-center">
-            <Animated.View
-              style={pulseStyle}
-              className={`px-2 py-0.5 rounded-full ${color.bgClass}`}
-            >
-              <Text size="2xs" bold className={`uppercase ${color.textClass}`}>
-                {color.label}
-              </Text>
-            </Animated.View>
-            <Text size="2xs" className="text-muted-foreground ml-auto">
-              {relativeTime(run.updatedAt)}
-            </Text>
-          </HStack>
-          <Text size="xs" className="text-foreground" numberOfLines={2}>
-            {run.title ?? truncate(run.prompt, 80)}
-          </Text>
-        </VStack>
+        <Feather name="menu" size={24} color={iconColor} />
       </Pressable>
-    </StaggerEnter>
-  );
-}
-
-function DesktopRail() {
-  const router = useRouter();
-  const segments = useSegments();
-  const { data } = useRuns();
-  const runs: RunRow[] = data?.runs ?? [];
-
-  const inSettings = segments.includes('settings');
-  const runIdx = segments.indexOf('run');
-  const activeRunId = runIdx >= 0 && runIdx + 1 < segments.length ? segments[runIdx + 1] : null;
-  const inRuns = !inSettings && !activeRunId;
-
-  return (
-    <Box className="w-72 lg:w-72 xl:w-80 bg-card border-r border-border">
-      <VStack className="h-full">
-        <Box className="px-4 py-4 border-b border-border">
-          <Heading size="md" bold className="text-foreground">
-            sprite-machine
-          </Heading>
-        </Box>
-
-        <Box className="px-3 py-3 border-b border-border">
-          <Button
-            variant="default"
-            size="sm"
-            onPress={() => router.push('/new')}
-            className="w-full"
-          >
-            <ButtonText>+ New run</ButtonText>
-          </Button>
-        </Box>
-
-        <Box className="flex-1">
-          <ScrollView className="flex-1">
-            {runs.length === 0 ? (
-              <Box className="p-4">
-                <Text size="xs" className="text-muted-foreground">
-                  No runs yet.
-                </Text>
-              </Box>
-            ) : (
-              runs.map((run, idx) => (
-                <RailRunItem
-                  key={run.id}
-                  run={run}
-                  index={idx}
-                  isActive={activeRunId === run.id}
-                  onPress={() => router.push(`/run/${run.id}`)}
-                />
-              ))
-            )}
-          </ScrollView>
-        </Box>
-
-        <Box className="border-t border-border">
-          <Pressable
-            onPress={() => router.push('/(tabs)')}
-            className={inRuns ? 'px-4 py-3 bg-accent' : 'px-4 py-3 data-[hover=true]:bg-accent'}
-          >
-            <Text size="sm" className="text-foreground">
-              Runs
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/(tabs)/settings')}
-            className={inSettings ? 'px-4 py-3 bg-accent' : 'px-4 py-3 data-[hover=true]:bg-accent'}
-          >
-            <Text size="sm" className="text-foreground">
-              Settings
-            </Text>
-          </Pressable>
-        </Box>
-      </VStack>
+      <WolfMark size={24} />
     </Box>
   );
 }
@@ -227,14 +127,26 @@ function ResponsiveShell({ children }: { children: React.ReactNode }) {
   const { width } = useWindowDimensions();
   const segments = useSegments();
   const isDesktop = width >= LG_BREAKPOINT;
-  const onLogin = segments.includes('login');
+  const onLogin = (segments as readonly string[]).includes('login');
+  const { open: drawerOpen, setOpen: setDrawerOpen } = useDrawer();
 
-  if (!isDesktop || onLogin) return <>{children}</>;
+  if (onLogin) return <>{children}</>;
 
+  if (isDesktop) {
+    return (
+      <Box className="flex-1 flex-row bg-background">
+        <Sidebar mode="desktop" />
+        <Box className="flex-1 bg-background">{children}</Box>
+      </Box>
+    );
+  }
+
+  // Mobile: render screen content, then overlay the sidebar drawer so it
+  // can slide over everything including the Stack header.
   return (
-    <Box className="flex-1 flex-row bg-background">
-      <DesktopRail />
-      <Box className="flex-1 bg-background">{children}</Box>
+    <Box className="flex-1 bg-background">
+      {children}
+      <Sidebar mode="mobile-drawer" open={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </Box>
   );
 }
@@ -243,6 +155,11 @@ export default function RootLayout() {
   const systemScheme = useColorScheme();
   const [initialThemeOverride] = useState<ThemeOverride | null>(() => readThemeOverrideSync());
   const [hydrated, setHydrated] = useState<Hydrated | null>(null);
+
+  // Bug 1: load the Feather icon font on web so icons render as glyphs instead
+  // of squares. expo-font is a transitive dep; importing here makes TS happy
+  // and ensures the font is requested before any icon renders.
+  const [fontsLoaded] = useFonts(Feather.font);
 
   useEffect(() => {
     void (async () => {
@@ -290,7 +207,8 @@ export default function RootLayout() {
     [hydrated, setToken, setBaseUrl, setEmail, setThemeOverride],
   );
 
-  if (!hydrated) {
+  // Hold the splash until both storage hydration and font loading are done.
+  if (!hydrated || !fontsLoaded) {
     return <GluestackUIProvider mode={resolved} />;
   }
 
@@ -301,17 +219,56 @@ export default function RootLayout() {
           {hydrated.token ? <PushSetup /> : null}
           <RouteGuard>
             <StatusBar style="auto" />
-            <ResponsiveShell>
-              <Stack>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="run/[id]" options={{ title: 'Run', headerBackTitle: 'Runs' }} />
-                <Stack.Screen
-                  name="new"
-                  options={{ title: 'New Run', presentation: 'modal', headerBackTitle: 'Cancel' }}
-                />
-                <Stack.Screen name="login" options={{ headerShown: false }} />
-              </Stack>
-            </ResponsiveShell>
+            <DrawerProvider>
+              <ResponsiveShell>
+                <Stack
+                  screenOptions={{
+                    animation: 'slide_from_right',
+                    animationDuration: 240,
+                    contentStyle: { backgroundColor: 'transparent' },
+                    // Desktop: sidebar rail is always visible; no hamburger needed.
+                    // Mobile: hamburger lives in the Stack/Tabs header via DrawerProvider.
+                    headerShown: false,
+                  }}
+                >
+                  {/* (tabs) has its own Tabs header with a hamburger injected
+                      by (tabs)/_layout.tsx — keep headerShown:false here. */}
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+
+                  {/* run/[id]: show the Stack header with a hamburger on mobile.
+                      The custom in-screen info bar still renders below it. */}
+                  <Stack.Screen
+                    name="run/[id]"
+                    options={{
+                      headerShown: true,
+                      headerLeft: () => <HamburgerButton />,
+                      headerRight: () => null,
+                      title: 'Chat',
+                    }}
+                  />
+
+                  <Stack.Screen
+                    name="new"
+                    options={{
+                      headerShown: true,
+                      title: 'New Chat',
+                      presentation: 'modal',
+                      headerBackTitle: 'Cancel',
+                    }}
+                  />
+                  <Stack.Screen
+                    name="sprites"
+                    options={{
+                      headerShown: true,
+                      headerLeft: () => <HamburgerButton />,
+                      headerRight: () => null,
+                      title: 'Sprites',
+                    }}
+                  />
+                  <Stack.Screen name="login" options={{ headerShown: false }} />
+                </Stack>
+              </ResponsiveShell>
+            </DrawerProvider>
           </RouteGuard>
         </AppConfigContext.Provider>
       </QueryClientProvider>

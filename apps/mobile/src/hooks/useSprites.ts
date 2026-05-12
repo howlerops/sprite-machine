@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSprites, getSprite, suspendSprite, resumeSprite } from '../api';
+import { getSprites, getSprite, suspendSprite, resumeSprite, deleteSprite } from '../api';
 import { useAppConfig } from '../config-store';
 
 export function useSprites() {
@@ -39,6 +39,18 @@ export function useResumeSprite(id: string) {
     mutationFn: () => resumeSprite(baseUrl, token, id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['sprite', id] });
+      void queryClient.invalidateQueries({ queryKey: ['sprites'] });
+    },
+  });
+}
+
+export function useDeleteSprite(id: string) {
+  const { baseUrl, token } = useAppConfig();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => deleteSprite(baseUrl, token, id),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['sprite', id] });
       void queryClient.invalidateQueries({ queryKey: ['sprites'] });
     },
   });

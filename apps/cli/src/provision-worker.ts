@@ -234,11 +234,22 @@ async function main(): Promise<void> {
     console.log('  · --skip-bun set, skipping bun + codex + pi installs');
   }
 
-  // Sync settings + auth for each harness
-  for (const harness of ['claude', 'codex', 'pi'] as const) {
-    const subdir = harness === 'claude' ? 'claude-settings' : `${harness}-settings`;
+  // Sync settings + auth for each harness/tool.
+  for (const harness of ['claude', 'codex', 'pi', 'github'] as const) {
+    const subdir =
+      harness === 'claude'
+        ? 'claude-settings'
+        : harness === 'github'
+          ? 'git-settings'
+          : `${harness}-settings`;
     const remoteDir =
-      harness === 'claude' ? '~/.claude' : harness === 'codex' ? '~/.codex' : '~/.pi/agent';
+      harness === 'claude'
+        ? '~/.claude'
+        : harness === 'codex'
+          ? '~/.codex'
+          : harness === 'pi'
+            ? '~/.pi/agent'
+            : '~';
     const settingsDir = path.join(root, 'manifest', subdir);
     if (existsSync(settingsDir)) {
       await step(`sync ${harness} settings → ${remoteDir}`, () =>
@@ -247,9 +258,20 @@ async function main(): Promise<void> {
     }
     const secretsDir = path.join(root, '.sprite-machine-data', 'secrets', harness);
     if (existsSync(secretsDir)) {
-      await step(`sync ${harness} auth → ${remoteDir}`, () =>
-        sprites.uploadDir(sprite.id, secretsDir, remoteDir),
+      const authRemoteDir = harness === 'github' ? '~/.config/gh' : remoteDir;
+      await step(`sync ${harness} auth → ${authRemoteDir}`, () =>
+        sprites.uploadDir(sprite.id, secretsDir, authRemoteDir),
       );
+      if (harness === 'github') {
+        await step('configure gh git credentials', async () => {
+          const r = await sprites.exec(sprite.id, [
+            'bash',
+            '-lc',
+            'chmod 700 ~/.config/gh && chmod 600 ~/.config/gh/hosts.yml && gh auth setup-git',
+          ]);
+          if (r.exitCode !== 0) throw new Error(r.stderr || r.stdout || 'gh auth setup-git failed');
+        });
+      }
     }
   }
 
@@ -317,6 +339,7 @@ async function main(): Promise<void> {
     `HOST=0.0.0.0`,
     `SPRITE_AGENT_MODE=auto`,
     `SPRITE_AGENT_DATA_DIR=/var/sprite-agent-data`,
+    `SUBPROCESS_HARNESS_TIMEOUT_MS=${process.env.SUBPROCESS_HARNESS_TIMEOUT_MS ?? '600000'}`,
     args.webhookUrl ? `CONTROL_PLANE_WEBHOOK_URL=${args.webhookUrl}` : '',
     args.webhookToken ? `CONTROL_PLANE_WEBHOOK_TOKEN=${args.webhookToken}` : '',
     args.anthropicKey ? `ANTHROPIC_API_KEY=${args.anthropicKey}` : '',

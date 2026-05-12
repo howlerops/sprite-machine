@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
@@ -41,6 +42,7 @@ function errorMessage(e: LoginError): string {
 
 export default function LoginScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { baseUrl, setEmail: setEmailCtx } = useAppConfig();
   const [flyToken, setFlyToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -56,6 +58,10 @@ export default function LoginScreen() {
       const result = await login(baseUrl, trimmed);
       await setEmail(result.email);
       setEmailCtx(result.email);
+      // Force runs/sprites to refetch with the new cookie session — without
+      // this they stay disabled in cache and the dashboard shows nothing
+      // until a manual refresh.
+      await queryClient.invalidateQueries();
       router.replace('/');
     } catch (err: unknown) {
       const status = (err as { status?: number })?.status;
@@ -88,7 +94,7 @@ export default function LoginScreen() {
         <StaggerEnter delay={60}>
           <HStack space="sm" className="items-center">
             <Heading size="lg" bold className="text-foreground">
-              sprite-machine
+              HowlerForge
             </Heading>
             <Box className="w-2 h-2 rounded-full bg-status-running" />
           </HStack>

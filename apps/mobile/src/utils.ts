@@ -27,6 +27,7 @@ export function truncate(text: string, maxLen: number): string {
 export type StatusColor = {
   bgClass: string;
   textClass: string;
+  dotClass: string;
   label: string;
 };
 
@@ -37,32 +38,36 @@ export function statusColor(status: string): StatusColor {
       return {
         bgClass: 'bg-status-running-muted',
         textClass: 'text-status-running-foreground',
+        dotClass: 'bg-status-running',
         label: status,
       };
     case 'awaiting_input':
       return {
         bgClass: 'bg-status-warning-muted',
         textClass: 'text-status-warning-foreground',
+        dotClass: 'bg-status-warning',
         label: 'waiting',
       };
     case 'completed':
       return {
         bgClass: 'bg-status-success-muted',
         textClass: 'text-status-success-foreground',
+        dotClass: 'bg-status-success',
         label: 'done',
       };
     case 'failed':
       return {
         bgClass: 'bg-destructive/10',
         textClass: 'text-destructive',
+        dotClass: 'bg-destructive',
         label: 'failed',
       };
     case 'cancelled':
-      return { bgClass: 'bg-muted', textClass: 'text-muted-foreground', label: 'cancelled' };
+      return { bgClass: 'bg-muted', textClass: 'text-muted-foreground', dotClass: 'bg-muted-foreground', label: 'cancelled' };
     case 'queued':
     case 'idle':
     default:
-      return { bgClass: 'bg-muted', textClass: 'text-foreground', label: status };
+      return { bgClass: 'bg-muted', textClass: 'text-muted-foreground', dotClass: 'bg-muted-foreground', label: status };
   }
 }
 

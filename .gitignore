@@ -38,6 +38,13 @@ android/
 .omx/
 .claude/
 
+# Expo / EAS generated outputs
+apps/mobile/dist-web/
+apps/mobile/dist-ios/
+apps/mobile/playwright-report/
+apps/mobile/test-results/
+apps/mobile/expo-env.d.ts
+
 # Playwright/visual-sweep screenshots dumped at repo root
 /*.png
 

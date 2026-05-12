@@ -1,10 +1,15 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
-const TOKEN_KEY = 'sprite_machine_token';
-const BASE_URL_KEY = 'sprite_machine_base_url';
-const THEME_OVERRIDE_KEY = 'sprite_machine_theme_override';
-const EMAIL_KEY = 'sprite_machine_email';
+const TOKEN_KEY = 'howlerforge_token';
+const BASE_URL_KEY = 'howlerforge_base_url';
+const THEME_OVERRIDE_KEY = 'howlerforge_theme_override';
+const EMAIL_KEY = 'howlerforge_email';
+
+const LEGACY_TOKEN_KEY = 'sprite_machine_token';
+const LEGACY_BASE_URL_KEY = 'sprite_machine_base_url';
+const LEGACY_THEME_OVERRIDE_KEY = 'sprite_machine_theme_override';
+const LEGACY_EMAIL_KEY = 'sprite_machine_email';
 
 export type ThemeOverride = 'system' | 'light' | 'dark';
 
@@ -51,8 +56,16 @@ const nativeKV: KV = {
 
 const kv: KV = Platform.OS === 'web' ? webKV : nativeKV;
 
+async function getWithLegacy(key: string, legacyKey: string): Promise<string | null> {
+  const current = await kv.get(key);
+  if (current !== null) return current;
+  const legacy = await kv.get(legacyKey);
+  if (legacy !== null) await kv.set(key, legacy);
+  return legacy;
+}
+
 export async function getToken(): Promise<string | null> {
-  return kv.get(TOKEN_KEY);
+  return getWithLegacy(TOKEN_KEY, LEGACY_TOKEN_KEY);
 }
 
 export async function setToken(token: string): Promise<void> {
@@ -60,7 +73,7 @@ export async function setToken(token: string): Promise<void> {
 }
 
 export async function getBaseUrl(): Promise<string> {
-  const url = await kv.get(BASE_URL_KEY);
+  const url = await getWithLegacy(BASE_URL_KEY, LEGACY_BASE_URL_KEY);
   return url ?? DEFAULT_BASE_URL;
 }
 
@@ -69,7 +82,7 @@ export async function setBaseUrl(url: string): Promise<void> {
 }
 
 export async function getThemeOverride(): Promise<ThemeOverride> {
-  const v = await kv.get(THEME_OVERRIDE_KEY);
+  const v = await getWithLegacy(THEME_OVERRIDE_KEY, LEGACY_THEME_OVERRIDE_KEY);
   return isThemeOverride(v) ? v : 'system';
 }
 
@@ -78,7 +91,7 @@ export async function setThemeOverride(value: ThemeOverride): Promise<void> {
 }
 
 export async function getEmail(): Promise<string | null> {
-  return kv.get(EMAIL_KEY);
+  return getWithLegacy(EMAIL_KEY, LEGACY_EMAIL_KEY);
 }
 
 export async function setEmail(email: string): Promise<void> {
@@ -87,6 +100,7 @@ export async function setEmail(email: string): Promise<void> {
 
 export async function clearEmail(): Promise<void> {
   await kv.del(EMAIL_KEY);
+  await kv.del(LEGACY_EMAIL_KEY);
 }
 
 export async function clearAll(): Promise<void> {
@@ -94,4 +108,8 @@ export async function clearAll(): Promise<void> {
   await kv.del(BASE_URL_KEY);
   await kv.del(THEME_OVERRIDE_KEY);
   await kv.del(EMAIL_KEY);
+  await kv.del(LEGACY_TOKEN_KEY);
+  await kv.del(LEGACY_BASE_URL_KEY);
+  await kv.del(LEGACY_THEME_OVERRIDE_KEY);
+  await kv.del(LEGACY_EMAIL_KEY);
 }

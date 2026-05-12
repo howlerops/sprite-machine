@@ -15,15 +15,18 @@ import { PushDispatcher } from './push.js';
 import { SseBus } from './sse-bus.js';
 import { buildAuthRoutes } from './routes/auth.js';
 import { buildRunsRoutes } from './routes/runs.js';
+import { buildAttachmentsRoutes } from './routes/attachments.js';
 import { buildWebhooksRoutes } from './routes/webhooks.js';
 import { buildPushRoutes } from './routes/push.js';
 import { buildSpritesRoutes } from './routes/sprites.js';
+import { buildFsRoutes } from './routes/fs.js';
+import { buildIntegrationsRoutes } from './routes/integrations.js';
 import { attachExecProxy } from './routes/exec.js';
 import { IdleScheduler } from './idle-scheduler.js';
 
 // Asset extension allowlist for the /app/* gate. Anything else without a
 // session must redirect to /app/login (prevents arbitrary-suffix bypass).
-const ASSET_EXT_RE = /\.(js|css|map|woff2?|png|jpg|jpeg|svg|ico|webp|json|html|txt)$/i;
+const ASSET_EXT_RE = /\.(js|css|map|woff2?|ttf|otf|png|jpg|jpeg|svg|ico|webp|json|html|txt)$/i;
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -200,6 +203,8 @@ async function main(): Promise<void> {
       }),
     );
     app.get('/app', (c) => c.redirect('/app/'));
+    // Root → dashboard. Without this, hitting the bare hostname 404s.
+    app.get('/', (c) => c.redirect('/app/'));
     // Expo emits absolute asset URLs (`/_expo/...`, `/assets/...`, `/favicon.ico`).
     // Serve those at the root, public, so the dashboard JS bundle can load.
     app.use('/_expo/*', serveStatic({ root: webDir }));
@@ -223,8 +228,14 @@ async function main(): Promise<void> {
     }),
   );
   userApp.route('/', buildRunsRoutes({ orchestrator, storage, sseBus }));
+  userApp.route('/', buildAttachmentsRoutes({ storage, dataDir: cfg.dataDir }));
   userApp.route('/', buildPushRoutes({ storage }));
   userApp.route('/', buildSpritesRoutes({ orchestrator, storage, idleScheduler }));
+  userApp.route(
+    '/',
+    buildIntegrationsRoutes({ orchestrator, storage, sessionSecret: cfg.sessionSecret }),
+  );
+  userApp.route('/', buildFsRoutes({ fsRoot: process.env.FS_ROOT ?? cfg.workspaceRoot }));
   app.route('/', userApp);
 
   // WS exec proxy — attaches to the underlying http.Server's `upgrade` event

@@ -55,6 +55,12 @@ export class PiCliAgent extends JsonlSubprocessAgent {
     if (msg.type === 'session' && msg.id) {
       return [{ type: 'session_started', sessionId: msg.id, model: 'pi', at }];
     }
+    if (msg.type === 'message_update' && msg.assistantMessageEvent?.type === 'text_delta') {
+      const delta = msg.assistantMessageEvent.delta;
+      return typeof delta === 'string' && delta.length > 0
+        ? [{ type: 'assistant_delta', text: delta, at }]
+        : [];
+    }
     if (msg.type === 'message_end' && msg.message?.role === 'assistant') {
       const events: RunEvent[] = [];
       const content = msg.message.content ?? [];

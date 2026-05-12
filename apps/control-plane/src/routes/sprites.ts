@@ -42,6 +42,15 @@ export function buildSpritesRoutes(deps: SpritesRoutesDeps): Hono {
     }
   });
 
+  app.delete('/sprites/:id', async (c) => {
+    try {
+      await orchestrator.destroySprite(c.req.param('id'));
+      return c.json({ deleted: true });
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 409);
+    }
+  });
+
   app.post('/admin/idle/tick', async (c) => {
     const result = await idleScheduler.tick();
     return c.json(result);

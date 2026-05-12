@@ -1,0 +1,32 @@
+# Dependencies / caches
+node_modules/
+.expo/
+.expo-shared/
+*.log
+.DS_Store
+
+# Local generated outputs; EAS builds from source
+dist-web/
+dist-ios/
+web-build/
+playwright-report/
+test-results/
+coverage/
+expo-env.d.ts
+
+# Native generated folders are produced by EAS prebuild
+ios/
+android/
+
+# Secrets / local runtime data
+.env
+.env.*
+.sprite-machine-data/
+google-services.json
+GoogleService-Info.plist
+*.p8
+*.p12
+*.mobileprovision
+
+# Repo-only automation / tests not needed in native build
+e2e/

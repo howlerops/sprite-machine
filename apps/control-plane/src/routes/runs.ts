@@ -28,6 +28,7 @@ export function buildRunsRoutes(deps: RunsRoutesDeps): Hono {
         prompt: data.prompt,
         ...(data.harness !== undefined ? { harness: data.harness } : {}),
         ...(data.workdir !== undefined ? { workdir: data.workdir } : {}),
+        ...(data.workdirs !== undefined ? { workdirs: data.workdirs } : {}),
         ...(data.model !== undefined ? { model: data.model } : {}),
         ...(data.permissionMode !== undefined ? { permissionMode: data.permissionMode } : {}),
         ...(data.allowedTools !== undefined ? { allowedTools: data.allowedTools } : {}),
@@ -45,8 +46,15 @@ export function buildRunsRoutes(deps: RunsRoutesDeps): Hono {
   });
 
   app.get('/runs/:id', async (c) => {
-    const run = await storage.getRun(c.req.param('id'));
-    if (!run) return c.json({ error: 'not found' }, 404);
+    const existing = await storage.getRun(c.req.param('id'));
+    if (!existing) return c.json({ error: 'not found' }, 404);
+    // Opening an old run should wake its sprite and reconcile stale control-plane
+    // status with the sidecar's durable run store. This recovers runs that were
+    // marked running/starting before the sidecar or sprite was suspended.
+    const run = await orchestrator.refreshRunFromSidecar(existing.id).catch((err) => {
+      console.warn(`[runs] failed to refresh ${existing.id}:`, err);
+      return existing;
+    });
     const events = await storage.listRunEvents(run.id);
     return c.json({ ...run, events });
   });
@@ -57,6 +65,21 @@ export function buildRunsRoutes(deps: RunsRoutesDeps): Hono {
     try {
       await orchestrator.sendMessage(c.req.param('id'), parsed.data.text);
       return c.json({ accepted: true }, 202);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 500);
+    }
+  });
+
+  app.delete('/runs/:id', async (c) => {
+    const id = c.req.param('id');
+    const run = await storage.getRun(id);
+    if (!run) return c.json({ error: 'not found' }, 404);
+    try {
+      if (run.status === 'starting' || run.status === 'running') {
+        await orchestrator.cancelRun(id).catch(() => undefined);
+      }
+      await storage.deleteRun(id);
+      return c.json({ deleted: true });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 500);
     }

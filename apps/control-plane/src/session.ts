@@ -88,6 +88,7 @@ export function setSessionCookie(c: Context, email: string, opts: SessionCookieO
     sameSite: 'Lax',
     path: '/',
     maxAge,
+    partitioned: true,
   });
 }
 

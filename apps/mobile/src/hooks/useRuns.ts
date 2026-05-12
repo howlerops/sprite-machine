@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getRuns, getRun, createRun, sendMessage, cancelRun, resolvePermission } from '../api';
+import { getRuns, getRun, createRun, sendMessage, cancelRun, deleteRun, resolvePermission } from '../api';
 import type { CreateRunRequest, ResolvePermissionRequest } from '../api';
 import { useAppConfig } from '../config-store';
 
@@ -47,6 +47,17 @@ export function useCancelRun(runId: string) {
     mutationFn: () => cancelRun(baseUrl, token, runId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['run', runId] });
+      void queryClient.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useDeleteRun() {
+  const { baseUrl, token } = useAppConfig();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => deleteRun(baseUrl, token, runId),
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['runs'] });
     },
   });

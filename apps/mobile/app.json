@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Sprite Machine",
-    "slug": "sprite-machine",
+    "name": "HowlerForge",
+    "slug": "howlerforge",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "sprite-machine",
+    "scheme": "howlerforge",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -15,9 +15,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.spritemachine.mobile",
+      "bundleIdentifier": "com.howlerforge.mobile",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -25,7 +28,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"
       },
-      "package": "com.spritemachine.mobile",
+      "package": "com.howlerforge.mobile",
       "googleServicesFile": "./google-services.json"
     },
     "web": {
@@ -47,6 +50,19 @@
       "typedRoutes": true,
       "tsconfigPaths": true,
       "baseUrl": "/app"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ab9689eb-6597-465a-abb0-75707c81ee88"
+      }
+    },
+    "owner": "jacobbeckdev",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ab9689eb-6597-465a-abb0-75707c81ee88"
     }
   }
 }

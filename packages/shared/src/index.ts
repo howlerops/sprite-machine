@@ -19,6 +19,7 @@ export const CreateRunRequest = z.object({
   prompt: z.string().min(1),
   harness: Harness.optional(),
   workdir: z.string().optional(),
+  workdirs: z.array(z.string()).optional(),
   model: z.string().optional(),
   permissionMode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan']).optional(),
   allowedTools: z.array(z.string()).optional(),
@@ -41,6 +42,7 @@ export const RunEvent = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('user_message'), text: z.string(), at: z.string() }),
   z.object({ type: z.literal('assistant_text'), text: z.string(), at: z.string() }),
+  z.object({ type: z.literal('assistant_delta'), text: z.string(), at: z.string() }),
   z.object({
     type: z.literal('tool_use'),
     toolUseId: z.string(),
@@ -89,6 +91,7 @@ export const RunSummary = z.object({
   sessionId: z.string().optional(),
   prompt: z.string(),
   workdir: z.string().optional(),
+  workdirs: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   totalCostUsd: z.number().default(0),

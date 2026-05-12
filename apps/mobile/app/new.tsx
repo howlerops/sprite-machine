@@ -7,7 +7,6 @@ import { Pressable } from '@/components/ui/pressable';
 import { ScrollView } from '@/components/ui/scroll-view';
 import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
-import { Input, InputField } from '@/components/ui/input';
 import { Textarea, TextareaInput } from '@/components/ui/textarea';
 import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
 import {
@@ -23,6 +22,7 @@ import { useToast, Toast, ToastTitle, ToastDescription } from '@/components/ui/t
 
 import { useCreateRun } from '../src/hooks/useRuns';
 import type { CreateRunRequest } from '../src/api';
+import { FileExplorer } from '@/components/file-explorer';
 
 type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 type Harness = 'claude' | 'codex' | 'pi' | 'mock';
@@ -73,7 +73,8 @@ export default function NewRunScreen() {
   const toast = useToast();
 
   const [prompt, setPrompt] = useState('');
-  const [workdir, setWorkdir] = useState('');
+  const [workdirs, setWorkdirs] = useState<string[]>([]);
+  const [explorerOpen, setExplorerOpen] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [harness, setHarness] = useState<Harness>('claude');
   const [submitted, setSubmitted] = useState(false);
@@ -103,7 +104,7 @@ export default function NewRunScreen() {
     const body: CreateRunRequest = {
       prompt: trimmed,
       ...(harness !== 'claude' ? { harness } : {}),
-      ...(workdir.trim() ? { workdir: workdir.trim() } : {}),
+      ...(workdirs.length > 0 ? { workdirs } : {}),
       ...(permissionMode !== 'default' ? { permissionMode } : {}),
     };
 
@@ -112,7 +113,7 @@ export default function NewRunScreen() {
       router.back();
       router.push(`/run/${run.id}`);
     } catch (e) {
-      showError(e instanceof Error ? e.message : 'Failed to create run.');
+      showError(e instanceof Error ? e.message : 'Failed to create chat.');
     }
   }
 
@@ -148,21 +149,37 @@ export default function NewRunScreen() {
 
         <FormControl>
           <FormControlLabel>
-            <FormControlLabelText>Working Directory</FormControlLabelText>
+            <FormControlLabelText>Working Directories</FormControlLabelText>
           </FormControlLabel>
-          <Input>
-            <InputField
-              value={workdir}
-              onChangeText={setWorkdir}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="/path/to/project"
-            />
-          </Input>
+          {workdirs.length > 0 && (
+            <HStack className="flex-wrap gap-1 mb-2">
+              {workdirs.map((p) => (
+                <Pressable
+                  key={p}
+                  onPress={() => setWorkdirs((prev) => prev.filter((x) => x !== p))}
+                  className="px-2 py-1 rounded-full bg-primary"
+                >
+                  <Text size="xs" className="text-primary-foreground">
+                    {p.split('/').pop() ?? p} ×
+                  </Text>
+                </Pressable>
+              ))}
+            </HStack>
+          )}
+          <Button variant="outline" onPress={() => setExplorerOpen(true)}>
+            <ButtonText>Browse directories...</ButtonText>
+          </Button>
           <FormControlHelper>
-            <FormControlHelperText>Absolute path on the sprite (optional).</FormControlHelperText>
+            <FormControlHelperText>Absolute paths on the sprite (optional).</FormControlHelperText>
           </FormControlHelper>
         </FormControl>
+
+        <FileExplorer
+          visible={explorerOpen}
+          selected={workdirs}
+          onConfirm={(paths) => { setWorkdirs(paths); setExplorerOpen(false); }}
+          onCancel={() => setExplorerOpen(false)}
+        />
 
         <FormControl>
           <FormControlLabel>
@@ -184,7 +201,7 @@ export default function NewRunScreen() {
             className="w-full"
           >
             {createRun.isPending ? <ButtonSpinner /> : null}
-            <ButtonText>Start Run</ButtonText>
+            <ButtonText>Start Chat</ButtonText>
           </Button>
         </Box>
       </VStack>

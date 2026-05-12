@@ -21,6 +21,7 @@ export interface RunRow {
   prompt: string;
   title: string | null;
   workdir: string | null;
+  workdirs: string[] | null;
   sessionId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -45,6 +46,12 @@ export interface PushTokenRow {
   lastUsedAt: string | null;
 }
 
+export interface IntegrationRow {
+  key: string;
+  value: Record<string, unknown>;
+  updatedAt: string;
+}
+
 export interface NewSprite {
   id: string;
   status: SpriteRow['status'];
@@ -63,6 +70,7 @@ export interface NewRun {
   prompt: string;
   title?: string;
   workdir: string | null;
+  workdirs?: string[] | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -94,6 +102,7 @@ export interface Storage {
   listRuns(): Promise<RunRow[]>;
   listRunsForSprite(spriteId: string): Promise<RunRow[]>;
   updateRun(id: string, patch: RunPatch): Promise<RunRow>;
+  deleteRun(id: string): Promise<void>;
 
   appendRunEvent(runId: string, event: RunEvent): Promise<{ seq: number }>;
   listRunEvents(runId: string, afterSeq?: number): Promise<RunEventRow[]>;
@@ -101,6 +110,13 @@ export interface Storage {
   registerPushToken(token: string, label?: string): Promise<PushTokenRow>;
   listPushTokens(): Promise<PushTokenRow[]>;
   removePushToken(token: string): Promise<void>;
+
+  getIntegration(key: string): Promise<IntegrationRow | null>;
+  setIntegration(key: string, value: Record<string, unknown>): Promise<IntegrationRow>;
+  removeIntegration(key: string): Promise<void>;
+
+  createAttachment(a: NewAttachment): Promise<AttachmentRow>;
+  getAttachment(runId: string, attachmentId: string): Promise<AttachmentRow | null>;
 
   getStats(sinceIso?: string): Promise<Stats>;
 }
@@ -115,4 +131,21 @@ export interface Stats {
   totalOutputTokens: number;
   runsByStatus: Record<string, number>;
   runsLast24h: number;
+}
+
+export interface AttachmentRow {
+  id: string;
+  runId: string;
+  contentType: string;
+  sizeBytes: number;
+  path: string;
+  createdAt: number;
+}
+
+export interface NewAttachment {
+  id: string;
+  runId: string;
+  contentType: string;
+  sizeBytes: number;
+  path: string;
 }

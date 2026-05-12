@@ -4,13 +4,15 @@
  *   - claude: ~/.claude          → manifest/claude-settings/   (committed; sanitized)
  *   - codex:  ~/.codex           → manifest/codex-settings/    (committed; sanitized)
  *   - pi:     ~/.pi/agent        → manifest/pi-settings/       (committed; sanitized)
+ *   - github: ~/.gitconfig       → manifest/git-settings/       (committed; sanitized)
+ *             gh auth token      → .sprite-machine-data/secrets/github/hosts.yml
  *
  * Auth files (containing tokens) are NOT committed. They go to
  *   .sprite-machine-data/secrets/<harness>/   (gitignored)
  * which `provision-worker` then uploads to the sprite alongside the manifest.
  *
  * Usage:
- *   pnpm sync-settings [--harness claude|codex|pi|all] [--source <path>] [--include-auth]
+ *   pnpm sync-settings [--harness claude|codex|pi|github|all] [--source <path>] [--include-auth]
  *
  * Without --include-auth, auth.json files are skipped (you'd authenticate
  * directly on the sprite with `claude /login`, `codex login`, `pi`-equivalent).
@@ -19,15 +21,19 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 interface Args {
-  harness: 'claude' | 'codex' | 'pi' | 'all';
+  harness: 'claude' | 'codex' | 'pi' | 'github' | 'all';
   source?: string;
   includeAuth: boolean;
 }
 
 interface HarnessSpec {
-  name: 'claude' | 'codex' | 'pi';
+  name: 'claude' | 'codex' | 'pi' | 'github';
   defaultSource: string;
   manifestSubdir: string;
   /** files copied verbatim (unsensitive) */
@@ -67,6 +73,15 @@ const HARNESSES: HarnessSpec[] = [
     copyJsonSanitized: ['settings.json'],
     copyDirs: [],
     authFiles: ['auth.json'],
+  },
+  {
+    name: 'github',
+    defaultSource: homedir(),
+    manifestSubdir: 'git-settings',
+    copyAsIs: ['.gitconfig'],
+    copyJsonSanitized: [],
+    copyDirs: [],
+    authFiles: [],
   },
 ];
 
@@ -117,7 +132,29 @@ async function syncOne(spec: HarnessSpec, source: string, includeAuth: boolean):
   for (const f of spec.copyAsIs) {
     const src = path.join(source, f);
     if (!existsSync(src)) continue;
-    await copyFile(src, path.join(manifestDir, f));
+    if (spec.name === 'github' && f === '.gitconfig') {
+      const readGitConfig = async (key: string): Promise<string> => {
+        try {
+          const { stdout } = await execFileAsync('git', ['config', '--global', '--get', key], {
+            encoding: 'utf8',
+          });
+          return String(stdout).trim();
+        } catch {
+          return '';
+        }
+      };
+      const [name, email, defaultBranch] = await Promise.all([
+        readGitConfig('user.name'),
+        readGitConfig('user.email'),
+        readGitConfig('init.defaultBranch'),
+      ]);
+      await writeFile(
+        path.join(manifestDir, f),
+        `[user]\n\tname = ${name || 'Sprite'}\n\temail = ${email || 'noreply@sprites.dev'}\n[init]\n\tdefaultBranch = ${defaultBranch || 'main'}\n`,
+      );
+    } else {
+      await copyFile(src, path.join(manifestDir, f));
+    }
     copied += 1;
   }
   for (const f of spec.copyJsonSanitized) {
@@ -149,6 +186,29 @@ async function syncOne(spec: HarnessSpec, source: string, includeAuth: boolean):
       await copyFile(src, path.join(secretsDir, f));
       authCopied += 1;
     }
+
+    if (spec.name === 'github') {
+      try {
+        const [{ stdout: tokenOut }, { stdout: userOut }] = await Promise.all([
+          execFileAsync('gh', ['auth', 'token'], { encoding: 'utf8' }),
+          execFileAsync('gh', ['api', 'user', '--jq', '.login'], { encoding: 'utf8' }),
+        ]);
+        const token = String(tokenOut).trim();
+        const user = String(userOut).trim();
+        if (token && user) {
+          await mkdir(secretsDir, { recursive: true });
+          await writeFile(
+            path.join(secretsDir, 'hosts.yml'),
+            `github.com:\n    oauth_token: ${token}\n    git_protocol: https\n    users:\n        ${user}:\n            oauth_token: ${token}\n    user: ${user}\n`,
+            { mode: 0o600 },
+          );
+          authCopied += 1;
+        }
+      } catch {
+        // gh is not installed or not logged in locally; keep settings-only sync.
+      }
+    }
+
     if (authCopied > 0) {
       console.log(
         `  · ${spec.name}: ${copied} setting file(s) → manifest/${spec.manifestSubdir}/, ${authCopied} auth file(s) → .sprite-machine-data/secrets/${spec.name}/`,
