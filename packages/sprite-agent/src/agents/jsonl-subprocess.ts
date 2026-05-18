@@ -107,9 +107,12 @@ export abstract class JsonlSubprocessAgent implements Agent {
 
       const timer = setTimeout(() => killForTimeout('overall'), timeoutMs);
       const startupTimeoutMs = Number(process.env.SUBPROCESS_HARNESS_STARTUP_TIMEOUT_MS ?? 45_000);
-      const startupTimer = setTimeout(() => {
-        if (!sawOutput) killForTimeout('startup');
-      }, Math.min(startupTimeoutMs, timeoutMs));
+      const startupTimer = setTimeout(
+        () => {
+          if (!sawOutput) killForTimeout('startup');
+        },
+        Math.min(startupTimeoutMs, timeoutMs),
+      );
 
       void this.store.setStatus(runId, 'running').then(() => {
         started = true;
