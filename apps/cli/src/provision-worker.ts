@@ -144,6 +144,12 @@ async function main(): Promise<void> {
   await loadEnvFile(path.join(root, '.env'));
 
   const args = parseArgs();
+  const defaultWebhookBase = process.env.CONTROL_PLANE_WEBHOOK_URL ?? process.env.PUBLIC_BASE_URL;
+  if (!args.webhookUrl && defaultWebhookBase)
+    args.webhookUrl = `${defaultWebhookBase}/webhooks/sprite`;
+  if (!args.webhookToken && process.env.CONTROL_PLANE_WEBHOOK_TOKEN) {
+    args.webhookToken = process.env.CONTROL_PLANE_WEBHOOK_TOKEN;
+  }
   const apiToken = process.env.SPRITES_API_TOKEN;
   if (!apiToken) throw new Error('SPRITES_API_TOKEN not set (put it in .env at repo root)');
 

@@ -106,31 +106,54 @@ export class Orchestrator {
       totalCostUsd?: number;
       totalInputTokens?: number;
       totalOutputTokens?: number;
+      events?: RunEvent[];
     };
+
+    if (Array.isArray(sidecarRun.events)) {
+      const existing = await this.opts.storage.listRunEvents(run.id);
+      const existingSignatures = existing.map((row) => eventSignature(row.event));
+      let lastExistingMatchIndex = -1;
+      let lastSidecarMatchIndex = -1;
+      for (let i = 0; i < sidecarRun.events.length; i++) {
+        const event = sidecarRun.events[i]!;
+        const idx = existingSignatures.indexOf(eventSignature(event), lastExistingMatchIndex + 1);
+        if (idx !== -1) {
+          lastExistingMatchIndex = idx;
+          lastSidecarMatchIndex = i;
+        }
+      }
+      const missingEvents = sidecarRun.events.slice(lastSidecarMatchIndex + 1);
+      for (const event of missingEvents) {
+        await this.ingestWebhookEvent(sprite.id, run.sidecarRunId, event);
+      }
+    }
+
+    const latest = await this.opts.storage.getRun(run.id);
+    const current = latest ?? run;
     const patch: Parameters<Storage['updateRun']>[1] = {};
-    if (sidecarRun.status && sidecarRun.status !== run.status) patch.status = sidecarRun.status;
-    if (sidecarRun.sessionId !== undefined && sidecarRun.sessionId !== run.sessionId) {
+    if (sidecarRun.status && sidecarRun.status !== current.status) patch.status = sidecarRun.status;
+    if (sidecarRun.sessionId !== undefined && sidecarRun.sessionId !== current.sessionId) {
       patch.sessionId = sidecarRun.sessionId;
     }
     if (
       typeof sidecarRun.totalCostUsd === 'number' &&
-      sidecarRun.totalCostUsd !== run.totalCostUsd
+      sidecarRun.totalCostUsd !== current.totalCostUsd
     ) {
       patch.totalCostUsd = sidecarRun.totalCostUsd;
     }
     if (
       typeof sidecarRun.totalInputTokens === 'number' &&
-      sidecarRun.totalInputTokens !== run.totalInputTokens
+      sidecarRun.totalInputTokens !== current.totalInputTokens
     ) {
       patch.totalInputTokens = sidecarRun.totalInputTokens;
     }
     if (
       typeof sidecarRun.totalOutputTokens === 'number' &&
-      sidecarRun.totalOutputTokens !== run.totalOutputTokens
+      sidecarRun.totalOutputTokens !== current.totalOutputTokens
     ) {
       patch.totalOutputTokens = sidecarRun.totalOutputTokens;
     }
-    if (Object.keys(patch).length === 0) return run;
+    if (Object.keys(patch).length === 0) return current;
     return await this.opts.storage.updateRun(run.id, patch);
   }
 
@@ -346,5 +369,36 @@ export class Orchestrator {
       headers,
       body: body !== null ? JSON.stringify(body) : null,
     });
+  }
+}
+
+function eventSignature(event: RunEvent): string {
+  switch (event.type) {
+    case 'status':
+      return `status:${event.status}`;
+    case 'user_message':
+      return `user_message:${event.text}`;
+    case 'assistant_text':
+      return `assistant_text:${event.text}`;
+    case 'assistant_delta':
+      return `assistant_delta:${event.text}`;
+    case 'error':
+      return `error:${event.message}`;
+    case 'turn_complete':
+      return `turn_complete:${event.costUsd ?? ''}:${event.inputTokens ?? ''}:${event.outputTokens ?? ''}`;
+    case 'session_started':
+      return `session_started:${event.sessionId}`;
+    case 'tool_use':
+      return `tool_use:${event.toolUseId}`;
+    case 'tool_result':
+      return `tool_result:${event.toolUseId}`;
+    case 'permission_requested':
+      return `permission_requested:${event.requestId}`;
+    case 'permission_resolved':
+      return `permission_resolved:${event.requestId}:${event.decision}`;
+    case 'completed':
+      return 'completed';
+    default:
+      return JSON.stringify(event);
   }
 }
