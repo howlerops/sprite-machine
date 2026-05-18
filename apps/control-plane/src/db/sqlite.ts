@@ -31,7 +31,7 @@ export class SqliteStorage implements Storage {
     this.db.exec(SCHEMA_SQL);
     // Idempotent migration for existing dev/prod DBs that pre-date the harness column
     try {
-      this.db.exec(`alter table runs add column harness text not null default 'claude'`);
+      this.db.exec(`alter table runs add column harness text not null default 'pi'`);
     } catch {
       // column already exists
     }
@@ -444,7 +444,7 @@ function toRunRow(r: Record<string, unknown>): RunRow {
     spriteId: r.sprite_id as string,
     sidecarRunId: r.sidecar_run_id as string,
     status: r.status as RunRow['status'],
-    harness: ((r.harness as string | null) ?? 'claude') as RunRow['harness'],
+    harness: ((r.harness as string | null) ?? 'pi') as RunRow['harness'],
     prompt: r.prompt as string,
     title: (r.title as string | null) ?? null,
     workdir: (r.workdir as string | null) ?? null,

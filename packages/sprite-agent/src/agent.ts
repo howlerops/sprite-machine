@@ -52,7 +52,7 @@ export class AgentRouter implements Agent {
   }
 
   async start(runId: string, input: CreateRunInput): Promise<void> {
-    const harness = input.harness ?? 'claude';
+    const harness = input.harness ?? 'pi';
     return this.impls[harness].start(runId, input);
   }
 
@@ -65,6 +65,6 @@ export class AgentRouter implements Agent {
   }
 
   private harnessFor(runId: string): Harness {
-    return this.store.get(runId)?.summary.harness ?? 'claude';
+    return this.store.get(runId)?.summary.harness ?? 'pi';
   }
 }

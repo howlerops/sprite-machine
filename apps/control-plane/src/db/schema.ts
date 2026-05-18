@@ -21,7 +21,7 @@ create table if not exists runs (
   sprite_id text not null references sprites(id),
   sidecar_run_id text not null,
   status text not null,
-  harness text not null default 'claude',
+  harness text not null default 'pi',
   prompt text not null,
   title text,
   workdir text,

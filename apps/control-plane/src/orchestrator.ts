@@ -53,7 +53,7 @@ export class Orchestrator {
       throw new Error('sprite has no agentBaseUrl after create');
     }
 
-    const harness: Harness = input.harness ?? 'claude';
+    const harness: Harness = input.harness ?? 'pi';
     const effectiveWorkdir = input.workdirs?.[0] ?? input.workdir;
     const sidecarBody: Record<string, unknown> = { prompt: input.prompt, harness };
     if (effectiveWorkdir !== undefined) sidecarBody.workdir = effectiveWorkdir;

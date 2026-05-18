@@ -49,7 +49,18 @@ export abstract class JsonlSubprocessAgent implements Agent {
   async cancel(runId: string): Promise<void> {
     this.cancelled.add(runId);
     const child = this.children.get(runId);
-    if (child) child.kill('SIGTERM');
+    if (child) {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGTERM');
+        else child.kill('SIGTERM');
+      } catch {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // ignore
+        }
+      }
+    }
     await this.store.setStatus(runId, 'cancelled');
   }
 
@@ -67,6 +78,7 @@ export abstract class JsonlSubprocessAgent implements Agent {
         env: { ...process.env, ...(env ?? {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: opts.workdir,
+        detached: true,
       });
       this.children.set(runId, child);
 
@@ -78,9 +90,14 @@ export abstract class JsonlSubprocessAgent implements Agent {
       const timer = setTimeout(() => {
         timedOut = true;
         try {
-          child.kill('SIGTERM');
+          if (child.pid) process.kill(-child.pid, 'SIGTERM');
+          else child.kill('SIGTERM');
         } catch {
-          // ignore
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // ignore
+          }
         }
       }, timeoutMs);
 
@@ -141,10 +158,14 @@ export abstract class JsonlSubprocessAgent implements Agent {
         if (timedOut) {
           await this.store.appendEvent(runId, {
             type: 'error',
-            message: `${this.harnessName} timed out after ${timeoutMs}ms; stderr=${stderrBuf.slice(-300)}; stdout-tail=${stdoutBuf.slice(-300)}`,
+            message:
+              `${this.harnessName} stopped responding after ${Math.round(timeoutMs / 1000)}s. ` +
+              `This is usually a CLI/session hang, not a problem with your prompt. ` +
+              `Try sending the message again, or start a new chat with the pi harness.`,
             at: nowIso(),
           });
-          await this.store.setStatus(runId, 'failed');
+          // Keep the chat recoverable instead of leaving it in a failed terminal state.
+          await this.store.setStatus(runId, 'awaiting_input');
           this.children.delete(runId);
           return resolve();
         }

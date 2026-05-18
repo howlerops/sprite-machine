@@ -76,7 +76,7 @@ export default function NewRunScreen() {
   const [workdirs, setWorkdirs] = useState<string[]>([]);
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
-  const [harness, setHarness] = useState<Harness>('claude');
+  const [harness, setHarness] = useState<Harness>('pi');
   const [submitted, setSubmitted] = useState(false);
 
   const promptInvalid = submitted && !prompt.trim();
@@ -103,7 +103,7 @@ export default function NewRunScreen() {
 
     const body: CreateRunRequest = {
       prompt: trimmed,
-      ...(harness !== 'claude' ? { harness } : {}),
+      ...(harness !== 'pi' ? { harness } : {}),
       ...(workdirs.length > 0 ? { workdirs } : {}),
       ...(permissionMode !== 'default' ? { permissionMode } : {}),
     };

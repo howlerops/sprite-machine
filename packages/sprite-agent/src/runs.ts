@@ -105,7 +105,7 @@ export class RunStore extends EventEmitter {
     const summary: RunSummary = {
       id,
       status: 'queued',
-      harness: input.harness ?? 'claude',
+      harness: input.harness ?? 'pi',
       prompt: input.prompt,
       ...(input.workdir !== undefined ? { workdir: input.workdir } : {}),
       createdAt: nowIso(),
