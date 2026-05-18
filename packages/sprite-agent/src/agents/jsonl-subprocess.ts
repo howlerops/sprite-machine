@@ -86,9 +86,13 @@ export abstract class JsonlSubprocessAgent implements Agent {
       let stderrBuf = '';
       let started = false;
       let timedOut = false;
+      let timeoutReason: 'startup' | 'overall' = 'overall';
+      let sawOutput = false;
+      let sawErrorEvent = false;
 
-      const timer = setTimeout(() => {
+      const killForTimeout = (reason: 'startup' | 'overall') => {
         timedOut = true;
+        timeoutReason = reason;
         try {
           if (child.pid) process.kill(-child.pid, 'SIGTERM');
           else child.kill('SIGTERM');
@@ -99,7 +103,13 @@ export abstract class JsonlSubprocessAgent implements Agent {
             // ignore
           }
         }
-      }, timeoutMs);
+      };
+
+      const timer = setTimeout(() => killForTimeout('overall'), timeoutMs);
+      const startupTimeoutMs = Number(process.env.SUBPROCESS_HARNESS_STARTUP_TIMEOUT_MS ?? 45_000);
+      const startupTimer = setTimeout(() => {
+        if (!sawOutput) killForTimeout('startup');
+      }, Math.min(startupTimeoutMs, timeoutMs));
 
       void this.store.setStatus(runId, 'running').then(() => {
         started = true;
@@ -120,17 +130,22 @@ export abstract class JsonlSubprocessAgent implements Agent {
             if (ev.type === 'session_started') {
               ctx.capturedSessionId = ev.sessionId;
             }
+            if (ev.type === 'error') sawErrorEvent = true;
             await this.store.appendEvent(runId, ev);
           }
         }
       };
 
       child.stdout.on('data', (chunk: Buffer) => {
+        sawOutput = true;
+        clearTimeout(startupTimer);
         stdoutBuf += chunk.toString();
         void flushLines();
       });
 
       child.stderr.on('data', (chunk: Buffer) => {
+        sawOutput = true;
+        clearTimeout(startupTimer);
         stderrBuf += chunk.toString();
       });
 
@@ -147,6 +162,7 @@ export abstract class JsonlSubprocessAgent implements Agent {
 
       child.on('exit', async (code, signal) => {
         clearTimeout(timer);
+        clearTimeout(startupTimer);
         // If cancellation was requested, don't emit follow-on error/status events
         // that would override the 'cancelled' status the cancel() method already set.
         if (this.cancelled.has(runId)) {
@@ -156,12 +172,16 @@ export abstract class JsonlSubprocessAgent implements Agent {
         }
         await flushLines();
         if (timedOut) {
+          const seconds = Math.round(
+            (timeoutReason === 'startup' ? Math.min(startupTimeoutMs, timeoutMs) : timeoutMs) /
+              1000,
+          );
           await this.store.appendEvent(runId, {
             type: 'error',
             message:
-              `${this.harnessName} stopped responding after ${Math.round(timeoutMs / 1000)}s. ` +
-              `This is usually a CLI/session hang, not a problem with your prompt. ` +
-              `Try sending the message again, or start a new chat with the pi harness.`,
+              timeoutReason === 'startup'
+                ? `${this.harnessName} did not produce any output after ${seconds}s. The CLI may be waiting on auth or a startup lock. Check the integration/auth settings, then try again.`
+                : `${this.harnessName} stopped responding after ${seconds}s. This is usually a CLI/session hang, not a problem with your prompt. Try sending the message again, or choose another harness.`,
             at: nowIso(),
           });
           // Keep the chat recoverable instead of leaving it in a failed terminal state.
@@ -187,7 +207,7 @@ export abstract class JsonlSubprocessAgent implements Agent {
         }
         const finalStatus = this.store.get(runId)?.summary.status;
         if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
-          await this.store.setStatus(runId, 'idle');
+          await this.store.setStatus(runId, sawErrorEvent ? 'awaiting_input' : 'idle');
         }
         if (started === false) {
           // ensure 'running' was set even for very fast runs

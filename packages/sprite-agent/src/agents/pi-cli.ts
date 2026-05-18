@@ -63,6 +63,9 @@ export class PiCliAgent extends JsonlSubprocessAgent {
     }
     if (msg.type === 'message_end' && msg.message?.role === 'assistant') {
       const events: RunEvent[] = [];
+      if (msg.message.stopReason === 'error' && msg.message.errorMessage) {
+        events.push({ type: 'error', message: friendlyPiError(msg.message.errorMessage), at });
+      }
       const content = msg.message.content ?? [];
       const text = content
         .filter((b) => b.type === 'text' && typeof b.text === 'string')
@@ -97,6 +100,13 @@ export class PiCliAgent extends JsonlSubprocessAgent {
     }
     return [];
   }
+}
+
+function friendlyPiError(message: string): string {
+  if (/No API key for provider: openai-codex/i.test(message)) {
+    return 'Pi is not authenticated with its model provider. Reconnect Codex/OpenAI auth for the worker sprite, then try again.';
+  }
+  return message;
 }
 
 function findPiSessionFile(sessionId: string): string | null {
@@ -147,6 +157,8 @@ interface PiLine {
     role?: string;
     content?: PiContentBlock[];
     usage?: PiUsage;
+    stopReason?: string;
+    errorMessage?: string;
   };
   assistantMessageEvent?: { type?: string; delta?: string; contentIndex?: number };
 }

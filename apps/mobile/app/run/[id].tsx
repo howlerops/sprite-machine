@@ -37,7 +37,7 @@ import { useRunEventStream } from '../../src/sse';
 import { statusColor, formatCost } from '../../src/utils';
 import { usePulse, CrossfadePill, TabCrossfade } from '../../src/animations';
 import Animated from 'react-native-reanimated';
-import type { RunEventRow } from '../../src/api';
+import type { RunDetail, RunEventRow } from '../../src/api';
 import { uploadAttachment } from '../../src/api';
 import { useAppConfig } from '../../src/config-store';
 import { tokenizeCode } from '../../src/syntax';
@@ -461,56 +461,70 @@ function EventCard({
   }
 }
 
-function WorkProgressCard({ events }: { events: RunEventRow[] }) {
+function WorkProgressCard({
+  run,
+  events,
+  onCancel,
+  onRefresh,
+}: {
+  run: RunDetail;
+  events: RunEventRow[];
+  onCancel: () => void;
+  onRefresh: () => void;
+}) {
   const [tick, setTick] = useState(0);
 
   const last = [...events].reverse().find((row) => row.event.type !== 'status')?.event;
+  const startedAt = new Date(run.lastEventAt ?? run.updatedAt ?? run.createdAt).getTime();
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const elapsed =
+    elapsedSeconds < 60 ? `${elapsedSeconds}s` : `${Math.floor(elapsedSeconds / 60)}m`;
   const label = (() => {
-    if (!last) return 'Starting sprite session';
-    if (last.type === 'user_message') return 'Loading the saved session';
+    if (!last) return 'Preparing your sprite';
+    if (last.type === 'user_message') return 'Sending your prompt to the sprite';
     if (last.type === 'tool_use') return `Running ${last.name}`;
-    if (last.type === 'tool_result') return 'Reading tool output';
-    if (last.type === 'assistant_delta') return 'Streaming response';
-    if (last.type === 'permission_requested') return 'Waiting for approval';
-    return 'Thinking through next steps';
+    if (last.type === 'tool_result') return 'Reviewing tool output';
+    if (last.type === 'assistant_delta') return 'Writing a response';
+    if (last.type === 'permission_requested') return 'Waiting for your approval';
+    return run.status === 'starting' ? 'Starting the workspace' : 'Thinking';
   })();
-  const steps = ['Wake sprite', 'Restore session', 'Plan', 'Use tools', 'Write response'];
+  const detail =
+    elapsedSeconds > 45
+      ? 'This is taking longer than usual. We are checking the worker automatically.'
+      : 'Most chats start within a few seconds. First wake-up can take longer.';
 
   useEffect(() => {
-    const timer = setInterval(() => setTick((n) => n + 1), 900);
+    const timer = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(timer);
   }, []);
 
   return (
-    <Box className="rounded-2xl border border-border bg-card px-4 py-3 shadow-xs self-start max-w-[78%]">
-      <VStack space="sm">
-        <HStack space="sm" className="items-center">
+    <Box className="rounded-2xl border border-border bg-card px-4 py-4 shadow-xs self-start w-full max-w-[560px]">
+      <VStack space="md">
+        <HStack space="sm" className="items-start">
           <Spinner size="small" />
-          <Text size="sm" bold className="text-foreground">
-            {label}
-            {'.'.repeat((tick % 3) + 1)}
-          </Text>
-        </HStack>
-        <HStack space="xs" className="flex-wrap">
-          {steps.map((step, i) => (
-            <Box
-              key={step}
-              className={
-                i === tick % steps.length
-                  ? 'px-2 py-1 rounded-full bg-primary'
-                  : 'px-2 py-1 rounded-full bg-muted'
-              }
-            >
-              <Text
-                size="2xs"
-                className={
-                  i === tick % steps.length ? 'text-primary-foreground' : 'text-muted-foreground'
-                }
-              >
-                {step}
+          <VStack space="xs" className="flex-1">
+            <HStack space="sm" className="items-center flex-wrap">
+              <Text size="sm" bold className="text-foreground">
+                {label}
+                {'.'.repeat((tick % 3) + 1)}
               </Text>
-            </Box>
-          ))}
+              <Text size="2xs" className="text-muted-foreground">
+                {elapsed}
+              </Text>
+            </HStack>
+            <Text size="xs" className="text-muted-foreground">
+              {detail}
+            </Text>
+          </VStack>
+        </HStack>
+        <HStack space="sm" className="items-center">
+          <Button variant="outline" size="sm" onPress={onRefresh}>
+            <ButtonText>Check status</ButtonText>
+          </Button>
+          <Button variant="link" size="sm" onPress={onCancel}>
+            <ButtonText>Cancel</ButtonText>
+          </Button>
         </HStack>
       </VStack>
     </Box>
@@ -531,7 +545,7 @@ export default function RunDetailScreen() {
 
   const { token, baseUrl } = useAppConfig();
 
-  const { data: run, isLoading } = useRun(id);
+  const { data: run, isLoading, refetch: refetchRun } = useRun(id);
   useRunEventStream(id);
 
   const sendMsg = useSendMessage(id);
@@ -868,7 +882,14 @@ export default function RunDetailScreen() {
                     {emptyEventsText}
                   </Text>
                 )}
-                {showWorkLoader ? <WorkProgressCard events={visibleEvents} /> : null}
+                {showWorkLoader ? (
+                  <WorkProgressCard
+                    run={run}
+                    events={visibleEvents}
+                    onCancel={() => setConfirmCancel(true)}
+                    onRefresh={() => void refetchRun()}
+                  />
+                ) : null}
               </ScrollView>
             ) : (
               <FlatList
@@ -884,7 +905,14 @@ export default function RunDetailScreen() {
                   </Text>
                 }
                 ListFooterComponent={
-                  showWorkLoader ? <WorkProgressCard events={visibleEvents} /> : null
+                  showWorkLoader ? (
+                    <WorkProgressCard
+                      run={run}
+                      events={visibleEvents}
+                      onCancel={() => setConfirmCancel(true)}
+                      onRefresh={() => void refetchRun()}
+                    />
+                  ) : null
                 }
               />
             )}

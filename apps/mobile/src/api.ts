@@ -18,6 +18,7 @@ export interface RunRow {
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  lastEventAt?: string | null;
   totalCostUsd: number;
   totalInputTokens: number;
   totalOutputTokens: number;

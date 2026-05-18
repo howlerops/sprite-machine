@@ -27,6 +27,10 @@ export function useRun(id: string) {
     queryKey: ['run', id],
     queryFn: () => getRun(baseUrl, token, id),
     enabled: !!(token || email),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'starting' || status === 'running' ? 5000 : false;
+    },
   });
 }
 

@@ -42,7 +42,14 @@ export function buildRunsRoutes(deps: RunsRoutesDeps): Hono {
 
   app.get('/runs', async (c) => {
     const runs = await storage.listRuns();
-    return c.json({ runs });
+    const refreshed = await Promise.all(
+      runs.map((run) =>
+        run.status === 'starting' || run.status === 'running'
+          ? orchestrator.refreshRunFromSidecar(run.id).catch(() => run)
+          : run,
+      ),
+    );
+    return c.json({ runs: refreshed });
   });
 
   app.get('/runs/:id', async (c) => {
