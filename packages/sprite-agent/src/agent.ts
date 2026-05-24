@@ -34,6 +34,7 @@ export class AgentRouter implements Agent {
     const baseDeps: AgentDeps = {
       store: deps.store,
       defaultPermissionMode: deps.defaultPermissionMode,
+      defaultWorkdir: deps.defaultWorkdir,
       dataDir: deps.dataDir,
     };
     const claudeImpl = deps.claudeImpl ?? 'cli';

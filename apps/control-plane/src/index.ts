@@ -31,16 +31,22 @@ const ASSET_EXT_RE = /\.(js|css|map|woff2?|ttf|otf|png|jpg|jpeg|svg|ico|webp|jso
 async function main(): Promise<void> {
   const cfg = loadConfig();
 
-  // Resolve template checkpoint id (env wins, else .sprite-machine-data/template.json)
+  // Resolve template metadata (env wins, else .sprite-machine-data/template.json)
   let templateCheckpointId = cfg.templateCheckpointId;
-  if (!templateCheckpointId) {
+  let workerName = cfg.workerName;
+  let workerAgentToken = cfg.workerAgentToken;
+  if (!templateCheckpointId || !workerAgentToken) {
     const tplFile = path.join(cfg.dataDir, 'template.json');
     if (existsSync(tplFile)) {
       try {
         const parsed = JSON.parse(readFileSync(tplFile, 'utf8')) as {
-          templateCheckpointId: string;
+          templateCheckpointId?: string | null;
+          agentToken?: string;
+          spriteName?: string;
         };
-        templateCheckpointId = parsed.templateCheckpointId;
+        if (!templateCheckpointId) templateCheckpointId = parsed.templateCheckpointId ?? null;
+        if (!workerAgentToken && parsed.agentToken) workerAgentToken = parsed.agentToken;
+        if (workerName === cfg.workerName && parsed.spriteName) workerName = parsed.spriteName;
       } catch (err) {
         console.warn('[control-plane] failed to parse template.json:', err);
       }
@@ -54,7 +60,7 @@ async function main(): Promise<void> {
   const storage = new SqliteStorage(cfg.dbPath);
 
   const flyAgentTokens = new Map<string, string>();
-  if (cfg.workerAgentToken) flyAgentTokens.set(cfg.workerName, cfg.workerAgentToken);
+  if (workerAgentToken) flyAgentTokens.set(workerName, workerAgentToken);
 
   const sprites: SpritesClient = createSpritesClient({
     backend: cfg.spritesBackend,
@@ -63,7 +69,7 @@ async function main(): Promise<void> {
       ? {
           fly: {
             apiToken: cfg.spritesApiToken,
-            workerName: cfg.workerName,
+            workerName,
             ...(flyAgentTokens.size > 0 ? { agentTokens: flyAgentTokens } : {}),
           },
         }

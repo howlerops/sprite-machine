@@ -10,6 +10,7 @@ export interface Agent {
 export interface AgentDeps {
   store: RunStore;
   defaultPermissionMode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+  defaultWorkdir: string;
   dataDir: string;
 }
 

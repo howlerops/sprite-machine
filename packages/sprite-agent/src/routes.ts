@@ -11,21 +11,38 @@ import type { RunStore } from './runs.js';
 interface RouteDeps {
   store: RunStore;
   agent: Agent;
+  webhookConfigured: boolean;
+  webhookTokenConfigured: boolean;
 }
 
 export function buildRoutes(deps: RouteDeps): Hono {
   const app = new Hono();
   const { store, agent } = deps;
 
-  app.get('/healthz', (c) => c.json({ ok: true, role: 'sprite-agent' }));
+  app.get('/healthz', (c) =>
+    c.json({
+      ok: true,
+      role: 'sprite-agent',
+      webhookConfigured: deps.webhookConfigured,
+      webhookTokenConfigured: deps.webhookTokenConfigured,
+    }),
+  );
 
   app.post('/runs', async (c) => {
     const parsed = CreateRunRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.format() }, 400);
     const run = await store.create(parsed.data);
-    void agent
-      .start(run.summary.id, parsed.data)
-      .catch((err) => console.error(`[run ${run.summary.id}] agent.start failed:`, err));
+    setImmediate(() => {
+      void agent.start(run.summary.id, parsed.data).catch(async (err) => {
+        console.error(`[run ${run.summary.id}] agent.start failed:`, err);
+        await store.appendEvent(run.summary.id, {
+          type: 'error',
+          message: (err as Error).message,
+          at: new Date().toISOString(),
+        });
+        await store.setStatus(run.summary.id, 'failed');
+      });
+    });
     return c.json(run.summary, 201);
   });
 

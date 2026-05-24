@@ -144,6 +144,10 @@ export class SqliteStorage implements Storage {
       sets.push('agent_base_url = ?');
       vals.push(patch.agentBaseUrl);
     }
+    if (patch.agentToken !== undefined) {
+      sets.push('agent_token = ?');
+      vals.push(patch.agentToken);
+    }
     if (patch.lastActiveAt !== undefined) {
       sets.push('last_active_at = ?');
       vals.push(patch.lastActiveAt);

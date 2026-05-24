@@ -126,6 +126,20 @@ async function step<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+function resolveWebhookUrl(input: string | undefined): string | undefined {
+  if (!input) return undefined;
+  const trimmed = input.replace(/\/+$/, '');
+  return trimmed.endsWith('/webhooks/sprite') ? trimmed : `${trimmed}/webhooks/sprite`;
+}
+
+async function inferFlyPublicBaseUrl(workspaceRootPath: string): Promise<string | undefined> {
+  const flyTomlPath = path.join(workspaceRootPath, 'fly.toml');
+  if (!existsSync(flyTomlPath)) return undefined;
+  const text = await readFile(flyTomlPath, 'utf8');
+  const match = /^\s*app\s*=\s*["']([^"']+)["']/m.exec(text);
+  return match?.[1] ? `https://${match[1]}.fly.dev` : undefined;
+}
+
 async function preserveAgentToken(workspaceRootPath: string): Promise<string> {
   const tplPath = path.join(workspaceRootPath, '.sprite-machine-data', 'template.json');
   if (existsSync(tplPath)) {
@@ -144,9 +158,14 @@ async function main(): Promise<void> {
   await loadEnvFile(path.join(root, '.env'));
 
   const args = parseArgs();
-  const defaultWebhookBase = process.env.CONTROL_PLANE_WEBHOOK_URL ?? process.env.PUBLIC_BASE_URL;
-  if (!args.webhookUrl && defaultWebhookBase)
-    args.webhookUrl = `${defaultWebhookBase}/webhooks/sprite`;
+  const defaultWebhookBase =
+    process.env.CONTROL_PLANE_WEBHOOK_URL ??
+    process.env.PUBLIC_BASE_URL ??
+    (await inferFlyPublicBaseUrl(root));
+  if (!args.webhookUrl) {
+    const resolvedWebhookUrl = resolveWebhookUrl(defaultWebhookBase);
+    if (resolvedWebhookUrl) args.webhookUrl = resolvedWebhookUrl;
+  }
   if (!args.webhookToken && process.env.CONTROL_PLANE_WEBHOOK_TOKEN) {
     args.webhookToken = process.env.CONTROL_PLANE_WEBHOOK_TOKEN;
   }
@@ -345,6 +364,7 @@ async function main(): Promise<void> {
     `HOST=0.0.0.0`,
     `SPRITE_AGENT_MODE=auto`,
     `SPRITE_AGENT_DATA_DIR=/var/sprite-agent-data`,
+    `SPRITE_AGENT_WORKDIR=/home/sprite`,
     `SUBPROCESS_HARNESS_TIMEOUT_MS=${process.env.SUBPROCESS_HARNESS_TIMEOUT_MS ?? '600000'}`,
     args.webhookUrl ? `CONTROL_PLANE_WEBHOOK_URL=${args.webhookUrl}` : '',
     args.webhookToken ? `CONTROL_PLANE_WEBHOOK_TOKEN=${args.webhookToken}` : '',
@@ -356,12 +376,13 @@ async function main(): Promise<void> {
 
   const startSh = `#!/bin/bash
 set -euo pipefail
+export HOME="/home/sprite"
 # Sprites bun globals + the host's claude/codex live in these dirs.
 export PATH="/.sprite/languages/bun/bin:$HOME/.bun/bin:$HOME/.local/bin:$PATH"
 set -a
 source /opt/sprite-agent/env
 set +a
-mkdir -p "$SPRITE_AGENT_DATA_DIR"
+mkdir -p "$SPRITE_AGENT_DATA_DIR" "$SPRITE_AGENT_WORKDIR"
 cd /opt/sprite-agent
 exec node sprite-agent.mjs
 `;
@@ -399,13 +420,34 @@ exec node sprite-agent.mjs
     while (Date.now() < deadline) {
       try {
         const r = await fetch(`${baseUrl}/healthz`);
-        if (r.ok) return;
+        if (r.ok) {
+          const health = (await r.json()) as {
+            webhookConfigured?: boolean;
+            webhookTokenConfigured?: boolean;
+          };
+          if (!health.webhookConfigured || !health.webhookTokenConfigured) {
+            throw new Error(
+              `sidecar webhook not configured: ${JSON.stringify({
+                webhookConfigured: !!health.webhookConfigured,
+                webhookTokenConfigured: !!health.webhookTokenConfigured,
+              })}`,
+            );
+          }
+          return;
+        }
       } catch {
         // not yet
       }
       await new Promise((r) => setTimeout(r, 1500));
     }
     throw new Error('healthz never came up within 60s');
+  });
+
+  await step('verify sidecar bearer token (/runs)', async () => {
+    const r = await fetch(`${baseUrl}/runs`, {
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+    if (!r.ok) throw new Error(`authenticated /runs returned ${r.status}: ${await r.text()}`);
   });
 
   // Checkpoint

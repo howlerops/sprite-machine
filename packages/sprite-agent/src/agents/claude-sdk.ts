@@ -102,7 +102,7 @@ export class ClaudeSdkAgent implements Agent {
         permissionMode: opts.permissionMode,
         canUseTool,
       };
-      if (opts.workdir) queryOpts.cwd = opts.workdir;
+      queryOpts.cwd = opts.workdir ?? this.deps.defaultWorkdir;
       if (opts.model) queryOpts.model = opts.model;
       if (opts.allowedTools) queryOpts.allowedTools = opts.allowedTools;
       if (opts.resume) queryOpts.resume = opts.resume;

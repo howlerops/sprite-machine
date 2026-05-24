@@ -10,11 +10,13 @@ import type { Agent, AgentDeps } from './types.js';
  */
 export abstract class JsonlSubprocessAgent implements Agent {
   protected readonly store: RunStore;
+  protected readonly defaultWorkdir: string;
   protected children = new Map<string, ChildProcess>();
   protected cancelled = new Set<string>();
 
   constructor(deps: AgentDeps) {
     this.store = deps.store;
+    this.defaultWorkdir = deps.defaultWorkdir;
   }
 
   abstract readonly harnessName: string;
@@ -77,7 +79,7 @@ export abstract class JsonlSubprocessAgent implements Agent {
       const child = spawn(cmd, args, {
         env: { ...process.env, ...(env ?? {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: opts.workdir,
+        cwd: opts.workdir ?? this.defaultWorkdir,
         detached: true,
       });
       this.children.set(runId, child);

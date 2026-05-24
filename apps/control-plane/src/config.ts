@@ -34,7 +34,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const dbPath = env.CONTROL_PLANE_DB_PATH ?? path.join(dataDir, 'control-plane.sqlite');
   const port = env.PORT ?? '8787';
   const host = env.HOST ?? '127.0.0.1';
-  const publicBaseUrl = env.PUBLIC_BASE_URL ?? `http://${host}:${port}`;
+  const flyPublicBaseUrl = env.FLY_APP_NAME ? `https://${env.FLY_APP_NAME}.fly.dev` : undefined;
+  const publicBaseUrl = env.PUBLIC_BASE_URL ?? flyPublicBaseUrl ?? `http://${host}:${port}`;
 
   // SESSION_SECRET: hard-fail in prod, derived (with warning) for dev.
   let sessionSecret = env.SESSION_SECRET;

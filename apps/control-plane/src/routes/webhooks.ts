@@ -19,11 +19,12 @@ export function buildWebhooksRoutes(deps: WebhooksRoutesDeps): Hono {
     const parsed = SpriteWebhookEvent.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.format() }, 400);
     try {
-      await orchestrator.ingestWebhookEvent(
+      const ingested = await orchestrator.ingestWebhookEvent(
         parsed.data.spriteId,
         parsed.data.runId,
         parsed.data.event,
       );
+      if (!ingested) return c.json({ accepted: false, retry: true }, 409);
       return c.json({ accepted: true }, 202);
     } catch (err) {
       console.error('[webhooks/sprite] ingest failed:', err);

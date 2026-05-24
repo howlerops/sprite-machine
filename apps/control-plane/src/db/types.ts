@@ -77,6 +77,7 @@ export interface NewRun {
 export interface SpritePatch {
   status?: SpriteRow['status'];
   agentBaseUrl?: string | null;
+  agentToken?: string;
   lastActiveAt?: string;
 }
 

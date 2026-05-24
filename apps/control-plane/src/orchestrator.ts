@@ -28,9 +28,13 @@ export class Orchestrator {
 
   async createRun(input: CreateRunInput): Promise<RunRow> {
     const tplId = this.opts.templateCheckpointId;
-    const sprite = tplId
+    let sprite = tplId
       ? await this.opts.sprites.cloneFromCheckpoint(tplId, { name: `run-${newId('s').slice(2)}` })
       : await this.opts.sprites.create({ name: `run-${newId('s').slice(2)}` });
+
+    if (sprite.status === 'suspended' || !sprite.agentBaseUrl) {
+      sprite = await this.opts.sprites.resume(sprite.id);
+    }
 
     // Upsert: in single-worker model the same sprite is reused across runs.
     const existing = await this.opts.storage.getSprite(sprite.id);
@@ -42,10 +46,15 @@ export class Orchestrator {
         agentToken: sprite.agentToken,
         fromCheckpointId: sprite.fromCheckpointId,
       });
-    } else if (existing.agentBaseUrl !== sprite.agentBaseUrl || existing.status !== sprite.status) {
+    } else if (
+      existing.agentBaseUrl !== sprite.agentBaseUrl ||
+      existing.status !== sprite.status ||
+      existing.agentToken !== sprite.agentToken
+    ) {
       await this.opts.storage.updateSprite(sprite.id, {
         status: sprite.status,
         agentBaseUrl: sprite.agentBaseUrl,
+        agentToken: sprite.agentToken,
       });
     }
 
@@ -62,13 +71,49 @@ export class Orchestrator {
     if (input.allowedTools !== undefined) sidecarBody.allowedTools = input.allowedTools;
     if (input.metadata !== undefined) sidecarBody.metadata = input.metadata;
 
-    const res = await this.callSidecar(
-      sprite.agentBaseUrl,
-      sprite.agentToken,
-      'POST',
-      '/runs',
-      sidecarBody,
-    );
+    let res: Response;
+    try {
+      res = await this.callSidecar(
+        sprite.agentBaseUrl,
+        sprite.agentToken,
+        'POST',
+        '/runs',
+        sidecarBody,
+      );
+    } catch (err) {
+      sprite = await this.opts.sprites.resume(sprite.id);
+      if (!sprite.agentBaseUrl) throw new Error('sprite has no agentBaseUrl after resume');
+      await this.opts.storage.updateSprite(sprite.id, {
+        status: sprite.status,
+        agentBaseUrl: sprite.agentBaseUrl,
+        agentToken: sprite.agentToken,
+        lastActiveAt: nowIso(),
+      });
+      res = await this.callSidecar(
+        sprite.agentBaseUrl,
+        sprite.agentToken,
+        'POST',
+        '/runs',
+        sidecarBody,
+      );
+    }
+    if (res.status >= 500) {
+      sprite = await this.opts.sprites.resume(sprite.id);
+      if (!sprite.agentBaseUrl) throw new Error('sprite has no agentBaseUrl after resume');
+      await this.opts.storage.updateSprite(sprite.id, {
+        status: sprite.status,
+        agentBaseUrl: sprite.agentBaseUrl,
+        agentToken: sprite.agentToken,
+        lastActiveAt: nowIso(),
+      });
+      res = await this.callSidecar(
+        sprite.agentBaseUrl,
+        sprite.agentToken,
+        'POST',
+        '/runs',
+        sidecarBody,
+      );
+    }
     if (res.status !== 201) {
       throw new Error(`sidecar /runs returned ${res.status}: ${await res.text()}`);
     }
@@ -91,13 +136,49 @@ export class Orchestrator {
     const { run, sprite } = await this.requireRunAndLiveSprite(runId);
     if (!sprite.agentBaseUrl) return run;
 
-    const res = await this.callSidecar(
-      sprite.agentBaseUrl,
-      sprite.agentToken,
-      'GET',
-      `/runs/${run.sidecarRunId}`,
-      null,
-    );
+    let res: Response;
+    try {
+      res = await this.callSidecar(
+        sprite.agentBaseUrl,
+        sprite.agentToken,
+        'GET',
+        `/runs/${run.sidecarRunId}`,
+        null,
+      );
+    } catch (err) {
+      const resumed = await this.opts.sprites.resume(sprite.id);
+      if (!resumed.agentBaseUrl) return run;
+      await this.opts.storage.updateSprite(sprite.id, {
+        status: resumed.status,
+        agentBaseUrl: resumed.agentBaseUrl,
+        agentToken: resumed.agentToken,
+        lastActiveAt: nowIso(),
+      });
+      res = await this.callSidecar(
+        resumed.agentBaseUrl,
+        resumed.agentToken,
+        'GET',
+        `/runs/${run.sidecarRunId}`,
+        null,
+      );
+    }
+    if (res.status >= 500) {
+      const resumed = await this.opts.sprites.resume(sprite.id);
+      if (!resumed.agentBaseUrl) return run;
+      await this.opts.storage.updateSprite(sprite.id, {
+        status: resumed.status,
+        agentBaseUrl: resumed.agentBaseUrl,
+        agentToken: resumed.agentToken,
+        lastActiveAt: nowIso(),
+      });
+      res = await this.callSidecar(
+        resumed.agentBaseUrl,
+        resumed.agentToken,
+        'GET',
+        `/runs/${run.sidecarRunId}`,
+        null,
+      );
+    }
     if (!res.ok) return run;
 
     const sidecarRun = (await res.json()) as {
@@ -239,6 +320,7 @@ export class Orchestrator {
     return await this.opts.storage.updateSprite(spriteId, {
       status: 'running',
       agentBaseUrl: resumed.agentBaseUrl,
+      agentToken: resumed.agentToken,
       lastActiveAt: nowIso(),
     });
   }
@@ -377,24 +459,22 @@ export class Orchestrator {
     if (res.exitCode !== 0) throw new Error(res.stderr || res.stdout || 'gh auth setup-git failed');
   }
 
-  async ingestWebhookEvent(spriteId: string, sidecarRunId: string, event: RunEvent): Promise<void> {
+  async ingestWebhookEvent(spriteId: string, sidecarRunId: string, event: RunEvent): Promise<boolean> {
     const sprite = await this.opts.storage.getSprite(spriteId);
     if (!sprite) {
       console.warn(`[orchestrator] webhook for unknown sprite ${spriteId}`);
-      return;
+      return false;
     }
     const run = await this.opts.storage.getRunBySidecar(spriteId, sidecarRunId);
     if (!run) {
       console.warn(`[orchestrator] webhook for unknown run ${spriteId}/${sidecarRunId}`);
-      return;
+      return false;
     }
-    if (event.type === 'user_message') {
-      const existing = await this.opts.storage.listRunEvents(run.id);
-      const alreadyIngested = existing.some(
-        (row) => row.event.type === 'user_message' && row.event.text === event.text,
-      );
-      if (alreadyIngested) return;
-    }
+    const existing = await this.opts.storage.listRunEvents(run.id);
+    const alreadyIngested = existing.some(
+      (row) => eventSignature(row.event) === eventSignature(event),
+    );
+    if (alreadyIngested) return true;
 
     const { seq } = await this.opts.storage.appendRunEvent(run.id, event);
     const patch: Parameters<Storage['updateRun']>[1] = { lastEventAt: nowIso() };
@@ -411,6 +491,7 @@ export class Orchestrator {
     await this.opts.storage.updateSprite(spriteId, { lastActiveAt: nowIso() });
     this.opts.sseBus.publish({ runId: run.id, seq, event });
     void this.opts.push.notifyRunEvent(run.id, run.prompt, event);
+    return true;
   }
 
   private async requireRunAndLiveSprite(
@@ -428,6 +509,7 @@ export class Orchestrator {
       sprite = await this.opts.storage.updateSprite(sprite.id, {
         status: 'running',
         agentBaseUrl: resumed.agentBaseUrl,
+        agentToken: resumed.agentToken,
         lastActiveAt: nowIso(),
       });
     }
@@ -447,6 +529,7 @@ export class Orchestrator {
       method,
       headers,
       body: body !== null ? JSON.stringify(body) : null,
+      signal: AbortSignal.timeout(Number(process.env.SIDECAR_HTTP_TIMEOUT_MS ?? 60_000)),
     });
   }
 }

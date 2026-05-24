@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   const agent: Agent = new AgentRouter({
     store,
     defaultPermissionMode: cfg.defaultPermissionMode,
+    defaultWorkdir: cfg.defaultWorkdir,
     dataDir: cfg.dataDir,
     claudeImpl,
   });
@@ -44,7 +45,15 @@ async function main(): Promise<void> {
 
   const app = new Hono();
   app.use('*', bearerAuth(cfg.agentToken, ['/healthz']));
-  app.route('/', buildRoutes({ store, agent }));
+  app.route(
+    '/',
+    buildRoutes({
+      store,
+      agent,
+      webhookConfigured: !!cfg.controlPlaneWebhookUrl,
+      webhookTokenConfigured: !!cfg.controlPlaneWebhookToken,
+    }),
+  );
 
   serve({ fetch: app.fetch, port: cfg.port, hostname: cfg.host }, (info) => {
     console.log(

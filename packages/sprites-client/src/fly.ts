@@ -74,7 +74,8 @@ export class FlySpritesClient implements SpritesClient {
   }
 
   async create(opts: CreateOpts = {}): Promise<SpriteHandle> {
-    const name = opts.name ?? this.workerName;
+    void opts;
+    const name = this.workerName;
     let raw = await this.tryGetRaw(name);
     if (!raw) {
       raw = await this.postSprite({ name, url_settings: { auth: 'public' } });
@@ -116,6 +117,7 @@ export class FlySpritesClient implements SpritesClient {
     // reality. It is effectively a no-op inside the sprite.
     await this.exec(id, ['true'], { timeoutMs: 60_000 });
     raw = (await this.tryGetRaw(id)) ?? raw;
+    await this.waitForSidecarHealthz(raw.url);
     return this.toHandle(raw);
   }
 
@@ -166,13 +168,18 @@ export class FlySpritesClient implements SpritesClient {
     };
   }
 
-  async cloneFromCheckpoint(_checkpointId: string, _opts: CloneOpts = {}): Promise<SpriteHandle> {
-    // Single-worker model: ALWAYS return the worker. opts.name is intentionally
-    // ignored — the orchestrator passes a per-run name from its run-id naming
-    // scheme, but in this model every run shares the same worker sprite. Per-run
-    // isolation lives in the sidecar's session_id, not a new VM. To roll back
-    // the worker to a checkpoint, call restoreCheckpoint() instead.
-    return this.create({ name: this.workerName });
+  async cloneFromCheckpoint(checkpointId: string, _opts: CloneOpts = {}): Promise<SpriteHandle> {
+    // Single-worker model: normally return the existing worker. opts.name is
+    // intentionally ignored — per-run isolation lives in the sidecar session.
+    // If the worker was deleted while template metadata still points at a
+    // checkpoint, recreate the named worker and restore the provisioned image so
+    // we do not start an empty sprite without the sidecar service.
+    const existing = await this.tryGetRaw(this.workerName);
+    if (existing) return this.toHandle(existing);
+
+    const raw = await this.postSprite({ name: this.workerName, url_settings: { auth: 'public' } });
+    await this.restoreCheckpoint(raw.name, checkpointId);
+    return await this.resume(raw.name);
   }
 
   async exec(id: string, cmd: string[], opts: ExecOpts = {}): Promise<ExecResult> {
@@ -292,7 +299,25 @@ export class FlySpritesClient implements SpritesClient {
     if (!res.ok) {
       throw new Error(`restore ${id}@${checkpointId} returned ${res.status}: ${await res.text()}`);
     }
-    await res.text(); // drain NDJSON
+    const text = await res.text();
+    let lastErr: string | null = null;
+    let completed = false;
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const ev = JSON.parse(line) as { type?: string; data?: unknown };
+        if (ev.type === 'error') lastErr = String(ev.data ?? 'unknown');
+        if (ev.type === 'complete') completed = true;
+      } catch {
+        // ignore partial/non-JSON lines from streaming restore output
+      }
+    }
+    if (lastErr) throw new Error(`restore ${id}@${checkpointId}: ${lastErr}`);
+    if (!completed) {
+      throw new Error(
+        `restore ${id}@${checkpointId}: restore did not complete. body=${text.slice(0, 500)}`,
+      );
+    }
   }
 
   async putService(
@@ -353,6 +378,26 @@ export class FlySpritesClient implements SpritesClient {
 
   // --- internals ---
 
+  private async waitForSidecarHealthz(baseUrl: string): Promise<void> {
+    const deadline = Date.now() + Number(process.env.SPRITES_SIDECAR_HEALTH_TIMEOUT_MS ?? 60_000);
+    let lastErr: unknown = null;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`${baseUrl.replace(/\/$/, '')}/healthz`, {
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (res.ok) return;
+        lastErr = new Error(`healthz returned ${res.status}`);
+      } catch (err) {
+        lastErr = err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    throw new Error(
+      `sprite-agent healthz not ready after resume: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+    );
+  }
+
   private async tryGetRaw(name: string): Promise<RawSprite | null> {
     const res = await this.rawFetch(`/v1/sprites/${encodeURIComponent(name)}`);
     if (res.status === 404) return null;
@@ -384,7 +429,11 @@ export class FlySpritesClient implements SpritesClient {
   private async rawFetch(path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set('authorization', `Bearer ${this.token}`);
-    return await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+    return await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers,
+      signal: init.signal ?? AbortSignal.timeout(Number(process.env.SPRITES_API_TIMEOUT_MS ?? 60_000)),
+    });
   }
 
   private toHandle(raw: RawSprite): SpriteHandle {
