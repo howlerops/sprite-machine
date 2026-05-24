@@ -64,12 +64,25 @@ export interface HealthResponse {
   template?: string;
 }
 
+export interface ApplyResult {
+  applied: string[];
+  errors: Array<{ spriteId: string; message: string }>;
+}
+
 export interface GithubIntegration {
   connected: boolean;
   username: string | null;
   gitUserName: string | null;
   gitUserEmail: string | null;
-  apply?: { applied: string[]; errors: Array<{ spriteId: string; message: string }> };
+  apply?: ApplyResult;
+}
+
+export interface AiAuthIntegration {
+  codexConnected: boolean;
+  piConnected: boolean;
+  claudeConnected: boolean;
+  updatedAt: string | null;
+  apply?: ApplyResult;
 }
 
 export interface ApiError extends Error {
@@ -242,6 +255,33 @@ export function applyGithubIntegration(
   token: string | null,
 ): Promise<GithubIntegration> {
   return apiFetch<GithubIntegration>(baseUrl, token, '/integrations/github/apply', {
+    method: 'POST',
+  });
+}
+
+export function getAiAuthIntegration(
+  baseUrl: string,
+  token: string | null,
+): Promise<AiAuthIntegration> {
+  return apiFetch<AiAuthIntegration>(baseUrl, token, '/integrations/ai-auth');
+}
+
+export function saveAiAuthIntegration(
+  baseUrl: string,
+  token: string | null,
+  body: { codexAuthJson?: string; piAuthJson?: string; claudeCredentialsJson?: string },
+): Promise<AiAuthIntegration> {
+  return apiFetch<AiAuthIntegration>(baseUrl, token, '/integrations/ai-auth', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function applyAiAuthIntegration(
+  baseUrl: string,
+  token: string | null,
+): Promise<AiAuthIntegration> {
+  return apiFetch<AiAuthIntegration>(baseUrl, token, '/integrations/ai-auth/apply', {
     method: 'POST',
   });
 }

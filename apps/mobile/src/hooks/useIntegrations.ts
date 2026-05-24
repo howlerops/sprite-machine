@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  applyAiAuthIntegration,
   applyGithubIntegration,
+  getAiAuthIntegration,
   getGithubIntegration,
+  saveAiAuthIntegration,
   saveGithubIntegration,
+  type AiAuthIntegration,
   type GithubIntegration,
 } from '../api';
 import { useAppConfig } from '../config-store';
@@ -40,6 +44,43 @@ export function useApplyGithubIntegration() {
     mutationFn: () => applyGithubIntegration(baseUrl, token),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['integration', 'github'] });
+      void queryClient.invalidateQueries({ queryKey: ['sprites'] });
+    },
+  });
+}
+
+export function useAiAuthIntegration() {
+  const { baseUrl, token, email } = useAppConfig();
+  return useQuery<AiAuthIntegration>({
+    queryKey: ['integration', 'ai-auth'],
+    queryFn: () => getAiAuthIntegration(baseUrl, token),
+    enabled: !!(token || email),
+  });
+}
+
+export function useSaveAiAuthIntegration() {
+  const { baseUrl, token } = useAppConfig();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      codexAuthJson?: string;
+      piAuthJson?: string;
+      claudeCredentialsJson?: string;
+    }) => saveAiAuthIntegration(baseUrl, token, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['integration', 'ai-auth'] });
+      void queryClient.invalidateQueries({ queryKey: ['sprites'] });
+    },
+  });
+}
+
+export function useApplyAiAuthIntegration() {
+  const { baseUrl, token } = useAppConfig();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => applyAiAuthIntegration(baseUrl, token),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['integration', 'ai-auth'] });
       void queryClient.invalidateQueries({ queryKey: ['sprites'] });
     },
   });

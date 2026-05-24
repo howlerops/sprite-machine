@@ -11,6 +11,7 @@ import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Divider } from '@/components/ui/divider';
 import { Input, InputField, InputSlot } from '@/components/ui/input';
+import { Textarea, TextareaInput } from '@/components/ui/textarea';
 import { Icon, EyeIcon, EyeOffIcon } from '@/components/ui/icon';
 import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
 import { FormControl, FormControlLabel, FormControlLabelText } from '@/components/ui/form-control';
@@ -25,8 +26,11 @@ import {
   useTickIdleScheduler,
 } from '../../src/hooks/usePushTokens';
 import {
+  useAiAuthIntegration,
+  useApplyAiAuthIntegration,
   useApplyGithubIntegration,
   useGithubIntegration,
+  useSaveAiAuthIntegration,
   useSaveGithubIntegration,
 } from '../../src/hooks/useIntegrations';
 
@@ -54,6 +58,9 @@ export default function SettingsScreen() {
   const [ghUsername, setGhUsername] = useState('jbeck018');
   const [gitName, setGitName] = useState('Jacob Beck');
   const [gitEmail, setGitEmail] = useState('jacob.beck.018@gmail.com');
+  const [codexAuthJson, setCodexAuthJson] = useState('');
+  const [piAuthJson, setPiAuthJson] = useState('');
+  const [claudeCredentialsJson, setClaudeCredentialsJson] = useState('');
 
   useEffect(() => {
     setUrlDraft(baseUrl);
@@ -65,8 +72,11 @@ export default function SettingsScreen() {
 
   const { data: pushTokensData, refetch: refetchPushTokens } = usePushTokens();
   const { data: githubIntegration } = useGithubIntegration();
+  const { data: aiAuthIntegration } = useAiAuthIntegration();
   const saveGithubMutation = useSaveGithubIntegration();
   const applyGithubMutation = useApplyGithubIntegration();
+  const saveAiAuthMutation = useSaveAiAuthIntegration();
+  const applyAiAuthMutation = useApplyAiAuthIntegration();
   const registerMutation = useRegisterPushToken();
   const tickMutation = useTickIdleScheduler();
 
@@ -175,6 +185,52 @@ export default function SettingsScreen() {
       showToast({
         title: 'GitHub error',
         description: e instanceof Error ? e.message : 'Failed to apply GitHub integration.',
+        action: 'error',
+      });
+    }
+  }
+
+  async function handleSaveAiAuth() {
+    try {
+      const body = {
+        ...(codexAuthJson.trim() ? { codexAuthJson: codexAuthJson.trim() } : {}),
+        ...(piAuthJson.trim() ? { piAuthJson: piAuthJson.trim() } : {}),
+        ...(claudeCredentialsJson.trim()
+          ? { claudeCredentialsJson: claudeCredentialsJson.trim() }
+          : {}),
+      };
+      const result = await saveAiAuthMutation.mutateAsync(body);
+      setCodexAuthJson('');
+      setPiAuthJson('');
+      setClaudeCredentialsJson('');
+      const applied = result.apply?.applied.length ?? 0;
+      const errors = result.apply?.errors.length ?? 0;
+      showToast({
+        title: 'AI auth saved',
+        description: `Applied to ${applied} sprite(s)${errors ? `, ${errors} error(s)` : ''}.`,
+        action: errors ? 'info' : 'success',
+      });
+    } catch (e) {
+      showToast({
+        title: 'AI auth error',
+        description: e instanceof Error ? e.message : 'Failed to save AI auth.',
+        action: 'error',
+      });
+    }
+  }
+
+  async function handleApplyAiAuth() {
+    try {
+      const result = await applyAiAuthMutation.mutateAsync();
+      showToast({
+        title: 'AI auth applied',
+        description: `Applied to ${result.apply?.applied.length ?? 0} sprite(s).`,
+        action: 'success',
+      });
+    } catch (e) {
+      showToast({
+        title: 'AI auth error',
+        description: e instanceof Error ? e.message : 'Failed to apply AI auth.',
         action: 'error',
       });
     }
@@ -293,6 +349,122 @@ export default function SettingsScreen() {
           <Heading size="md" bold className="text-foreground">
             Integrations
           </Heading>
+
+          <Box className="bg-card border border-border rounded-[10px] p-4">
+            <VStack space="md">
+              <HStack className="items-center" space="sm">
+                <VStack className="flex-1" space="xs">
+                  <Text size="sm" bold className="text-foreground">
+                    AI provider auth
+                  </Text>
+                  <Text size="xs" className="text-muted-foreground">
+                    Paste local auth JSON for Codex/Pi/Claude. Values are encrypted and applied to
+                    worker sprites.
+                  </Text>
+                </VStack>
+                <Text size="2xs" bold className="uppercase text-muted-foreground">
+                  {[
+                    aiAuthIntegration?.codexConnected ? 'Codex' : null,
+                    aiAuthIntegration?.piConnected ? 'Pi' : null,
+                    aiAuthIntegration?.claudeConnected ? 'Claude' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' / ') || 'Not connected'}
+                </Text>
+              </HStack>
+
+              <Text size="xs" className="text-muted-foreground">
+                Local file paths: ~/.codex/auth.json, ~/.pi/agent/auth.json, and
+                ~/.claude/.credentials.json. Leave fields blank to keep existing saved values.
+              </Text>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText>Codex auth.json</FormControlLabelText>
+                </FormControlLabel>
+                <Textarea className="h-24">
+                  <TextareaInput
+                    value={codexAuthJson}
+                    onChangeText={setCodexAuthJson}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder={
+                      aiAuthIntegration?.codexConnected
+                        ? 'Connected — paste new JSON to replace'
+                        : '{ "tokens": ... }'
+                    }
+                  />
+                </Textarea>
+              </FormControl>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText>Pi auth.json</FormControlLabelText>
+                </FormControlLabel>
+                <Textarea className="h-24">
+                  <TextareaInput
+                    value={piAuthJson}
+                    onChangeText={setPiAuthJson}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder={
+                      aiAuthIntegration?.piConnected
+                        ? 'Connected — paste new JSON to replace'
+                        : '{ "openai-codex": ... }'
+                    }
+                  />
+                </Textarea>
+              </FormControl>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText>Claude credentials JSON</FormControlLabelText>
+                </FormControlLabel>
+                <Textarea className="h-24">
+                  <TextareaInput
+                    value={claudeCredentialsJson}
+                    onChangeText={setClaudeCredentialsJson}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder={
+                      aiAuthIntegration?.claudeConnected
+                        ? 'Connected — paste new JSON to replace'
+                        : '{ "claudeAiOauth": ... }'
+                    }
+                  />
+                </Textarea>
+              </FormControl>
+
+              <HStack space="sm" className="flex-wrap">
+                <Button
+                  variant="default"
+                  size="sm"
+                  isDisabled={saveAiAuthMutation.isPending}
+                  onPress={() => void handleSaveAiAuth()}
+                >
+                  {saveAiAuthMutation.isPending ? <ButtonSpinner /> : null}
+                  <ButtonText>Save & Apply AI auth</ButtonText>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  isDisabled={
+                    applyAiAuthMutation.isPending ||
+                    !(
+                      aiAuthIntegration?.codexConnected ||
+                      aiAuthIntegration?.piConnected ||
+                      aiAuthIntegration?.claudeConnected
+                    )
+                  }
+                  onPress={() => void handleApplyAiAuth()}
+                >
+                  {applyAiAuthMutation.isPending ? <ButtonSpinner /> : null}
+                  <ButtonText>Apply saved auth</ButtonText>
+                </Button>
+              </HStack>
+            </VStack>
+          </Box>
+
           <Box className="bg-card border border-border rounded-[10px] p-4">
             <VStack space="md">
               <HStack className="items-center" space="sm">

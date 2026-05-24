@@ -274,6 +274,85 @@ export class Orchestrator {
     return result;
   }
 
+  async applyAiAuthIntegration(input: {
+    codexAuthJson?: string;
+    piAuthJson?: string;
+    claudeCredentialsJson?: string;
+  }): Promise<{ applied: string[]; errors: Array<{ spriteId: string; message: string }> }> {
+    const sprites = await this.opts.storage.listActiveSprites();
+    const result = {
+      applied: [] as string[],
+      errors: [] as Array<{ spriteId: string; message: string }>,
+    };
+    for (const sprite of sprites) {
+      if (sprite.status === 'destroyed') continue;
+      try {
+        await this.configureAiAuthOnSprite(sprite.id, input);
+        result.applied.push(sprite.id);
+      } catch (err) {
+        result.errors.push({ spriteId: sprite.id, message: (err as Error).message });
+      }
+    }
+    return result;
+  }
+
+  async configureAiAuthOnSprite(
+    spriteId: string,
+    input: { codexAuthJson?: string; piAuthJson?: string; claudeCredentialsJson?: string },
+  ): Promise<void> {
+    await this.resumeSprite(spriteId);
+    const mkdir = await this.opts.sprites.exec(
+      spriteId,
+      [
+        'bash',
+        '-lc',
+        'mkdir -p ~/.codex ~/.pi/agent ~/.claude && chmod 700 ~/.codex ~/.pi ~/.pi/agent ~/.claude',
+      ],
+      { timeoutMs: 60_000 },
+    );
+    if (mkdir.exitCode !== 0) throw new Error(mkdir.stderr || mkdir.stdout || 'mkdir failed');
+
+    if (input.codexAuthJson) {
+      JSON.parse(input.codexAuthJson);
+      await this.opts.sprites.writeFile(
+        spriteId,
+        '/home/sprite/.codex/auth.json',
+        input.codexAuthJson,
+      );
+    }
+    if (input.piAuthJson) {
+      JSON.parse(input.piAuthJson);
+      await this.opts.sprites.writeFile(
+        spriteId,
+        '/home/sprite/.pi/agent/auth.json',
+        input.piAuthJson,
+      );
+    }
+    if (input.claudeCredentialsJson) {
+      JSON.parse(input.claudeCredentialsJson);
+      await this.opts.sprites.writeFile(
+        spriteId,
+        '/home/sprite/.claude/.credentials.json',
+        input.claudeCredentialsJson,
+      );
+      await this.opts.sprites.writeFile(
+        spriteId,
+        '/home/sprite/.claude/credentials.json',
+        input.claudeCredentialsJson,
+      );
+    }
+    const chmod = await this.opts.sprites.exec(
+      spriteId,
+      [
+        'bash',
+        '-lc',
+        'chmod 600 ~/.codex/auth.json ~/.pi/agent/auth.json ~/.claude/.credentials.json ~/.claude/credentials.json 2>/dev/null || true',
+      ],
+      { timeoutMs: 60_000 },
+    );
+    if (chmod.exitCode !== 0) throw new Error(chmod.stderr || chmod.stdout || 'chmod failed');
+  }
+
   async configureGitHubOnSprite(
     spriteId: string,
     input: { token: string; username: string; gitUserName: string; gitUserEmail: string },

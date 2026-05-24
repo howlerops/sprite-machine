@@ -763,7 +763,7 @@ export default function RunDetailScreen() {
           header on mobile without competing with it. On web/desktop the Stack
           header is hidden so insets.top is 0 and there is no extra padding. */}
       <Box
-        className="bg-card border-b border-border px-4 py-2 md:px-6 md:py-3"
+        className="bg-background border-b border-border px-4 py-2 md:px-6 md:py-3"
         style={{ paddingTop: insets.top > 0 ? insets.top : undefined }}
       >
         <VStack space="xs">
@@ -918,7 +918,10 @@ export default function RunDetailScreen() {
             )}
 
             {/* Composer */}
-            <VStack className="p-3 md:p-4 bg-card border-t border-border shadow-xs" space="sm">
+            <VStack
+              className="p-3 md:p-4 bg-background border-t border-border shadow-xs"
+              space="sm"
+            >
               <VStack
                 className="w-full max-w-[960px] self-center rounded-3xl border border-border bg-background px-3 py-3 shadow-xs"
                 space="sm"
