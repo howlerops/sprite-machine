@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -61,6 +61,9 @@ export default function SettingsScreen() {
   const [codexAuthJson, setCodexAuthJson] = useState('');
   const [piAuthJson, setPiAuthJson] = useState('');
   const [claudeCredentialsJson, setClaudeCredentialsJson] = useState('');
+  const codexFileRef = useRef<HTMLInputElement | null>(null);
+  const piFileRef = useRef<HTMLInputElement | null>(null);
+  const claudeFileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setUrlDraft(baseUrl);
@@ -188,6 +191,42 @@ export default function SettingsScreen() {
         action: 'error',
       });
     }
+  }
+
+  function handleAuthFilePicked(
+    files: FileList | null,
+    setValue: (value: string) => void,
+    label: string,
+  ) {
+    const file = files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '');
+      try {
+        JSON.parse(text);
+        setValue(text);
+        showToast({
+          title: `${label} loaded`,
+          description: file.name,
+          action: 'success',
+        });
+      } catch {
+        showToast({
+          title: 'Invalid JSON',
+          description: `${file.name} is not valid JSON.`,
+          action: 'error',
+        });
+      }
+    };
+    reader.onerror = () => {
+      showToast({
+        title: 'File error',
+        description: `Could not read ${file.name}.`,
+        action: 'error',
+      });
+    };
+    reader.readAsText(file);
   }
 
   async function handleSaveAiAuth() {
@@ -374,14 +413,73 @@ export default function SettingsScreen() {
               </HStack>
 
               <Text size="xs" className="text-muted-foreground">
-                Local file paths: ~/.codex/auth.json, ~/.pi/agent/auth.json, and
-                ~/.claude/.credentials.json. Leave fields blank to keep existing saved values.
+                Use “Choose file” to upload an existing local JSON file, or paste JSON manually.
+                Browsers cannot auto-read dotfiles without your file-picker approval.
               </Text>
 
+              {Platform.OS === 'web' ? (
+                <Box className="hidden">
+                  <input
+                    ref={codexFileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(e) =>
+                      handleAuthFilePicked(e.currentTarget.files, setCodexAuthJson, 'Codex auth')
+                    }
+                  />
+                  <input
+                    ref={piFileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(e) =>
+                      handleAuthFilePicked(e.currentTarget.files, setPiAuthJson, 'Pi auth')
+                    }
+                  />
+                  <input
+                    ref={claudeFileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(e) =>
+                      handleAuthFilePicked(
+                        e.currentTarget.files,
+                        setClaudeCredentialsJson,
+                        'Claude credentials',
+                      )
+                    }
+                  />
+                </Box>
+              ) : null}
+
+              <Box className="rounded-[10px] bg-muted/60 border border-border px-3 py-3">
+                <VStack space="xs">
+                  <Text size="xs" bold className="text-foreground">
+                    Proper OAuth options
+                  </Text>
+                  <Text size="xs" className="text-muted-foreground">
+                    Codex supports device auth from a terminal: run `codex login --device-auth` in
+                    the worker shell, complete the browser flow, then save/apply the resulting
+                    ~/.codex/auth.json here. Claude uses `claude auth login` or `claude
+                    setup-token`. Direct embedded OAuth is not exposed by these CLIs yet, so the
+                    safe browser flow is file upload or terminal device login.
+                  </Text>
+                </VStack>
+              </Box>
+
               <FormControl>
-                <FormControlLabel>
-                  <FormControlLabelText>Codex auth.json</FormControlLabelText>
-                </FormControlLabel>
+                <HStack className="items-center justify-between" space="sm">
+                  <FormControlLabel>
+                    <FormControlLabelText>Codex auth.json</FormControlLabelText>
+                  </FormControlLabel>
+                  {Platform.OS === 'web' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onPress={() => codexFileRef.current?.click()}
+                    >
+                      <ButtonText>Choose file</ButtonText>
+                    </Button>
+                  ) : null}
+                </HStack>
                 <Textarea className="h-24">
                   <TextareaInput
                     value={codexAuthJson}
@@ -398,9 +496,16 @@ export default function SettingsScreen() {
               </FormControl>
 
               <FormControl>
-                <FormControlLabel>
-                  <FormControlLabelText>Pi auth.json</FormControlLabelText>
-                </FormControlLabel>
+                <HStack className="items-center justify-between" space="sm">
+                  <FormControlLabel>
+                    <FormControlLabelText>Pi auth.json</FormControlLabelText>
+                  </FormControlLabel>
+                  {Platform.OS === 'web' ? (
+                    <Button variant="outline" size="sm" onPress={() => piFileRef.current?.click()}>
+                      <ButtonText>Choose file</ButtonText>
+                    </Button>
+                  ) : null}
+                </HStack>
                 <Textarea className="h-24">
                   <TextareaInput
                     value={piAuthJson}
@@ -417,9 +522,20 @@ export default function SettingsScreen() {
               </FormControl>
 
               <FormControl>
-                <FormControlLabel>
-                  <FormControlLabelText>Claude credentials JSON</FormControlLabelText>
-                </FormControlLabel>
+                <HStack className="items-center justify-between" space="sm">
+                  <FormControlLabel>
+                    <FormControlLabelText>Claude credentials JSON</FormControlLabelText>
+                  </FormControlLabel>
+                  {Platform.OS === 'web' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onPress={() => claudeFileRef.current?.click()}
+                    >
+                      <ButtonText>Choose file</ButtonText>
+                    </Button>
+                  ) : null}
+                </HStack>
                 <Textarea className="h-24">
                   <TextareaInput
                     value={claudeCredentialsJson}
