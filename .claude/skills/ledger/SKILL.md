@@ -1,70 +1,121 @@
 ---
 name: ledger
-description: Run a body of work to completion with a ledger + leader/worker loop. An Opus leader keeps a ledger of work items, assigns ready items to Haiku workers in parallel, reviews every result against its acceptance criteria, and loops until every item is done or blocked on a human. Use when asked to "work the ledger", "run the ledger", "execute the plan/milestone with workers", "fan out workers", or to turn a plan into a ledger. Also use to add, split, or re-plan ledger items.
+description: Run a body of work to completion with a ledger + leader/worker loop. An Opus leader keeps a ledger of work items, assigns ready items to Haiku workers (Opus for risky ones) in parallel git worktrees, reviews every result against its acceptance criteria, merges, and loops until every item is done or waiting on a human. Use when asked to "work the ledger", "run the ledger", "execute the plan/milestone with workers", "fan out workers", to turn a plan into a ledger, to add/split/re-plan items, or to report ledger status / what is blocked on the human. Not for financial ledgers.
 ---
 
 # Ledger: leader / worker execution
 
-You are the **leader**. You own the ledger, assign work, review it, and decide
-when it is done. **Workers** are subagents that each implement exactly one ledger
-item and report back. Only the leader edits the ledger, merges work, and marks
-items done.
+You are the **leader**. You own the ledger, assign work, review it, merge it, and
+decide when it is done. **Workers** are subagents that each implement exactly one
+item and report back. Only the leader edits the ledger, merges, and marks items done.
 
-| Role | Model | How |
-| --- | --- | --- |
-| Leader | Opus (`opus`) | This session. If the session runs another model, spawn one `opus` Agent as the leader and hand it this skill. |
-| Worker | Haiku (`haiku`) | `Agent` tool with `model: "haiku"`, one per item, `isolation: "worktree"` for anything that writes code |
-| Escalation worker | Opus (`opus`) | Only for items that failed review twice, or that are tagged `size: L` / `risk: high` |
+## Roles and models
+
+- **The leader must be the top-level session, running Opus.** Subagents cannot spawn
+  subagents. If this session is not Opus, stop and tell the user to restart with
+  `--model opus` (or `/model opus`).
+- **Workers**: the `Agent` tool with `isolation: "worktree"` and `run_in_background: true`.
+  - **Model**: `haiku` by default. Use `opus` on attempt 1 when the item is `risk: high` or `size: L`, and on attempt 3 of any item.
+  - One worker per item, one item per worker.
 
 ## Files
 
-- Ledger: `docs/ledger/LEDGER.yaml` (format: [reference/ledger-format.md](reference/ledger-format.md)).
-- Worker reports: `docs/ledger/reports/<ID>.md`, written by the worker in its worktree and merged with its work.
-- Leader log: `docs/ledger/LOG.md`, append-only, one line per state change: `2026-10-23T21:40Z L-012 review→done (abc123)`.
+| File                          | Purpose                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `docs/ledger/LEDGER.yaml`     | The ledger. Format: [reference/ledger-format.md](reference/ledger-format.md) |
+| `docs/ledger/STATUS.md`       | Human-readable status, rewritten on every ledger commit                      |
+| `docs/ledger/LOG.md`          | Append-only: `<UTC time> <ID> <from>→<to> <note>`                            |
+| `docs/ledger/reports/<ID>.md` | Worker reports, committed on the worker branch                               |
 
-If no ledger exists, build one first (see "Planning" below), then run the loop.
+If no ledger exists, build one first (see Planning), then run the loop.
 
 ## The loop
 
-Repeat until no item is `todo`, `assigned`, `review` or `changes`:
+There are no fixed waves. Keep up to `max_parallel` workers in flight, and refill a
+slot as soon as one frees up.
 
-1. **Sync.** `git pull` the working branch. Re-read `LEDGER.yaml`.
-2. **Pick ready items**: `status: todo`, every `deps` item `done`, and `owner` not `human`. Sort by milestone, then priority. Take up to **`max_parallel` (default 4)**. Never assign two items whose `paths` overlap in the same wave.
-3. **Assign.** For each item:
-   - set `status: assigned`, `attempt += 1`, `assignee: worker-<ID>-<attempt>`;
-   - commit the ledger change;
-   - spawn the workers **in a single message** so they run in parallel, each with the brief from [reference/worker-brief.md](reference/worker-brief.md) filled in.
-   - Workers run in the background. Do not poll. You are re-invoked as each one finishes.
-4. **Review** each result as it arrives, using [reference/review-checklist.md](reference/review-checklist.md):
-   - Read the report **and the diff**. Never trust the report alone.
-   - Run the item's `verify` commands yourself on the worker's branch.
-   - **Pass** → merge the worker branch (merge commit, no squash), set `status: done`, record `evidence` (commit SHA + check output summary).
-   - **Fail** → set `status: changes`, write concrete `review_notes`, and re-assign. Attempt 2 goes to a fresh Haiku worker with the notes. Attempt 3 goes to an Opus worker. After attempt 3 fails, split the item or set `blocked` with the reason.
-5. **Re-plan as you learn.**
-   - Add discovered work as new items; never silently widen an item.
-   - Split items a worker found too big.
-   - Mark items `blocked` with `blocked_on` when they need a human: credentials, devices, accounts, product decisions.
-6. **Report.** After each wave, post a short status line to the user: done / in-flight / blocked counts plus anything needing their action. Keep `LEDGER.yaml` and `LOG.md` committed and pushed.
+**0. Reconcile** (at loop start, and after any restart or context reset):
 
-**Stop conditions**:
-- every item is `done`; or
-- all remaining items are `blocked` (or wait on blocked items) → summarize what each blocker needs from the human, then stop; or
-- the user says stop.
+- `git pull` the working branch and re-read the ledger.
+- For each `assigned` / `review` item with no live worker in this session:
+  - if a branch matching `*<ID>*` has commits beyond `branch`, review it as a result;
+  - otherwise reset it to `todo` (keep `attempt`) and log `orphaned`.
+- Unblock human items whose condition now holds. For example, `test -n "$SPRITES_API_TOKEN"` flips M0-001 to `done` with evidence. New environment secrets only appear after a session restart.
+
+**1. Pick** ready items:
+
+- `status: todo` and `owner: worker`;
+- every dep `done`;
+- `paths` (plus implicit paths, see the format doc) do not overlap any in-flight item.
+
+Order by milestone, then priority. Do `owner: leader` items yourself between assignments.
+
+**2. Assign** each picked item:
+
+1. Set `status: assigned`, `attempt += 1`, `assignee`.
+2. Commit the ledger.
+3. Spawn the worker with the brief from [reference/worker-brief.md](reference/worker-brief.md).
+
+Spawn all assignments of one pick in a **single message**. Do not poll: you are
+re-invoked when each worker finishes.
+
+**3. Review** each result as it arrives, using
+[reference/review-checklist.md](reference/review-checklist.md). The worker's reply
+starts with its branch name and HEAD SHA.
+
+- **Pass**: merge (see checklist), then `status: done`, `evidence: "merged <sha>; verify: <n> passed, clippy clean"`.
+- **Fail**: `status: changes` with numbered `review_notes`, then re-assign (attempt+1).
+- **After attempt 3 fails**: split the item, or set `blocked` with `blocked_on`.
+- **A merge conflict that isn't only `Cargo.lock`**: set `changes` with the note "merge v2 @<sha> into your branch and re-run verify". This does **not** count as an attempt.
+
+**4. Re-plan**:
+
+- Promote "discovered work" from reports into new items.
+- Split items that turned out too big.
+- Never silently widen an item.
+
+**5. Report**:
+
+- After every assignment batch and every merge, rewrite `STATUS.md` and append to `LOG.md`.
+- Tell the user one line: `done 12/130 · in-flight M0-003b,M0-005a · blocked 6 (human: M0-001, …) · attempts 19/250`.
+
+## Stop conditions
+
+Stop and summarize when any of these holds:
+
+1. Every item is `done`.
+2. Every remaining non-done item is `owner: human`, `blocked`, or transitively depends on one of those.
+   - Set the dependents `blocked` with `blocked_on: <human item id>`.
+   - Post **one** message listing each human item's `howto`.
+   - Stop. Do not idle.
+3. **Budget**: total attempts reach `budget.max_total_attempts`, or three consecutive merges-or-rejections make no progress (nothing merged).
+4. The user says stop.
+
+**Timeouts**: if a worker hasn't returned within `budget.max_worker_minutes`, stop
+it (TaskStop), record `timeout` in its review_notes, and count the attempt.
 
 ## Leader rules
 
-- **Review is the job.** A worker saying "done" means nothing until you have seen the diff and run `verify`.
-- **One item per worker, one worker per item.** Workers never pick their own work, edit the ledger, or touch paths outside their item's `paths` (except reports and lockfiles regenerated by tooling).
-- **Keep items Haiku-sized**: one crate/module/screen, about ≤300 lines of change, explicit file paths, explicit acceptance criteria, and runnable `verify` commands. If you cannot write a `verify` command for an item, it is not ready. Split it or add a spike item first.
-- **Never** let a worker skip, disable or weaken tests to pass `verify`, and never accept it. Reject and note it.
-- **Secrets**: workers get secrets only through the environment. Never paste tokens into briefs, reports or the ledger.
-- Keep CI green on the working branch. If a merge breaks `verify` for done items, fixing that is the next item, at top priority.
-- Commit messages: `ledger(<ID>): <title>` for work, `ledger: <change>` for ledger edits.
+- **Review is the job.** A worker's "done" means nothing until you've seen the diff and re-run `verify` yourself.
+- **Keep items worker-sized**:
+  - one module/screen, ≲300 changed lines;
+  - explicit paths and ≥2 `context` entries (a plan section + an upstream spec or sibling code);
+  - runnable `verify` that fails without the change.
+
+  If you can't write such a `verify`, the item isn't ready: split it or add a spike.
+
+- **Prefer integration-test targets** (`cargo test -p x --test name`) over name filters. Name filters pass vacuously when zero tests match, so the checklist counts tests.
+- **Never** accept skipped, ignored or weakened tests or lints.
+- **Secrets** come only from the environment. Never put them in briefs, reports, the ledger, service env, or logs.
+- **Live-infra verifies** (Sprites, Fly) run **once per attempt**, and always clean up what they create (`SMOKE_KEEP=0`).
+- **Review items** (`*-review`): the leader's report quotes each plan exit criterion next to the command and output that demonstrate it. Review items never gate other items.
+- **Keep the working branch green.** If a merge breaks the workspace checks, fixing that becomes the next item, at priority 0.
+- **Commits**: `ledger(<ID>): <title>` for work; `ledger: <change>` for ledger edits.
 
 ## Planning (turning a plan into a ledger)
 
-1. Read the plan doc(s) and the repo.
-2. Break each milestone into Haiku-sized items following [reference/ledger-format.md](reference/ledger-format.md): deps, paths, acceptance criteria, verify.
-3. Put the first `todo` items in each milestone on the critical path. Mark human-only work `owner: human` (accounts, tokens, physical devices, app store, product decisions).
-4. Add a final item per milestone: `<M>-review`, an Opus pass that re-reads the milestone's exit criteria from the plan and verifies them end to end.
-5. Commit the ledger before running the loop.
+1. Read the plan and the repo, and check the container's tooling (`which cargo flutter docker xcodebuild`).
+2. Break each milestone into worker-sized items per the format doc. Pre-create shared scaffolding (module stubs, `mod.rs` files) in an early leader item, so parallel items only add files.
+3. Human-only work (accounts, tokens, devices, store, product decisions) gets `owner: human`, `status: blocked`, `blocked_on: human`, and a precise `howto`.
+4. Add a `<M>-review` leader item per milestone.
+5. Validate: unique ids, deps exist, no cycles. Commit before running the loop.

@@ -1,74 +1,97 @@
 # sprite-machine v2 — a multi-protocol Agent Development Environment on Sprites
 
-> Status: plan / RFC · rev 2 · 2026-10-23
+> Status: plan / RFC · rev 4 · 2026-10-23 (incorporates the four-lens review: protocols,
+> infra/security, product/client, ledger executability)
 > Goal: a new **native app for mobile and desktop** (iOS, Android, macOS, Windows,
 > Linux; no web at launch) where you connect **any** agent fleet and drive it like
 > Claude Code Remote: tasks, diffs, approvals, terminals, previews, checkpoints.
 > Managed agents run on **Sprites**. Bring-your-own agents connect over **A2A**.
+> Work is executed from `docs/ledger/LEDGER.yaml` using the `ledger` skill.
 
 ---
 
 ## 1. Protocol stack: one protocol per boundary
 
-The design rule: **each boundary speaks the open standard built for it**. We
-translate between them in exactly two places, the sidecar and the hub.
+Rule: **each boundary speaks the open standard built for it**. We translate in
+exactly two places: the sidecar (ACP ⇄ A2A) and the hub (A2A ⇄ AG-UI).
 
-| Boundary                                                                        | Protocol                                                                                                               | Why this one                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sidecar ↔ coding harness (Claude Code, Codex, Gemini CLI, Goose, opencode, pi…) | **ACP — Agent Client Protocol** (Zed). JSON-RPC over stdio. v1 is stable; v2 is in draft. TS and Rust SDKs are at 1.0. | Built for agent ↔ editor/IDE. Already models what an ADE needs: sessions, prompt turns, tool calls, **diffs**, **permission requests**, **terminals**, fs, agent plans, modes, slash commands, elicitation, session list/resume/fork/close, usage. There's an **ACP Registry** of installable agents. It replaces our hand-written v1 JSONL adapters. |
-| Hub ↔ agents (managed _and_ BYO), agent ↔ agent                                 | **A2A 1.0** (Linux Foundation). JSON-RPC, gRPC and HTTP+JSON bindings.                                                 | Built for networked agent ↔ agent work: Agent Cards, tasks, streaming, push notifications for agents that sleep, `INPUT_REQUIRED` / `AUTH_REQUIRED`, extensions. The fleet-level standard, so any third-party agent plugs in.                                                                                                                         |
-| Hub ↔ client UI                                                                 | **AG-UI** (ag-ui-protocol; from CopilotKit, LangChain and CrewAI). Event stream over HTTP (SSE) or WebSocket.          | Built for agent ↔ user-facing app. Typed events for text, tool calls, reasoning, **state snapshot/delta**, **activity**, **subagents**, **interrupts** (pause/approve/edit/resume). **Rust and Dart SDKs exist**, matching both client candidates.                                                                                                    |
-| Agent-generated widgets (optional)                                              | **A2UI** (declarative generative-UI spec, carried over AG-UI)                                                          | Lets agents propose forms, pickers and cards that the client validates and renders natively. Phase 2.                                                                                                                                                                                                                                                 |
-| Agent ↔ tools / infra                                                           | **MCP**, including **`mcp.fly.io`**                                                                                    | Tools, plus "promote sandbox → production Fly app".                                                                                                                                                                                                                                                                                                   |
-| Desktop app ↔ Zed (bonus)                                                       | **ACP**, with our hub as the agent side                                                                                | "Open this workspace's agent in Zed": Zed talks ACP to an ACP proxy that forwards to the hub.                                                                                                                                                                                                                                                         |
+| Boundary                                                                        | Protocol                                                                                                                                                     | Notes                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sidecar ↔ coding harness (Claude Code, Codex, Gemini CLI, Goose, opencode, pi…) | **ACP** (Zed's Agent Client Protocol), JSON-RPC over stdio. Target **v1** (stable); **v2 is draft**. Official Rust/TS SDKs 1.0.                              | Covers sessions, prompt turns, tool calls, diffs, permission requests, client-hosted terminals + fs (v1), plans, modes, slash commands, elicitation, session list/resume/close/usage (stable). **Fork is still an RFD.** Agents are installable from the **ACP Registry**. Replaces v1's JSONL adapters. |
+| Hub ↔ agents (managed and BYO), agent ↔ agent                                   | **A2A 1.0**: JSON-RPC binding first (HTTP+JSON later). PascalCase methods; `A2A-Version: 1.0` on every request (an empty header means 0.3).                  | Agent Cards, tasks, streaming, push webhooks for agents that sleep, `INPUT_REQUIRED` / `AUTH_REQUIRED`, extensions via `A2A-Extensions`.                                                                                                                                                                 |
+| Hub ↔ client UI                                                                 | **AG-UI 1.0**, standard HTTP+SSE binding, plus **our subscription endpoint** for fan-out/replay (§4.2). The Rust and Dart SDKs are **community-maintained**. | Text, tool calls, reasoning, state snapshot/delta (RFC 6902), activity, subagents, interrupts (`RunFinished{outcome: interrupt}` → resume with a new run).                                                                                                                                               |
+| Agent-generated widgets (later)                                                 | **A2UI** over AG-UI                                                                                                                                          | Forms, pickers and cards that the client validates.                                                                                                                                                                                                                                                      |
+| Agent ↔ tools / infra                                                           | **MCP**: per-Loadout servers, `sprites.dev/mcp`, `mcp.fly.io` as _agent-side_ tools                                                                          | Production promotion uses the Fly Machines API (§4.3), not an interactive MCP.                                                                                                                                                                                                                           |
+| Desktop app ↔ Zed (bonus)                                                       | **ACP** through a local stdio↔hub bridge                                                                                                                     | ACP remote transport is a draft RFD, so we don't build on it.                                                                                                                                                                                                                                            |
 
 ```
- Harness CLIs ──ACP(stdio)── a2a-sidecar ──A2A── HUB ──AG-UI(SSE/WS)── Native clients
- (claude-agent-acp,          (in Sprite)          │  ▲                 (gpui-kit or Flutter)
-  codex-acp, gemini, goose…)                      │  └─A2A── BYO agents (LangGraph, ADK, CrewAI…)
-                                                  └─ACP proxy── Zed / other ACP editors (bonus)
+ Harness CLIs ──ACP v1 (stdio)── sidecar ──A2A 1.0── HUB ──AG-UI (SSE + subscription)── Native clients
+ (claude-agent-acp, codex-acp,   (Sprite service,     │  ▲                              (gpui-kit / Flutter)
+  opencode acp, pi adapters…)     sole HTTP port)     │  └─A2A── BYO agents
+                                                      └─ local ACP bridge ── Zed (bonus)
 ```
 
-### 1.1 Event mapping (the core of the system)
+### 1.1 Event mapping
 
-| ACP (harness → sidecar)              | A2A (sidecar → hub)                                      | AG-UI (hub → client)                                                       |
-| ------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `session/new`, `session/prompt`      | `SendStreamingMessage` (new or existing task)            | `RunStarted`                                                               |
-| `session/update` agent message chunk | `TaskStatusUpdateEvent` with message `TextPart`          | `TextMessageStart/Content/End`                                             |
-| agent thought chunk                  | message `DataPart` (`ext/reasoning`)                     | `Reasoning*`                                                               |
-| tool call / tool call update         | `DataPart` (`ext/tool`)                                  | `ToolCallStart/Args/End/Result`                                            |
-| tool call content: diff              | `TaskArtifactUpdateEvent` (`text/x-diff`)                | `ActivitySnapshot` (diff card) + `StateDelta` (workspace files)            |
-| agent plan                           | `DataPart` (`ext/plan`)                                  | `ActivitySnapshot/Delta` (plan)                                            |
-| `session/request_permission`         | state `TASK_STATE_INPUT_REQUIRED` + `ext/approval`       | `RunFinished{outcome: interrupt}` → client resumes a new run with `resume` |
-| elicitation                          | `INPUT_REQUIRED` + `ext/elicitation`                     | interrupt (or an A2UI form, phase 2)                                       |
-| auth required                        | `TASK_STATE_AUTH_REQUIRED` (Sprites connector OAuth URL) | interrupt (auth)                                                           |
-| `terminal/*`                         | `ext/terminal` (exec session id)                         | `Custom` → opens a live terminal pane                                      |
-| usage update                         | task metadata (`ext/usage`)                              | `StateDelta` (cost/context meters)                                         |
-| sub-agent session                    | child A2A task (via hub)                                 | `SubagentStarted/Finished/Error`                                           |
-| end of turn (+ our checkpoint)       | `ext/checkpoint` artifact                                | `ActivitySnapshot` (timeline)                                              |
-| `session/cancel`                     | `CancelTask`                                             | client action → `RunFinished` / `RunError`                                 |
+The sidecar normalizes ACP into an internal **`TurnEvent`** enum, so an ACP v2
+adapter can be added without touching the A2A side. The v2 names are given in brackets.
 
-Everything not covered by a standard goes in **our A2A extensions**:
-`ext/workspace`, `ext/tool`, `ext/plan`, `ext/approval`, `ext/elicitation`,
-`ext/terminal`, `ext/usage`, `ext/checkpoint`, `ext/reasoning`. They live under
-`https://sprite-machine.dev/ext/<name>/v1` and are negotiated with `A2A-Extensions`.
-In practice they are mostly a thin encapsulation of ACP's own types. BYO agents
-without them render as plain chat + artifacts.
+| ACP v1 (→ sidecar)                                                                     | A2A 1.0 (sidecar → hub)                                                                                                                              | AG-UI (hub → client)                                                                             |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `session/new` (or `session/resume`)                                                    | new `contextId` (= ACP sessionId)                                                                                                                    | thread (`threadId` = contextId)                                                                  |
+| `session/prompt`                                                                       | `SendStreamingMessage` → **new task** in the context; `referenceTaskIds` = previous turn                                                             | `RunStarted` (hub-generated `runId`)                                                             |
+| `agent_message_chunk`                                                                  | `TaskStatusUpdateEvent` with message `TextPart` (`messageId` stable per chunk group)                                                                 | `TextMessageStart/Content/End`                                                                   |
+| `agent_thought_chunk`                                                                  | `DataPart` `ext/reasoning`                                                                                                                           | `Reasoning*`                                                                                     |
+| `tool_call` / `tool_call_update` [v2: `tool_call_update` upsert]                       | `DataPart` `ext/tool`, upsert by `toolCallId`                                                                                                        | `ToolCallStart/Args/End/Result`                                                                  |
+| tool content `diff {path, oldText, newText}` [v2: `changes` + `git_patch`]             | artifact `artifactId = <toolCallId>:<path>`, parts: `TextPart text/x-diff` + `DataPart ext/tool.diff`; large diffs chunked with `append`/`lastChunk` | `ActivitySnapshot(activityType: "diff")` after `lastChunk`; `StateDelta /workspace/files/<path>` |
+| `plan` [v2: `plan_update{planId}`]                                                     | `DataPart` `ext/plan` (carries planId)                                                                                                               | `ActivitySnapshot/Delta(activityType: "plan")`                                                   |
+| client-hosted `terminal/*` (output tee'd by the sidecar) [v2: `terminal_output_chunk`] | artifact `artifactId = terminalId`, `ext/terminal {bytes_b64, exit?}` chunks with `append`/`lastChunk`                                               | `ActivitySnapshot/Delta(activityType: "terminal")`                                               |
+| `session/request_permission`                                                           | `TASK_STATE_INPUT_REQUIRED` + `ext/approval {options}`                                                                                               | `RunFinished{outcome: interrupt}`; reply = new run with `resume`                                 |
+| `elicitation/create mode=form`                                                         | `INPUT_REQUIRED` + `ext/elicitation {requestedSchema}`                                                                                               | interrupt with `responseSchema` = the ACP schema                                                 |
+| `elicitation/create mode=url`                                                          | `TASK_STATE_AUTH_REQUIRED` + URL                                                                                                                     | interrupt (auth)                                                                                 |
+| `available_commands_update`, `current_mode_update`, config options                     | `ext/session-config`                                                                                                                                 | `StateDelta /session/{commands,mode,model}`                                                      |
+| client → `session/set_mode` / config option                                            | `SendMessage` with `ext/session-config` DataPart                                                                                                     | client action                                                                                    |
+| user image/file                                                                        | `FilePart` (hub-hosted signed URI)                                                                                                                   | — (client uploads to the hub)                                                                    |
+| → ACP `image` / `resource` content block                                               |                                                                                                                                                      |                                                                                                  |
+| `usage_update`                                                                         | task metadata `ext/usage`                                                                                                                            | `StateDelta /usage` (per turn + cumulative)                                                      |
+| sub-agent                                                                              | child A2A task via hub delegation                                                                                                                    | `SubagentStarted/Finished/Error`                                                                 |
+| `stopReason: end_turn` (+ our checkpoint) [v2: `state_update` idle]                    | task `COMPLETED` + `ext/checkpoint` artifact                                                                                                         | `RunFinished{success}` + `ActivitySnapshot(checkpoint)`                                          |
+| `session/cancel` (pending permission answered `cancelled`)                             | `CancelTask` → `WORKING` → `CANCELED`                                                                                                                | `RunError{code: "cancelled"}`; open interrupts abandoned                                         |
+
+Every sidecar event carries **`ext/seq {task_seq}`** in its metadata, so the hub can
+dedupe stream and push deliveries exactly.
+
+**Our extensions** (`https://sprite-machine.dev/ext/<name>/v1`, all `required: false`):
+`seq`, `workspace`, `tool`, `plan`, `approval`, `elicitation`, `terminal`, `usage`,
+`checkpoint`, `reasoning`, `session-config`.
+
+- Extension parts are only emitted when the request's `A2A-Extensions` header names them, and each Message/Artifact lists the URIs it uses.
+- BYO agents without extensions render as plain chat + artifacts. Their dedup is best-effort, on a structural key.
+
+### 1.2 Identity model
+
+| Concept             | ACP                | A2A                               | AG-UI                                   | Hub table                                   |
+| ------------------- | ------------------ | --------------------------------- | --------------------------------------- | ------------------------------------------- |
+| Conversation        | sessionId          | contextId                         | threadId                                | `contexts`                                  |
+| One prompt turn     | prompt request     | task (terminal at end of turn)    | 1..n runs                               | `tasks`                                     |
+| Approval round-trip | permission request | `INPUT_REQUIRED` on the same task | run ends in interrupt; resume = new run | `interrupts`, `runs(task_id, resume_index)` |
+
+- A follow-up prompt creates a **new task** in the same context.
+- A message sent while a task is `WORKING` is accepted as a new task in `SUBMITTED` state and queued until the session is idle. It is visible to the client and can be removed.
+- `RunAgentInput.messages` carries only the latest user message, because history lives in the harness. This is a documented deviation from AG-UI's "complete history".
+- First answer to an interrupt wins; any later answer gets 409.
 
 ---
 
-## 2. What changed upstream (and why v1 gets rebuilt)
+## 2. What changed upstream
 
-v1 (this repo) is single-user and Claude-Code-centric: one shared "worker" Sprite,
-a custom sidecar webhook protocol, SQLite on one Fly volume, and an Expo app.
-
-| Upstream change                                                                                                                                                                                                                | Impact                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Sprites Block Device (SBD)** (Sprites created since 10/6): the disk is a bucket over NBD formatted as ext4; checkpoints are versioned block snapshots; restore costs about a restart; every block read is verified.          | **Checkpoint per agent turn**: undo turn, fork from here. **One Sprite per workspace** replaces the shared worker. Old Sprites need the storage upgrade (docs.fly.io/sprites/sprite-maintenance#storage-upgrades). |
-| **Sprites API 0.1.12**: services (`http_port`, `needs`, logs), **connectors** (OAuth, API-key, custom API and managed keys, with usage and balance), network/privileges/memory **policies**, labels, usage, fs, exec sessions. | The sidecar runs as a Sprite **service** (fixes v1 worker-startup flakiness). Credentials live in connectors, never on disk. Per-agent sandbox policy. Cost dashboards.                                            |
-| **`mcp.fly.io`**: one MCP for Sprites and Fly apps, browser-authorized and app-scoped. Sprites 2.0 schedules are coming.                                                                                                       | "Promote to production" flow. Scheduled tasks later.                                                                                                                                                               |
-| **ACP** matured (registry, SDK 1.0, session resume/fork, remote transport in progress).                                                                                                                                        | Harness integration becomes "install from the ACP Registry".                                                                                                                                                       |
-| **A2A 1.0**, **AG-UI 1.0**                                                                                                                                                                                                     | Standard wire formats at the fleet and UI boundaries.                                                                                                                                                              |
+| Upstream                                                                                                                                                                                                      | Impact                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sprites Block Device** (Sprites since 10/6): verified block storage; checkpoints are versioned snapshots; restore ≈ a restart.                                                                              | Checkpoint per turn is cheap and reliable → undo turn. **Restore works only within the same Sprite.** The API has no cross-Sprite restore and no way to create a Sprite from a checkpoint, so fork and template become copy/recipe operations (§4.3; spike M0-010). Restore restarts the environment: the sidecar must be restart-safe. Old Sprites need the storage upgrade, which drops their old checkpoints. |
+| **Sprites API 0.1.12**: services (only **one** can own the HTTP port), fs, exec, policies (network / privileges / resources), connectors **gateway**, usage, labels (read-only in the API, settable via CLI). | Sidecar = the sole HTTP service, which also proxies previews. Credentials never enter the Sprite: harnesses call the connector gateway. Per-workspace hardening.                                                                                                                                                                                                                                                 |
+| **Lifecycle**: idle ~30 s → warm → cold. Cold = processes restart, in-memory state lost; services don't keep a Sprite awake; the Tasks API does.                                                              | The sidecar holds a Task during a turn, persists its state, and re-attaches ACP sessions after wake (§4.1).                                                                                                                                                                                                                                                                                                      |
+| **`mcp.fly.io`**, **`sprites.dev/mcp`**                                                                                                                                                                       | Agent-side tools in Loadouts. Promotion uses the Machines API with an app-scoped deploy token.                                                                                                                                                                                                                                                                                                                   |
+| **ACP** registry + SDK 1.0, **A2A 1.0**, **AG-UI 1.0**                                                                                                                                                        | Standard wire formats at each boundary.                                                                                                                                                                                                                                                                                                                                                                          |
 
 ---
 
@@ -77,242 +100,407 @@ a custom sidecar webhook protocol, SQLite on one Fly volume, and an Expo app.
 **Nouns**:
 
 - **Fleet**: agents grouped by labels.
-- **Agent**: has an A2A Agent Card. Managed agents also have an ACP harness + Sprite.
+- **Agent**: has an A2A card. Managed agents also have an ACP harness and a Sprite.
 - **Workspace**: repo + branch + Sprite + checkpoint lineage.
-- **Task**: A2A task ↔ AG-UI runs.
-- **Artifact**: diffs, files, reports, PRs, preview URLs.
+- **Context**: a conversation.
+- **Task**: one turn.
+- **Artifact**: diffs, files, terminals, PRs, previews.
 
 **Surfaces**:
 
-1. **Inbox** across the fleet: needs-input badges and push notifications.
-2. **Task view**: streamed transcript, reasoning, tool calls, approval cards, plan, diff viewer, cost and context meters.
-3. **Checkpoint timeline**: restore, **fork into a new workspace**, compare.
-4. **Workspace tools**: terminal (Sprites exec), file tree and editor (fs API), live preview (Sprite URL / service port).
-5. **Agent registry**:
-   - add a BYO agent by URL (we fetch its A2A card), or
-   - launch a managed agent: pick an ACP agent from the registry + model connector + policy.
-6. **Multi-agent**: delegate tasks, planner → sub-agents (AG-UI `Subagent*` events).
-7. **Ship**: open a GitHub PR, or promote to Fly via `mcp.fly.io`.
-8. **Open in Zed** (desktop) through the ACP proxy.
+0. **Onboarding**: sign in, then either (a) paste a Sprites org token + add a model connector, or (b) add a BYO A2A URL. Target: first streamed token in **< 2 min** on a phone. BYO-only works with no Sprites token. Every list has an empty state with one primary action.
+1. **New task**:
+   - repo/issue → workspace (new or existing) → agent → prompt;
+   - mode/model when the card advertises them;
+   - attachments;
+   - Loadout;
+   - drafts survive an app kill.
+2. **Inbox**:
+   - sections Needs you / Running / Done;
+   - search + filters (status/agent/workspace);
+   - auto-titles, rename, archive;
+   - quick Allow/Deny.
+3. **Task view**:
+   - streamed transcript, reasoning, tool calls, plan, terminals;
+   - diffs (unified/split, open the file from a hunk);
+   - approval cards: show the pending diff or command and time left, and record who resolved it;
+   - composer with slash commands, mode/model switch, queued-message chips, Stop;
+   - inline images;
+   - per-turn and cumulative cost and context %.
+4. **Workspace**:
+   - checkpoint timeline: restore, fork, compare;
+   - terminal (desktop pane; mobile key bar);
+   - files (view on mobile, edit on desktop);
+   - preview (hub-signed URL; system browser sheet on mobile);
+   - Sprite lifecycle (sleep/wake/delete, storage, memory, cost).
+5. **Agents**:
+   - add BYO by URL;
+   - launch managed (ACP agent + connector + policy + Loadout);
+   - card, skills, health.
+6. **Settings**:
+   - Sprites token (set/rotate/test), connectors, policies and egress view;
+   - Loadouts;
+   - notifications (event classes × mute × quiet hours);
+   - org members and roles.
+7. **Multi-agent**: delegation with subagent views.
+8. **Ship**: GitHub PR; promote to Fly; Open in Zed (desktop).
+9. **Desktop power use**: command palette, shortcuts (⌘K, ⌘N, ⌘↵, task navigation).
+10. **Cross-cutting**:
+    - screen-reader labels and focus order;
+    - Dynamic Type and reduced motion;
+    - strings in a Fluent catalog (en only at launch);
+    - offline queue for messages and approvals.
 
-**Non-goals for v2.0**: a web client (a read-only shared task page may come later),
-hosting third-party agents' compute, a marketplace.
+**Carried over from v1** (must not be lost): auto-titles, image attachments, file
+explorer, search/filter, delete/archive, Sprite suspend/resume/delete,
+per-message cost, the settings→worker sync (now Loadouts).
+
+**Non-goals for v2.0**: a web client (a hub-served read-only task page may come
+later), a marketplace, hosting third-party agents' compute.
 
 ---
 
 ## 4. Architecture
 
-### 4.1 Sidecar (`crates/` or `packages/sidecar`), inside each Sprite
+### 4.1 Sidecar (in each Sprite)
 
-- Runs as a Sprite **service** on `http_port 8080`, with URL auth `sprite`.
-- **ACP client**: spawns the chosen harness through its ACP adapter (stdio). It implements the client-side ACP methods: fs read/write against the workspace, terminals mapped to local PTYs, and permission requests.
-- **A2A server**: serves a signed Agent Card (skills = the installed ACP agents, `streaming` and `pushNotifications` enabled, our extensions). It applies the §1.1 mapping and supports push webhooks to the hub so the Sprite can sleep between turns.
-- At end of turn it calls the Sprites checkpoint API with comment `task:<id> turn:<n>`.
-- **Language**: Rust (ACP Rust SDK 1.0; a small A2A server), which gives a single static binary in the Sprite template. TypeScript with the ACP TS SDK is the fallback.
+**Process model**
 
-### 4.2 Hub (`apps/hub`, evolves from `apps/control-plane`)
+- Runs as the Sprite's **only HTTP service** (`http_port 8080`, `needs: []`, its own `dir`).
+- The Sprite URL stays `auth: sprite`. Routes are split by path:
+  - `/a2a/*`: requires a **per-Sprite hub bearer**. The hub writes it through the fs API to a 0600 file owned by the sidecar user, never into service env.
+  - `/.well-known/agent-card.json` and `/healthz`: readable.
+  - `/preview/<port>/*`: reverse proxy to the user's dev server (WebSocket upgrade supported). Only reached through hub-signed preview URLs.
+- The harness runs as a **separate Unix user** from the sidecar.
 
-**What it does**:
+**ACP client**
 
-- **A2A client** to all agents: live `SubscribeToTask` streams plus push-webhook ingest.
-- **AG-UI server** to clients: one run stream per task, multiplexed inbox stream.
-- Append-only `task_events` log of raw A2A events. AG-UI is a deterministic projection of that log, so reconnects replay from a `seq` and no events are lost.
-- Projects workspace and agent state into AG-UI `StateSnapshot`/`StateDelta` (JSON Patch).
-- **Sprites orchestrator**:
-  - creates Sprites from the template checkpoint;
-  - sets labels, policies and connectors;
-  - handles checkpoint/restore/fork;
-  - proxies exec and fs for the terminal and file tree.
-- **ACP proxy endpoint**: exposes any fleet agent to ACP editors (Zed), using ACP's remote transport (Streamable HTTP/WS) once it stabilizes, or a tiny local stdio↔WS bridge until then.
-- Push notifications (APNs/FCM) on `INPUT_REQUIRED` and task completion.
+- **Session table**: contextId → harness process, ACP sessionId, state ∈ {idle, prompting, awaiting_input}. One prompt in flight per session; further messages queue as `SUBMITTED` tasks.
+- Advertises `fs`, `terminal` and `elicitation{form,url}`. fs is confined to the workspace. Terminals are PTYs whose output is tee'd into `ext/terminal` artifacts.
+- `TurnEvent` normalization layer; v1 adapter now, v2 adapter behind a feature flag (M5).
 
-**Stack**:
+**A2A server**
 
-- Postgres on Fly MPG, replacing SQLite (the v1 schema was written to be PG-compatible).
-- OIDC login, replacing the v1 single `USER_TOKEN`.
-- Per-org Sprites token stored encrypted.
-- Language: TypeScript (Hono, A2A JS, AG-UI integrations) or Rust if the sidecar goes Rust and we want one toolchain. Decide in M0.
+- JSON-RPC binding; `A2A-Version` enforced (missing or non-1.0 → `VersionNotSupportedError`).
+- Push configs: https-only, no private/link-local targets, `application/a2a+json`, 10–30 s timeout, backoff, disabled after N failures.
+
+**Durability**
+
+- SQLite under the workspace data directory holds tasks, contexts, push configs, the session table and the outbound event seq.
+- On restart or cold wake, the next message for a known context calls `session/resume` (or `session/load`) before prompting.
+- **The hub is the source of truth.** After a checkpoint restore rewinds the sidecar's store, the sidecar re-syncs from the hub.
+
+**Staying awake**
+
+- Holds a Sprites **Task** (5 min expiry, 60 s heartbeat) while a turn runs. Released at end of turn, on cancel, or by a crash trap.
+- While a task is `INPUT_REQUIRED`, it holds a Task up to an **approval TTL** (default 30 min, configurable). On expiry it answers the ACP permission `cancelled`, marks the task `FAILED` with `ext/approval {expired}`, and the hub offers "retry turn".
+
+**Checkpoints**
+
+- Taken after the task reaches a terminal or `INPUT_REQUIRED` state.
+- The sidecar tolerates being stopped or restarted by its own checkpoint (verified in M0-006).
+- Keeps the last K (default 20) turn checkpoints plus named ones. Pruning goes through the in-Sprite `sprite-env` tooling, because the API has no delete endpoint.
+
+**Agent card**: managed sidecars are **not** signed; trust comes from the hub
+provisioning the Sprite plus the bearer. For BYO cards, the hub verifies a JWS when present.
+
+### 4.2 Hub
+
+**A2A ingest**
+
+- Sends `A2A-Version: 1.0` + `A2A-Extensions` on every request.
+- Live `SubscribeToTask` while anyone watches; push webhooks otherwise.
+- Every event goes to an append-only `task_events` log with a hub seq, **deduped exactly on (taskId, ext/seq)**.
+- The `Task` that opens a stream or subscription is a **reconciliation snapshot**: diffed against the projection, never appended.
+
+**AG-UI out**
+
+- Standard `POST /threads/{threadId}/runs` (RunAgentInput → SSE).
+- **Our subscription endpoint** `GET /threads/{threadId}/events?after=<seq>`, which all clients read for fan-out:
+  - catch-up = `StateSnapshot` + `MessagesSnapshot` + runs from the last run boundary;
+  - then live events.
+- Replay never starts inside an open message, tool call or subagent.
+- The projection is deterministic: message and tool ids are derived from ACP ids in the raw payload.
+- Resume input is idempotent by a client-supplied id.
+
+**Data**
+
+- Postgres on Fly MPG, version chosen up front because there are no in-place major upgrades.
+- Tables: users, orgs, members(role), contexts, tasks (title, title_source, archived_at, labels, search index), runs, interrupts, task_events, artifacts, attachments, checkpoints, workspaces, agents, push_targets, notification_prefs, audit_log, usage_daily.
+- Hub tests run against a local Postgres (`scripts/pg-test.sh`), CI against a service container.
+
+**Auth and authorization**
+
+- GitHub OAuth with PKCE for native clients.
+- Roles: owner/admin/member/viewer. Viewers cannot send or approve; destructive operations need admin.
+- Every mutation writes an audit row.
+
+**Secrets at rest**
+
+- Envelope encryption under a hub master key (Fly secret) for:
+  - the Sprites tokens (§4.3);
+  - the GitHub app secret;
+  - APNs/FCM keys;
+  - Fly deploy tokens.
+- Rotation runbook in `docs/ops/`.
+
+**SSRF**
+
+- BYO agent URLs must be https and resolve to a public IP. Re-checked at connect time and on redirects.
+- Card size and time limits.
+
+**Push webhooks**
+
+- One random token per push config, bound to (agent, task), compared in constant time.
+- The payload's task must belong to that agent.
+- Token revoked at task end; endpoint rate-limited per agent.
+
+**Notifications**
+
+- APNs/FCM.
+- Event classes: needs_input, completed, failed, pr_opened, delegated.
+- Per agent/workspace mute and quiet hours.
+- Actionable Allow/Deny.
+- Payloads carry only the task id + a generic title, never prompt text.
+
+**Retention and privacy**
+
+- Secret-pattern redaction at ingest, before persistence.
+- Defaults: 90 days for events, 30 days for terminal streams, per-org override.
+- Deleting a task cascades to its events, artifacts and push configs.
+- An export API.
+
+**Ops**
+
+- OpenTelemetry traces and Prometheus metrics.
+- Alerts: hub 5xx, Sprites API 429/5xx, spend per org per day, MPG storage > 70%.
+- Rate limits.
+- Quarterly PITR restore drill.
+- Expand/contract migrations under an advisory lock.
+- Sidecar service logs shipped to the hub before a Sprite is archived.
+
+**Attachments**: hub blob store (Fly Tigris), signed URIs, ≤ 20 MB.
 
 ### 4.3 Sprites orchestration
 
-- A typed client generated from `api.sprites.dev/openapi.json`.
-- **Golden template**: toolchains + ACP agents (from the registry) + sidecar, then a checkpoint. Rebuilt in CI on version bumps.
-- **Per workspace**:
-  - labels `{fleet, workspace, agent}`;
-  - default-deny **network policy** with allowlists (package registries, GitHub, model gateway);
-  - privileges and memory policies.
-- **Credentials only via connectors**: managed keys with spend telemetry, or BYO API keys/OAuth. This replaces v1's auth-file upload.
+**Tokens**
+
+- Fly tokens are **not** used for the Sprites API: a Fly token returned 401, and nothing documents Fly tokens there.
+- The hub uses a **restricted** Sprites org token (name prefix `sm-<org>-`, creation cap) for orchestration.
+- A separate **unrestricted / `usage.read`** token is held only by the billing job, for `/v1/usage*` and connector usage.
+- CI uses its own restricted token (`sm-ci-`, cap 2).
+
+**Template = recipe**
+
+- A pinned build script plus an artifact tarball (toolchains, ACP adapters, sidecar). Applied to a fresh Sprite, then checkpointed _inside that Sprite_ as its local baseline.
+- ACP adapters are installed from a committed lockfile with integrity hashes (`npm ci --ignore-scripts` plus an allowlist of packages permitted to run install scripts).
+- Binaries are pinned by sha256; an SBOM is stored with each template version.
+
+**Fork = copy**
+
+- Create a Sprite, apply the recipe, then copy the workspace tree from the source checkpoint (`/.sprite/checkpoints/<id>/` exposes the last five) or after an in-place restore.
+- Expect minutes. M0-010 tests whether a faster path exists.
+
+**Per-workspace hardening**
+
+- One label `ws:<id>` (labels via the CLI path or an undocumented create field, checked in M0-006; otherwise the name-prefix `sm-<org>-<ws>-`).
+- Network policy: an **explicit allowlist, never the `defaults` preset**.
+- Privileges profile `minimal` + `noNewPrivileges`.
+- Memory `limit_mb` per harness.
+
+**Credentials via the connector gateway**
+
+- Harness base-URL variables (e.g. `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`) point at `api.sprites.dev/v1/gateway/<provider>/<id>`. No credential material exists in the Sprite.
+- Connector access policies use the workspace label and narrow `allowed_endpoints`.
+- Providers without a native connector use a `custom_api` connector.
+- Harnesses that need a subscription OAuth login are marked **unsupported** for managed workspaces. BYO-token-on-disk is possible only behind an explicit warning.
+
+**Lifecycle**
+
+- Admission control against `running_limit` / `warm_limit` and the 10-creates/min limit.
+- Reaper: workspaces idle beyond the TTL (default 14 days) are archived to a tarball in object storage, then the Sprite is deleted; restore from archive is supported.
+- Budgets per org from `/v1/usage`.
+
+**Promote to production**: the Fly Machines API with an **app-scoped deploy token**
+stored per org (create Machine, volume, secrets from the workspace service definition).
 
 ### 4.4 Native clients (mobile + desktop, no web)
 
-**Primary candidate: gpui-kit** (Longbridge; Rust on GPUI, Zed's UI framework; Apache-2.0; v0.8).
+**Candidates**
 
-- Desktop (macOS/Windows/Linux) is production-grade.
-- iOS/Android has been **experimental since v0.6.2**, via `longbridge/gpui-mobile`, with a native Swift/Android host embedding GPUI. Only the iOS simulator has been validated so far.
-- A WebAssembly target exists if web returns later.
-- It brings a Tree-sitter + LSP code editor, virtualized lists, dock layouts and Markdown.
-- Terminal via `alacritty_terminal` (as Zed does). AG-UI via its **Rust SDK**.
-- Zed's own ACP agent panel is a reference implementation for the task view.
+- **gpui-kit** (Longbridge, v0.8) on GPUI.
+  - Desktop is production-grade: a Tree-sitter/LSP editor, virtual lists, docks; terminal via `alacritty_terminal`.
+  - **Mobile is experimental**: the docs say mobile is not a primary target and only the iOS simulator path is documented. The bridge supports **one GPUI view per app lifetime**. IME composition, accessibility and lifecycle hooks are incomplete. There is no webview. `gpui-pre-mobile` pins GPUI 0.3.4 while Kit is on 0.3.9.
+- **Flutter** (AOT on all five platforms; community AG-UI Dart SDK; `xterm.dart`).
+- **Hybrid**: gpui-kit desktop + Flutter mobile over a shared Rust `client-core` (`flutter_rust_bridge`).
 
-**Fallback: Flutter** (AOT native on all five platforms, Impeller, small binaries).
+**Decision process (M1b)**
 
-- AG-UI via its **Dart SDK**.
-- Terminal via `xterm.dart`.
-- Weaker code and diff components.
+- **Gates are written before the prototypes** (`spikes/bench/gates.yaml`):
+  - numeric: frame time, key-to-glyph latency, cold start, RSS, binary size;
+  - hard: Japanese/Chinese IME, autocorrect, dictation, image paste, hardware keyboard, VoiceOver/TalkBack on an approval card, Dynamic Type 200%, 10-min background then resume from seq, push tap from a killed app, stacked native screens, a TestFlight upload accepted.
+- **Desktop and mobile are decided separately.** The desktop decision needs no devices.
+- **Default rule**: any hard-gate failure on gpui-kit mobile → hybrid. Flutter is only rejected if it fails the same gates.
+- Flutter is measured on the iPhone too.
 
-**Hybrid option**: gpui-kit on desktop + Flutter on mobile, sharing a **Rust client core** through `flutter_rust_bridge`. The core holds the AG-UI client, local event store, diff parsing and sync.
+**Client-core** (Rust, stack-agnostic):
 
-**Decided by spike M1b** (§5). Rejected: Expo/React Native (weak desktop, no Linux) and Tauri (web view, no benefit without a web target).
+- AG-UI subscription client;
+- SQLite cache;
+- JSON-Patch state;
+- an **outbound queue** (messages, approvals) with idempotency keys. A 409 shows who resolved an approval;
+- backoff with jitter, a connectivity banner;
+- iOS foreground-resume catch-up.
 
-### 4.5 Language decision: Rust end to end
+### 4.5 Language: Rust end to end
 
-**Decision**: one Cargo workspace for the sidecar, hub, client core and client UI.
-TypeScript survives only where a harness forces it, and those run as separate
-ACP subprocesses anyway (e.g. the npm-installed pi/opencode/Claude adapters).
+One Cargo workspace (`members = ["crates/*"]`) holds the sidecar, hub, client-core
+and client UI. TypeScript survives only inside harness adapters that run as ACP subprocesses.
 
-| Factor             | Rust                                                                                                                            | TypeScript                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| gpui-kit client    | Native. GPUI _is_ Rust, so it shares types with the client core.                                                                | Not possible                                                           |
-| Flutter fallback   | Rust client core via `flutter_rust_bridge`, so the work isn't wasted                                                            | Would need Dart duplicates                                             |
-| ACP                | **Official Rust SDK 1.0** (Zed's own language and implementation)                                                               | Official TS SDK 1.0                                                    |
-| A2A 1.0            | Community crates claim 1.0 (`ra2a`, `a2a-rs`, `a2a-rust`). Or codegen from the official `.proto` (prost/tonic) and JSON Schema. | Official JS SDK                                                        |
-| AG-UI              | Rust SDK listed (community)                                                                                                     | Official TS core                                                       |
-| Sidecar in Sprites | Single static binary, few MB of RAM (we pay for reserved memory), fast cold start after wake                                    | Node runtime, ~50–100 MB RSS                                           |
-| Hub                | tokio/axum handle many long-lived SSE/WS streams cheaply; one set of protocol types shared with sidecar and client              | Faster to iterate on CRUD                                              |
-| Plugins            | **wasmtime + WIT components**, the model Zed uses for its extensions                                                            | V8 isolates / worker sandboxes, weaker                                 |
-| Networking/VPN     | `boringtun` (userspace WireGuard), `libtailscale` FFI, rustls                                                                   | Mostly shells out                                                      |
-| Terminal           | `alacritty_terminal` shared by client and sidecar                                                                               | xterm.js only                                                          |
-| Costs              | Slower iteration, compile times, some SDKs community-maintained                                                                 | Rewrites types per layer, two languages anyway once the client is Rust |
+**Why Rust**:
 
-**Mitigations**:
+- gpui-kit is Rust;
+- the official ACP Rust SDK;
+- a single static (musl) sidecar binary with a few MB of RAM;
+- wasmtime for plugins;
+- `boringtun` / `libtailscale` for VPNs;
+- `alacritty_terminal`;
+- one `protocol` crate shared by every layer.
 
-- One `protocol` crate holds generated A2A/AG-UI/ACP types plus our extensions, with golden mapping tests.
-- Pin the community crates behind our own traits, so swapping a crate costs one adapter.
-- The Sprites client is generated from OpenAPI (`progenitor`).
+**Costs**:
 
-### 4.6 Extensibility: harnesses, skills, MCP, plugins
+- the A2A and AG-UI Rust crates are community-maintained. We wrap them behind our own traits, or codegen from the official proto/JSON Schema. Any crate must pass 1.0 wire-format fixtures (PascalCase methods, no `final`/`kind`, `supportedInterfaces`);
+- slower iteration;
+- compile times. A shared `CARGO_TARGET_DIR` across worktrees helps.
 
-Everything an agent can be extended with is one declarative, versioned
-**Loadout**. It generalizes v1's `manifest/` (claude/codex/pi settings,
-plugins.json). Loadouts attach at org, workspace or task level and are merged in
-that order.
+### 4.6 Extensibility: Loadouts and app plugins
 
-```yaml
-# loadout.yaml
-harnesses: # any ACP agent; ACP Registry id or command
-  - claude # via claude-agent-acp
-  - opencode # native: `opencode acp`
-  - pi # via a pi ACP adapter (pi-acp / pi-acpinator), pinned
-  - codex, gemini, goose
-skills: # Agent Skills folders (SKILL.md), from git/registry/local
-  - github:org/skills//frontend-design@v3
-mcp: # MCP servers; stdio inside the Sprite or remote HTTP
-  - name: linear
-    url: https://mcp.linear.app/mcp
-    auth: connector:linear # Sprites connector; no token on disk
-  - name: fly
-    url: https://mcp.fly.io/
-commands: [...] # slash commands / prompts
-subagents: [...] # agent definitions (e.g. v1 codex agents/*.toml)
-hooks: [...] # pre/post tool hooks, mapped per harness where supported
-harness_plugins: # native plugin systems, passed through untouched
-  claude: [marketplace:org/plugins#review]
-  pi: [pi.dev package names]
-network: profile:corp-tailnet # §4.7
-policy: { auto_allow: [read, test], deny_paths: [...] }
-```
+A **Loadout** (YAML; org → workspace → task merge) declares:
 
-**How a Loadout is applied**:
+- harnesses (ACP Registry ids or commands): claude via `claude-agent-acp`, opencode via native `opencode acp`, pi via a pinned community adapter (`pi-acp` / `pi-acpinator`), codex, gemini, goose;
+- skills (Agent Skills `SKILL.md` folders);
+- MCP servers;
+- slash commands and saved prompt templates;
+- subagents and hooks;
+- `harness_plugins` (Claude marketplace, pi packages) passed through untouched;
+- a network profile and an approval policy (auto-allow presets).
 
-- **Harness install**: baked into the golden template where common, otherwise installed lazily on first use (cached by checkpoint).
-- **MCP**: passed per session through ACP `session/new` → `mcpServers`, so it works the same for every ACP harness. Also written into native configs for harnesses that ignore ACP-provided MCP.
-- **Skills, commands, subagents, hooks**: a **renderer per harness** writes them in that harness's native layout (`.claude/skills`, `.codex/`, opencode/pi config dirs). This is v1's `sync-settings`, generalized and tested per harness.
-- **Secrets**: only Sprites connectors (OAuth/API-key/custom API). The sidecar injects them as short-lived env vars or proxy auth. Nothing is persisted in checkpoints.
+**How it is applied**:
 
-**App plugins** (extend _our_ product, not the agent):
+- **MCP**: passed per session via ACP `session/new.mcpServers`, with a native-config fallback. Remote MCP auth goes through a `custom_api` connector (bearer). MCP OAuth/DCR servers are unsupported until verified.
+- **Renderers per harness** write skills, commands, subagents and hooks into each harness's native layout. Unsupported features are reported, never silently dropped.
+- Harnesses are baked into the template where common, otherwise installed lazily and cached by the local checkpoint.
+- A **harness conformance matrix** (permissions, diffs, terminals, MCP via session/new, resume, fork-if-advertised, multi-session per process) is generated in CI and shown in the Loadout UI.
 
-- Sandboxed **WASM components** (wasmtime, WIT interfaces), Zed-extension style, loaded by the hub and the client.
-- Capability-scoped hooks: custom AG-UI event renderers / A2UI component sets, task lifecycle hooks (e.g. post to Slack), new agent providers, new network profiles, Loadout sources.
+**App plugins**:
 
-**Registries**:
+- Sandboxed WASM components (wasmtime + WIT), deny-by-default capabilities, fuel and memory limits.
+- Hooks: task lifecycle, AG-UI/A2UI renderers, agent providers, network profiles, Loadout sources.
 
-- ACP Registry for harnesses.
-- MCP registry for servers.
-- Git/URL sources for skills and plugins.
-- An org-private catalog in the hub, with version pinning and an allowlist.
+**Catalog**:
+
+- Sources: ACP Registry, MCP registry, git.
+- Pinned versions; an org allowlist gates harness-native plugins.
 
 ### 4.7 Networking and VPNs
 
-Agents often need private resources: internal Git, package mirrors, staging DBs,
-corp APIs. **Network Profiles** are hub objects, attached via the Loadout, that
-compose with the Sprites network policy.
+Sprites network policy is DNS-based:
 
-| Profile type | How                                                                                                                                                                      | Notes                                                                                                                                                    |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `public`     | Sprites network policy allowlist                                                                                                                                         | Default-deny + registries                                                                                                                                |
-| `tailnet`    | `tailscaled` in userspace-networking mode inside the Sprite, authed with an ephemeral pre-auth key (from a connector)                                                    | A community report says Sprites network limits block Tailscale's UDP. It may work over DERP (TCP 443) with the DERP hosts allowlisted. **Verify in M0.** |
-| `wireguard`  | `boringtun` (userspace WireGuard) in the sidecar, plus a SOCKS/HTTP proxy for the harness                                                                                | Generic: any WireGuard VPN, Headscale, NetBird                                                                                                           |
-| `gateway`    | A **Fly Machine egress gateway** per org: joined to the tailnet/VPN or Fly's private network (6PN). The Sprite reaches it through the network-policy allowlist plus mTLS | Fallback when in-Sprite VPN is blocked. Also how agents reach Fly apps privately.                                                                        |
-| client side  | The native apps reach a self-hosted hub or BYO agents over the OS VPN, or embedded `libtailscale` on desktop                                                             | For agents/hubs that live inside a private network                                                                                                       |
+- raw IPs are blocked unless resolved from an allowed domain;
+- **private IPs are always blocked**, so Fly 6PN / `.internal` cannot be reached from a Sprite.
 
-The UI shows each workspace's effective egress (profile + policy) and logs denied
-domains, so "why can't my agent reach X" is answerable.
+| Profile     | How                                                                                                                                                    | Status                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `public`    | explicit allowlist                                                                                                                                     | default                                                   |
+| `tailnet`   | userspace `tailscaled`, DERP over 443, DERP hostnames allowlisted, ephemeral key                                                                       | **spike M0-008**. A community report says UDP is blocked. |
+| `wireguard` | `boringtun` in the sidecar + SOCKS for the harness; peer must be a hostname                                                                            | spike M0-008                                              |
+| `gateway`   | per-org Fly Machine at a **public hostname** (`<org>-gw.fly.dev`), mTLS / CONNECT proxy. The gateway provides the private hop (tailnet/WireGuard/6PN). | guaranteed fallback                                       |
+| client side | native apps reach a self-hosted hub over the OS VPN / embedded `libtailscale` on desktop                                                               |                                                           |
+
+The UI shows each workspace's effective egress and a denied-domain log.
+
+### 4.8 Security model (Sprite-internal trust)
+
+Any process in a Sprite can call every connector whose policy matches the Sprite.
+That includes the harness, plugins and npm postinstall scripts, and the
+pre-installed gateway skill teaches agents to list connectors. So:
+
+1. One label per workspace; connector policies scoped to it, with endpoint allowlists (e.g. GitHub `/repos/<org>/*`) and blocked admin paths.
+2. An explicit network allowlist, shown as a diff in the UI. The `defaults` preset is never used, because it allows write-capable exfiltration channels (gists, package publish).
+3. Privileges `minimal` + `noNewPrivileges`; the harness user is separate from the sidecar user. The sidecar state directory is 0700, and the push token is held in sidecar memory only.
+4. The hub validates every inbound event against the push config that authenticated it.
+5. Harness-native plugins: org allowlist **and** only on workspaces whose connectors are read-only.
+6. An **exfiltration E2E test** (M4) plus `docs/security/threat-model.md` covering:
+   - prompt injection;
+   - plugins;
+   - hub↔sidecar auth;
+   - push spoofing;
+   - BYO-agent SSRF.
 
 ---
 
 ## 5. Milestones
 
-| #         | Milestone                            | Exit criteria                                                                                                                                                                                                                                                                                                                                             |
-| --------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0**    | Revive + unblock                     | Branch `v2`. Working **Sprites token** (§7.1). Migrate old Sprites to SBD. Cargo workspace + `protocol` crate. Generate the Sprites client. Verify the `tailnet` profile on a Sprite (§4.7). CI green.                                                                                                                                                    |
-| **M1a**   | Sidecar                              | One ACP agent (Claude via its ACP adapter) is exposed as an A2A agent from a Sprite service. Passes the A2A conformance kit (send, stream, get, cancel, subscribe, push). Checkpoint per turn. Permission → `INPUT_REQUIRED` round-trip works.                                                                                                            |
-| **M1b**   | **Client spike** (parallel, ~1 week) | The same task screen built in gpui-kit **and** Flutter: AG-UI stream with 10k events, 5k-line diff, terminal, approval interrupt. Measured on a **physical iPhone + mid-range Android** + one desktop for frame rate, input latency, memory, cold start, binary size, keyboard/IME, accessibility, and native push through the host. Pick a client stack. |
-| **M2**    | Hub                                  | A2A ingest → event log → AG-UI projection. Register a BYO agent by URL. OIDC. Push notifications. Deployed on Fly + MPG.                                                                                                                                                                                                                                  |
-| **M3**    | Client core                          | Inbox, task view (text, reasoning, tools, plan, diff, approvals), agent registry. Mobile + desktop.                                                                                                                                                                                                                                                       |
-| **M4**    | Workspaces                           | Sprite per workspace from the template. Checkpoint timeline with restore/fork. Terminal, files, preview. Policies + connectors.                                                                                                                                                                                                                           |
-| **M5**    | Fleet                                | **Loadouts** (§4.6): opencode, pi, Codex, Gemini CLI and Goose via ACP; skills, MCP and harness plugins rendered per harness; network profiles (§4.7). A third-party BYO A2A agent works end to end. Delegation + `Subagent*` UI. Usage/cost dashboard.                                                                                                   |
-| **M6**    | Ship                                 | GitHub PR flow, promote to Fly via `mcp.fly.io`, "Open in Zed" (ACP proxy), store + desktop release builds.                                                                                                                                                                                                                                               |
-| **M5b**   | App plugins                          | WASM plugin host (hub + client) with 2 first-party plugins (Slack notifier, custom renderer). Org-private catalog.                                                                                                                                                                                                                                        |
-| **Later** |                                      | A2UI generative widgets. Scheduled tasks (Sprites 2.0). MPG skill. Read-only web share page. Multi-tenant billing.                                                                                                                                                                                                                                        |
+Exit criteria are restated as ledger `*-review` items.
+
+| #       | Milestone        | Exit criteria                                                                                                                                                                                                                                                       |
+| ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0**  | Revive + unblock | Cargo workspace + dev toolchain script. Sprites token (restricted). Protocol types pass 1.0 fixtures. Sprites client. Spikes answered: smoke (labels, checkpoint-stops-service), checkpoint fork, connector gateway, Sprite URL auth, Tasks keep-alive, networking. |
+| **M1a** | Sidecar          | Claude via ACP served as an A2A agent from a Sprite service. Conformance kit passes on JSON-RPC (pinned commit). Durable across restart/cold wake. Path-routed auth. Keep-alive. Permission/cancel races covered. Checkpoint per turn.                              |
+| **M1b** | Client spike     | Gates written first. gpui-kit + Flutter task screen. Desktop decision (no devices). Mobile decision from on-device gates. ADRs.                                                                                                                                     |
+| **M2**  | Hub              | Ingest with exact dedup + reconciliation. AG-UI runs + subscription. OIDC, roles, audit. Secrets at rest. Notifications. Attachments. Titles/search. Retention. Ops. Deployed on Fly + MPG.                                                                         |
+| **M3**  | Client core      | Desktop then mobile: onboarding, composer, inbox, task view, approvals, diff, agents, notifications, a11y, offline queue. `cli e2e app` drives a task from the client.                                                                                              |
+| **M4**  | Workspaces       | Recipe template. Workspace from repo/issue. Hardening. Connector gateway. Timeline restore/fork/compare. Terminal/files/preview/lifecycle UIs. Auto-allow presets. Reaper. Exfiltration test. Managed agent launch.                                                 |
+| **M5**  | Fleet            | Loadouts + renderers for 6 harnesses + conformance matrix. MCP. Network profiles. Gateway. BYO E2E. Delegation. Usage. ACP v2 adapter (flagged).                                                                                                                    |
+| **M5b** | App plugins      | WASM host, two first-party plugins, catalog.                                                                                                                                                                                                                        |
+| **M6**  | Ship             | PR flow. Promote via Machines API. Zed bridge. Release workflows + signing. Retire v1.                                                                                                                                                                              |
+| Later   |                  | A2UI. Scheduled tasks (Sprites 2.0). MPG skill. Read-only web share page. Billing.                                                                                                                                                                                  |
 
 ---
 
 ## 6. Repo plan
 
 ```
-Cargo workspace
+Cargo workspace (members = ["crates/*"])
 crates/
-  protocol/        A2A + AG-UI + ACP types, our extensions, golden mapping tests
-  sprites/         Sprites API client (generated from openapi.json)
-  loadout/         Loadout schema, merge, per-harness renderers
-  netprofile/      tailnet / wireguard / gateway profiles
-  plugin-host/     wasmtime + WIT interfaces
-  sidecar/         ACP client + A2A server   ← replaces packages/sprite-agent
-  hub/             A2A ingest, AG-UI server, orchestration  ← replaces apps/control-plane
-  client-core/     AG-UI client, event store, diff, sync
-  client-gpui/     desktop + mobile UI (or apps/client-flutter/ via flutter_rust_bridge)
-  cli/             template build, provisioning, loadout tooling
-gateway/           Fly Machine egress gateway image
-manifest/          migrates into default Loadouts
+  protocol/      a2a/, acp/, agui/, mapping/ (golden tests), schemas/ (our extensions)
+  sprites/       generated client + hand-written checkpoint NDJSON + exec WS + undocumented fields
+  loadout/       schema, merge, render/<harness>.rs
+  netprofile/    public, wireguard, tailnet, gateway
+  plugin-host/   wasmtime + WIT
+  sidecar/       acp/, a2a/, bridge/, store/, keepalive/, auth/, preview/, checkpoint/
+  acp-mock/      scriptable ACP v1 (later v2) agent for tests
+  agui-fixture/  synthetic AG-UI streams
+  hub/
+  client-core/
+  client-gpui/   (or apps/client-flutter via flutter_rust_bridge)
+  acp-bridge/    local stdio ↔ hub bridge for Zed
+  cli/           smoke, spikes, deploy, template, conformance, e2e
+gateway/         egress gateway image
+spikes/          gpui/, flutter/, bench/
+scripts/         setup-dev.sh, pg-test.sh, tck.sh
+manifest/        → default Loadout
 ```
 
-Retired from v1: the Expo app, the idle scheduler, the single-worker logic, the
-custom webhook protocol and JSONL adapters (replaced by ACP), `USER_TOKEN` auth,
-the auth-file upload, and the TypeScript packages (replaced by Rust crates, §4.5).
+Retired in M6, after a `v1-final` tag: the Expo app, the TypeScript control plane
+and packages, the idle scheduler, the single-worker logic, the custom webhook
+protocol, `USER_TOKEN`, and the auth-file upload.
 
 ---
 
 ## 7. Open questions / risks
 
-1. **Sprites auth**. Sprites belong to Fly (`sprite login` uses Fly's browser login), but `api.sprites.dev` returned 401 for `Authorization: Bearer $FLY_TOKEN`. It is unverified whether a Fly **org token** (`fly tokens create org`, `FlyV1 fm2_…`) works with the `FlyV1` scheme. The documented path is a Sprites org token from `sprite org auth`, formatted `org-slug/org-id/token-id/token-value`. Store it as the environment secret `SPRITES_API_TOKEN`. This blocks M0.
-2. **gpui-kit mobile maturity**: experimental, simulator-validated only, and depends on a fork (`gpui-pre-mobile`). M1b exists to retire this risk. The fallbacks are Flutter or the hybrid.
-3. **Three protocols, lossy mapping**: keep the mapping table (§1.1) as executable golden tests in `protocol-ext`. Store raw ACP and A2A payloads in the event log so nothing is unrecoverable.
-4. **ACP remote transport** is still in progress. The "Open in Zed" feature uses a local bridge until it stabilizes.
-5. **Rust SDK maturity**: the A2A and AG-UI Rust crates are community-maintained. Wrap them behind our traits, or codegen from the official proto/JSON Schema. The surfaces are small enough to own.
-6. **Harness parity**: ACP adapters differ in what they support. For example, opencode's ACP reportedly auto-approves permissions in some builds, and pi relies on community adapters (`pi-acp`, `pi-acpinator`, package scope changing). Run a per-harness conformance checklist in CI and show the gaps in the UI.
-7. **VPN inside Sprites**: Sprites network limits may block Tailscale's UDP; the egress gateway is the guaranteed fallback.
-8. **Plugin security**: WASM capabilities are deny-by-default. Harness-native plugins (Claude marketplace, pi packages) run unsandboxed inside the Sprite, which is acceptable only because the Sprite is the sandbox. Gate them with the org allowlist.
-9. **Approval latency**: interrupts round-trip ACP → A2A → AG-UI → user. Mitigate with per-workspace auto-allow presets, mapped to ACP permission options.
-10. **Tenancy**: start single-org, multi-user, with the schema ready for tenants.
-11. **Cost**: one Sprite per workspace. Mitigated by native sleep, memory policy and the usage API.
-12. Evaluated and set aside: **Tov** (v0.0.1 experimental language; maybe later for small binaries), **Expo/RN** and **Tauri** (see §4.4), **Compose Multiplatform** (JVM desktop footprint).
+1. **Sprites auth**: we need a restricted Sprites org token (M0-001). Fly tokens are out.
+2. **gpui-kit mobile**: experimental. The gates + default-to-hybrid rule contain the risk.
+3. **Cross-Sprite fork**: not in the API. Copy-based fork is slow; M0-010 measures it.
+4. **Model credentials**: whether Sprites has a native Anthropic connector is unverified (custom_api is the fallback). Subscription-login harnesses can't be managed.
+5. **Three-protocol mapping**: §1.1 as executable golden tests; raw payloads kept in the event log.
+6. **Community Rust SDKs** (A2A, AG-UI): wrapped behind our traits and checked against 1.0 fixtures.
+7. **Harness parity**: adapters differ (e.g. opencode's ACP reportedly auto-approves in some builds; pi adapters are community-maintained, with a changing package scope). The conformance matrix surfaces it.
+8. **Approval latency/cost**: holding a Sprite awake for pending approvals costs compute; bounded by the approval TTL and auto-allow presets.
+9. **Sprites limits & cost**: running/warm limits, create rate, checkpoint storage (no API delete). Admission control, reaper, retention, budgets.
+10. **VPN inside Sprites**: may be impossible; the public-hostname gateway is the fallback.
+11. **Plugin & supply-chain security**: §4.8, pinned lockfiles, SBOM.
+12. **ACP v2 / remote transport**: draft. The `TurnEvent` layer and flagged adapter limit churn.
+13. **Container limits for the ledger run**: no macOS, devices or Docker daemon; 4 vCPU. Human items plus CI cover these.
+14. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform.
