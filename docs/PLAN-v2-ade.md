@@ -168,9 +168,9 @@ Delete: the idle scheduler, the single-worker logic, the custom webhook protocol
 
 ## 6. Open questions / risks
 
-1. **Sprites auth**: `FLY_TOKEN` is rejected by `api.sprites.dev` (401). It is probably a Fly API/deploy token rather than a Sprites token. Options: create a Sprites token in the Sprites dashboard / `sprite` CLI, or use the Fly→Sprites token exchange if one exists. This blocks M0.
+1. **Sprites auth**: Sprites belong to Fly (`sprite login` uses Fly's browser login), but `api.sprites.dev` accepted neither a plain `Authorization: Bearer $FLY_TOKEN` (401). It is unverified whether a Fly **org token** (`fly tokens create org`, macaroon `FlyV1 fm2_…`) works with the `FlyV1` scheme. The documented path is a Sprites org token from `sprite org auth`, formatted `org-slug/org-id/token-id/token-value`. Store it as the `SPRITES_API_TOKEN` environment secret. This blocks M0.
 2. **A2A JS SDK 1.0 readiness**: if `@a2a-js/sdk` is still on 0.3, run our own thin 1.0 binding and send `A2A-Version: 1.0`.
 3. **Interactive approvals over A2A**: INPUT_REQUIRED round-trips add latency to every tool prompt. Mitigate with per-workspace policy presets (auto-allow reads/tests).
 4. **Single-user vs multi-tenant** for v2.0. Recommendation: single-org, multi-user first, with schema ready for tenants.
-5. **Desktop**: Tauri (recommended) vs Electron, in case we need Node-native bits.
+5. **Desktop**: Tauri 2 (recommended) vs Electron. Evaluated and rejected for now: **GPUI / gpui-kit** (Rust, desktop-only, pre-1.0, no mobile; it would mean a second UI codebase) and **Tov** (an experimental v0.0.1 language, not a UI toolkit; possibly later for a single-binary sidecar).
 6. **Cost**: one Sprite per workspace. Mitigated by native sleep plus memory policy, and visible via usage API.
