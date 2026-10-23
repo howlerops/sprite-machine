@@ -1,0 +1,753 @@
+# Work ledger for docs/PLAN-v2-ade.md — run with the `ledger` skill.
+# Only the leader edits this file. Format: .claude/skills/ledger/reference/ledger-format.md
+version: 1
+plan: docs/PLAN-v2-ade.md
+branch: v2
+max_parallel: 4
+items:
+  # ───────────────────────── M0 — revive + unblock ─────────────────────────
+  - id: M0-001
+    title: Provide a working Sprites API token
+    milestone: M0
+    priority: 1
+    owner: human
+    status: todo
+    deps: []
+    howto: >
+      Run `sprite login` then `sprite org auth` locally (or create a token in the Sprites
+      dashboard). Add it to this cloud environment's settings under Network secrets as
+      SPRITES_API_TOKEN. Alternatively confirm whether a Fly org token (`fly tokens create org`)
+      works against api.sprites.dev with the `FlyV1` scheme.
+    acceptance:
+      - "`curl -H \"Authorization: Bearer $SPRITES_API_TOKEN\" https://api.sprites.dev/v1/sprites` returns 200"
+    verify: []
+
+  - id: M0-002
+    title: Cargo workspace skeleton + Rust CI job
+    milestone: M0
+    priority: 1
+    deps: []
+    paths: [Cargo.toml, rust-toolchain.toml, crates/*/Cargo.toml, crates/*/src/lib.rs, crates/*/src/main.rs, .github/workflows/rust.yml]
+    context: ["docs/PLAN-v2-ade.md#6-repo-plan"]
+    acceptance:
+      - "Workspace members exist as empty crates: protocol, sprites, loadout, netprofile, plugin-host, sidecar, hub, client-core, cli"
+      - "rust-toolchain.toml pins a stable toolchain with rustfmt + clippy"
+      - "New workflow runs fmt --check, clippy -D warnings, test on push to v2; legacy TS CI untouched"
+    verify:
+      - cargo fmt --all --check
+      - cargo clippy --workspace --all-targets -- -D warnings
+      - cargo test --workspace
+
+  - id: M0-003
+    title: "protocol crate: A2A 1.0 types"
+    milestone: M0
+    priority: 1
+    size: M
+    deps: [M0-002]
+    paths: [crates/protocol/**]
+    context:
+      - https://a2a-protocol.org/latest/specification/
+      - "Evaluate ra2a / a2a-rs types first; otherwise generate from the official a2a.proto or JSON Schema. Wrap behind crate::a2a."
+    acceptance:
+      - "crate::a2a exposes AgentCard, Message, Part, Task, TaskState, TaskStatusUpdateEvent, TaskArtifactUpdateEvent, StreamResponse and JSON-RPC request/response envelopes"
+      - "Serde round-trip tests pass on the spec's example payloads (vendored under crates/protocol/tests/fixtures/a2a/)"
+      - "A short DECISION.md in the crate says which source was used and why"
+    verify: ["cargo test -p protocol a2a"]
+
+  - id: M0-004
+    title: "protocol crate: ACP + AG-UI types"
+    milestone: M0
+    priority: 1
+    size: M
+    deps: [M0-002]
+    paths: [crates/protocol/src/acp*, crates/protocol/src/agui*, crates/protocol/tests/fixtures/agui/**, crates/protocol/tests/agui*.rs, crates/protocol/Cargo.toml]
+    context:
+      - https://agentclientprotocol.com (Rust SDK `agent-client-protocol` 1.x)
+      - https://docs.ag-ui.com/concepts/events
+    acceptance:
+      - "crate::acp re-exports the official ACP Rust SDK schema types (v1)"
+      - "crate::agui has every AG-UI 1.0 event type (lifecycle, text, tool call, state, activity, reasoning, subagent, raw, custom) with serde matching the spec's SCREAMING_SNAKE `type` tags"
+      - "Round-trip tests on fixture events"
+    verify: ["cargo test -p protocol"]
+
+  - id: M0-005
+    title: "sprites crate: generated client from openapi.json"
+    milestone: M0
+    priority: 1
+    size: M
+    deps: [M0-002]
+    paths: [crates/sprites/**]
+    context: ["https://api.sprites.dev/openapi.json (vendor it into crates/sprites/openapi.json)", "packages/sprites-client/src/fly.ts (v1 behaviour: NDJSON checkpoint stream, exec WS)"]
+    acceptance:
+      - "Typed client generated (progenitor or build.rs) for sprites, checkpoints, restore, services, fs, exec, policy, connectors, usage"
+      - "Hand-written helpers: checkpoint() parses the NDJSON stream to a checkpoint id; exec over WebSocket"
+      - "wiremock tests cover create/get/checkpoint/restore/service put"
+    verify: ["cargo test -p sprites"]
+
+  - id: M0-006
+    title: "cli: live Sprites smoke command"
+    milestone: M0
+    deps: [M0-001, M0-005]
+    paths: [crates/cli/**]
+    acceptance:
+      - "`cargo run -p cli -- smoke` creates sprite smoke-<rand>, execs `uname -a`, checkpoints, writes a file, restores, confirms the file is gone, deletes the sprite"
+      - "Prints storage/SBD info if the API exposes it"
+    verify: ["cargo run -p cli -- smoke"]
+
+  - id: M0-007
+    title: Audit existing Sprites and migrate pre-10/6 ones to SBD
+    milestone: M0
+    owner: leader
+    deps: [M0-001]
+    context: ["https://docs.fly.io/sprites/sprite-maintenance#storage-upgrades"]
+    acceptance:
+      - "Every Sprite in the org is listed in docs/spikes/sprites-audit.md with created_at and storage status; old ones migrated or deleted (with user OK)"
+    verify: []
+
+  - id: M0-008
+    title: "Spike: Tailscale / WireGuard inside a Sprite"
+    milestone: M0
+    risk: high
+    size: M
+    deps: [M0-006]
+    paths: [docs/spikes/networking.md, crates/cli/src/spikes/**]
+    context: ["docs/PLAN-v2-ade.md#47-networking-and-vpns", "https://community.fly.io/t/tailscale-on-sprites/27525"]
+    acceptance:
+      - "Report says, with command output, whether tailscaled (userspace networking, DERP-only) can join a tailnet from a Sprite with a network policy allowlist"
+      - "Same for a userspace WireGuard client (boringtun) to a test peer"
+      - "Recommendation: which profile types are viable in-Sprite vs need the gateway"
+    verify: ["test -s docs/spikes/networking.md"]
+
+  - id: M0-review
+    title: M0 exit review
+    milestone: M0
+    owner: leader
+    deps: [M0-003, M0-004, M0-005, M0-006, M0-007, M0-008]
+    acceptance: ["Plan §5 M0 exit criteria all hold"]
+    verify: ["cargo test --workspace"]
+
+  # ───────────────────────── M1a — sidecar ─────────────────────────
+  - id: M1A-001
+    title: "sidecar: axum server skeleton, config, /healthz, tracing"
+    milestone: M1a
+    priority: 1
+    deps: [M0-002]
+    paths: [crates/sidecar/**]
+    acceptance: ["`sidecar --port 0` serves GET /healthz 200; config from env with documented defaults"]
+    verify: ["cargo test -p sidecar"]
+
+  - id: M1A-002
+    title: "acp-mock: scriptable mock ACP agent binary for tests"
+    milestone: M1a
+    priority: 1
+    deps: [M0-004]
+    paths: [crates/acp-mock/**, Cargo.toml]
+    acceptance:
+      - "Speaks ACP v1 over stdio; a JSON script decides what it emits: text chunks, thought chunks, tool call with diff content, plan, permission request, terminal create, usage, end_turn"
+      - "Used by later tests via CARGO_BIN_EXE_acp-mock"
+    verify: ["cargo test -p acp-mock"]
+
+  - id: M1A-003
+    title: "sidecar: ACP client — spawn harness, initialize, session/new, prompt turn"
+    milestone: M1a
+    size: M
+    deps: [M1A-001, M1A-002]
+    paths: [crates/sidecar/src/acp/**]
+    acceptance:
+      - "Spawns a configured ACP command, runs initialize + session/new (cwd, mcpServers) + session/prompt, streams session/update into a channel"
+      - "session/cancel supported; child process is reaped on drop"
+    verify: ["cargo test -p sidecar acp::"]
+
+  - id: M1A-004
+    title: "sidecar: ACP client-side fs + terminal methods"
+    milestone: M1a
+    size: M
+    deps: [M1A-003]
+    paths: [crates/sidecar/src/acp/client_methods/**]
+    acceptance:
+      - "fs/read_text_file and fs/write_text_file confined to the workspace root (path traversal test)"
+      - "terminal/create, output, wait_for_exit, kill, release backed by a PTY (portable-pty)"
+    verify: ["cargo test -p sidecar client_methods"]
+
+  - id: M1A-005
+    title: "sidecar: A2A server — agent card + JSON-RPC task ops"
+    milestone: M1a
+    size: M
+    deps: [M1A-001, M0-003]
+    paths: [crates/sidecar/src/a2a/**]
+    acceptance:
+      - "Serves the agent card at the A2A 1.0 well-known URI with streaming + pushNotifications capabilities and our extensions listed"
+      - "SendMessage, SendStreamingMessage (SSE), GetTask, ListTasks, CancelTask, SubscribeToTask implemented over an in-memory task store; honors A2A-Version and A2A-Extensions headers"
+    verify: ["cargo test -p sidecar a2a::"]
+
+  - id: M1A-006
+    title: "ACP→A2A mapping per plan §1.1 with golden tests"
+    milestone: M1a
+    size: M
+    risk: high
+    deps: [M1A-003, M1A-005]
+    paths: [crates/protocol/src/mapping/acp_a2a*, crates/protocol/tests/golden/acp_a2a/**, crates/sidecar/src/bridge/**]
+    acceptance:
+      - "Every row of plan §1.1 ACP→A2A column has a golden fixture test"
+      - "Extension payloads use https://sprite-machine.dev/ext/<name>/v1 URIs; schemas in crates/protocol/schemas/"
+      - "Raw ACP payload preserved in message metadata"
+    verify: ["cargo test -p protocol mapping", "cargo test -p sidecar bridge"]
+
+  - id: M1A-007
+    title: "Permission request ⇄ INPUT_REQUIRED round trip"
+    milestone: M1a
+    deps: [M1A-006]
+    paths: [crates/sidecar/src/bridge/permission*]
+    acceptance:
+      - "ACP session/request_permission puts the A2A task in TASK_STATE_INPUT_REQUIRED with an ext/approval DataPart listing the ACP options"
+      - "A SendMessage reply choosing an option resolves the ACP request; timeouts and cancel are handled"
+    verify: ["cargo test -p sidecar permission"]
+
+  - id: M1A-008
+    title: "A2A push notification configs + webhook delivery"
+    milestone: M1a
+    deps: [M1A-005]
+    paths: [crates/sidecar/src/a2a/push/**]
+    acceptance:
+      - "Create/Get/List/Delete push config ops; deliveries POST StreamResponse with the config token; retry with backoff; idempotent delete"
+    verify: ["cargo test -p sidecar push"]
+
+  - id: M1A-009
+    title: "Checkpoint per turn via sprites crate"
+    milestone: M1a
+    deps: [M1A-006, M0-005]
+    paths: [crates/sidecar/src/checkpoint/**]
+    acceptance:
+      - "On end_turn: checkpoint with comment `task:<id> turn:<n>`, emit ext/checkpoint artifact; failures surface as a non-fatal status message"
+      - "Sprites client behind a trait; tested with a fake"
+    verify: ["cargo test -p sidecar checkpoint"]
+
+  - id: M1A-010
+    title: "Run A2A TCK against sidecar + acp-mock in CI"
+    milestone: M1a
+    size: M
+    deps: [M1A-007, M1A-008]
+    paths: [.github/workflows/rust.yml, scripts/tck.sh, docs/ledger/reports/**]
+    context: ["Official A2A conformance kit (a2a-tck) — find current repo/version"]
+    acceptance: ["scripts/tck.sh starts sidecar with acp-mock and runs the TCK JSON-RPC suite; CI job green or failures listed as new ledger items"]
+    verify: ["bash scripts/tck.sh"]
+
+  - id: M1A-011
+    title: "cli: deploy sidecar to a Sprite as a service"
+    milestone: M1a
+    deps: [M1A-005, M0-006]
+    paths: [crates/cli/src/deploy/**]
+    acceptance:
+      - "`cli sidecar deploy <sprite>` cross-builds (musl), uploads via fs/write, PUTs a service with http_port 8080, sets url auth=sprite, waits for /healthz via the Sprite URL"
+    verify: ["cargo run -p cli -- sidecar deploy smoke-sidecar && cargo run -p cli -- sidecar status smoke-sidecar"]
+
+  - id: M1A-012
+    title: Provide model credentials as a Sprites connector
+    milestone: M1a
+    owner: human
+    deps: [M0-001]
+    howto: "Create an Anthropic API-key connector (or approve a managed one) in the Sprites org; tell the leader its id. Never paste the key into chat."
+    acceptance: ["GET /v1/oauth/connections lists an Anthropic connector"]
+    verify: []
+
+  - id: M1A-013
+    title: "E2E: claude-agent-acp in a Sprite answers an A2A task"
+    milestone: M1a
+    risk: high
+    deps: [M1A-011, M1A-012, M1A-009]
+    paths: [crates/cli/src/e2e/**, docs/spikes/m1a-e2e.md]
+    acceptance: ["`cli e2e claude` sends a task that edits a file; receives text, tool call, diff artifact, checkpoint artifact, COMPLETED; permission prompt answered via INPUT_REQUIRED"]
+    verify: ["cargo run -p cli -- e2e claude"]
+
+  - id: M1A-review
+    title: M1a exit review
+    milestone: M1a
+    owner: leader
+    deps: [M1A-004, M1A-010, M1A-013]
+    acceptance: ["Plan §5 M1a exit criteria all hold"]
+    verify: ["cargo test --workspace"]
+
+  # ───────────────────────── M1b — client spike ─────────────────────────
+  - id: M1B-001
+    title: Devices, accounts and a macOS build path
+    milestone: M1b
+    priority: 1
+    owner: human
+    deps: []
+    howto: >
+      Provide: Apple Developer account + a physical iPhone, a mid-range Android phone, and either a
+      Mac or approval for GitHub macOS runners (iOS builds cannot run in the Linux cloud container).
+    acceptance: ["Leader confirms signing identity + devices available"]
+    verify: []
+
+  - id: M1B-002
+    title: "agui-fixture: synthetic AG-UI stream server"
+    milestone: M1b
+    priority: 1
+    deps: [M0-004]
+    paths: [crates/agui-fixture/**, Cargo.toml]
+    acceptance: ["Serves SSE scenarios: 10k-event transcript, 5k-line diff, terminal byte stream, approval interrupt; configurable rate"]
+    verify: ["cargo test -p agui-fixture"]
+
+  - id: M1B-003
+    title: "gpui-kit desktop prototype of the task screen"
+    milestone: M1b
+    size: L
+    risk: high
+    deps: [M1B-002]
+    paths: [spikes/gpui/**]
+    acceptance: ["Virtualized transcript, diff view (gpui-kit editor), alacritty_terminal pane, approval card; consumes agui-fixture; builds on Linux"]
+    verify: ["cargo build --manifest-path spikes/gpui/Cargo.toml --release"]
+
+  - id: M1B-004
+    title: "gpui-kit mobile hosts (iOS Swift + Android) mounting the prototype"
+    milestone: M1b
+    size: L
+    risk: high
+    deps: [M1B-003, M1B-001]
+    paths: [spikes/gpui/mobile/**]
+    context: ["https://gpui-kit.com/docs/mobile/", "https://github.com/longbridge/gpui-mobile"]
+    acceptance: ["Runs on a physical iPhone and Android; native push token obtained by the host"]
+    verify: ["Leader confirms on-device run (screen recording in report)"]
+
+  - id: M1B-005
+    title: "Flutter prototype of the task screen"
+    milestone: M1b
+    size: L
+    deps: [M1B-002]
+    paths: [spikes/flutter/**]
+    acceptance: ["Same features as M1B-003 using AG-UI Dart SDK, xterm.dart, a diff widget; runs on Linux desktop + Android"]
+    verify: ["cd spikes/flutter && flutter test && flutter build linux"]
+
+  - id: M1B-006
+    title: Benchmark protocol + metric capture scripts
+    milestone: M1b
+    deps: [M1B-002]
+    paths: [spikes/bench/**]
+    acceptance: ["Documented procedure + scripts for frame time, input latency, memory, cold start, binary size, IME, accessibility checks per platform"]
+    verify: ["test -s spikes/bench/README.md"]
+
+  - id: M1B-007
+    title: Run benchmarks on physical devices
+    milestone: M1b
+    owner: human
+    deps: [M1B-004, M1B-005, M1B-006]
+    howto: "Follow spikes/bench/README.md on the iPhone, Android and one desktop; commit results to spikes/bench/results/."
+    acceptance: ["Results committed for both stacks on all three devices"]
+    verify: []
+
+  - id: M1B-008
+    title: "ADR 0001: client stack decision"
+    milestone: M1b
+    owner: leader
+    deps: [M1B-007]
+    acceptance: ["docs/adr/0001-client-stack.md picks gpui-kit / Flutter / hybrid from the numbers; ledger M3 items updated accordingly"]
+    verify: ["test -s docs/adr/0001-client-stack.md"]
+
+  # ───────────────────────── M2 — hub ─────────────────────────
+  - id: M2-001
+    title: "hub: axum + sqlx Postgres skeleton and schema migrations"
+    milestone: M2
+    priority: 1
+    size: M
+    deps: [M0-002]
+    paths: [crates/hub/**]
+    acceptance:
+      - "Migrations for users, orgs, agents, agent_cards, workspaces, sprites, tasks, task_events(seq), artifacts, checkpoints, push_targets, usage_daily"
+      - "Integration tests run against a throwaway Postgres (testcontainers or docker service in CI)"
+    verify: ["cargo test -p hub"]
+
+  - id: M2-002
+    title: Provision Fly app + Managed Postgres for the hub
+    milestone: M2
+    owner: leader
+    deps: [M0-001]
+    acceptance: ["Fly app and MPG cluster exist; DATABASE_URL set as a Fly secret; names recorded in docs/ops/hub.md"]
+    verify: []
+
+  - id: M2-003
+    title: "hub: agent registry (add by URL, card fetch/validate/cache)"
+    milestone: M2
+    deps: [M2-001, M0-003]
+    paths: [crates/hub/src/agents/**]
+    acceptance: ["POST /api/agents {url} fetches the well-known card, validates, stores; refresh respects caching headers; signature verified when present"]
+    verify: ["cargo test -p hub agents"]
+
+  - id: M2-004
+    title: "hub: A2A client ingest into append-only task_events"
+    milestone: M2
+    size: M
+    deps: [M2-003]
+    paths: [crates/hub/src/ingest/**]
+    acceptance: ["Create task, stream via SendStreamingMessage/SubscribeToTask, persist each StreamResponse with monotonic seq; resubscribe on disconnect without duplicates"]
+    verify: ["cargo test -p hub ingest"]
+
+  - id: M2-005
+    title: "hub: push-notification webhook ingest"
+    milestone: M2
+    deps: [M2-004]
+    paths: [crates/hub/src/ingest/push*]
+    acceptance: ["Per-task push config registered with a random token; webhook verifies token; deduplicates against streamed events"]
+    verify: ["cargo test -p hub push"]
+
+  - id: M2-006
+    title: "A2A→AG-UI projection with golden tests"
+    milestone: M2
+    size: M
+    risk: high
+    deps: [M2-004, M0-004]
+    paths: [crates/protocol/src/mapping/a2a_agui*, crates/protocol/tests/golden/a2a_agui/**]
+    acceptance: ["Deterministic projection for every row of plan §1.1 A2A→AG-UI; replay from any seq yields identical events; StateSnapshot/StateDelta via JSON Patch"]
+    verify: ["cargo test -p protocol a2a_agui"]
+
+  - id: M2-007
+    title: "hub: AG-UI endpoints (task run stream, inbox stream, interrupt resume)"
+    milestone: M2
+    size: M
+    deps: [M2-006, M2-005]
+    paths: [crates/hub/src/agui/**]
+    acceptance: ["SSE run stream per task with ?after=seq resume; multiplexed inbox stream; resume input maps to A2A SendMessage on the task"]
+    verify: ["cargo test -p hub agui"]
+
+  - id: M2-008
+    title: "hub: OIDC login (GitHub) + API auth"
+    milestone: M2
+    deps: [M2-001]
+    paths: [crates/hub/src/auth/**]
+    acceptance: ["GitHub OIDC/OAuth login, session tokens for native clients (PKCE), middleware on all /api routes; org membership"]
+    verify: ["cargo test -p hub auth"]
+
+  - id: M2-009
+    title: "hub: APNs/FCM push on INPUT_REQUIRED and completion"
+    milestone: M2
+    deps: [M2-007]
+    paths: [crates/hub/src/notify/**]
+    acceptance: ["Register device tokens; send on state change; collapse duplicates; provider behind trait with fake in tests"]
+    verify: ["cargo test -p hub notify"]
+
+  - id: M2-010
+    title: "hub: Dockerfile, fly.toml, deploy workflow"
+    milestone: M2
+    deps: [M2-002, M2-007, M2-008]
+    paths: [crates/hub/Dockerfile, fly.hub.toml, .github/workflows/deploy-hub.yml]
+    acceptance: ["Deploy runs migrations on release; /healthz green on Fly; legacy control-plane deploy left intact until M6-005"]
+    verify: ["Leader confirms `curl https://<hub>/healthz` = 200"]
+
+  - id: M2-review
+    title: M2 exit review
+    milestone: M2
+    owner: leader
+    deps: [M2-009, M2-010]
+    acceptance: ["Plan §5 M2 exit criteria; register the M1a sidecar as an agent and drive a task through the hub with curl"]
+    verify: ["cargo test --workspace"]
+
+  # ───────────────────────── M3 — client core ─────────────────────────
+  # Paths assume gpui-kit; the leader rewrites these after M1B-008 if Flutter/hybrid wins.
+  - id: M3-001
+    title: "client-core: AG-UI client, reconnect, local event store, state apply"
+    milestone: M3
+    size: M
+    deps: [M2-007]
+    paths: [crates/client-core/**]
+    acceptance: ["Resumes from last seq after network loss; SQLite cache; JSON-Patch state apply; usable from GPUI and via flutter_rust_bridge"]
+    verify: ["cargo test -p client-core"]
+
+  - id: M3-002
+    title: "client: app shell, login, settings, navigation (desktop + mobile layouts)"
+    milestone: M3
+    size: M
+    deps: [M1B-008, M3-001, M2-008]
+    paths: [crates/client-gpui/src/shell/**]
+    acceptance: ["PKCE login against hub; responsive layouts; theme light/dark"]
+    verify: ["cargo test -p client-gpui shell"]
+
+  - id: M3-003
+    title: "client: inbox across the fleet"
+    milestone: M3
+    deps: [M3-002]
+    paths: [crates/client-gpui/src/inbox/**]
+    acceptance: ["Live task list with needs-input badges from the inbox stream"]
+    verify: ["cargo test -p client-gpui inbox"]
+
+  - id: M3-004
+    title: "client: task view — transcript, reasoning, tool calls, plan, cost meters"
+    milestone: M3
+    size: M
+    deps: [M3-002]
+    paths: [crates/client-gpui/src/task/**]
+    acceptance: ["Renders every AG-UI event type; virtualized; 10k-event fixture stays smooth (bench script)"]
+    verify: ["cargo test -p client-gpui task"]
+
+  - id: M3-005
+    title: "client: diff viewer + approval interrupt cards"
+    milestone: M3
+    deps: [M3-004]
+    paths: [crates/client-gpui/src/diff/**, crates/client-gpui/src/approval/**]
+    acceptance: ["Unified + split diff; approval card shows ACP options and resumes the run"]
+    verify: ["cargo test -p client-gpui diff approval"]
+
+  - id: M3-006
+    title: "client: agent registry screens"
+    milestone: M3
+    deps: [M3-002]
+    paths: [crates/client-gpui/src/agents/**]
+    acceptance: ["Add agent by URL, show card/skills/health"]
+    verify: ["cargo test -p client-gpui agents"]
+
+  - id: M3-007
+    title: "client: native push registration (iOS/Android/desktop)"
+    milestone: M3
+    deps: [M3-002, M2-009]
+    paths: [crates/client-gpui/mobile/**, crates/client-gpui/src/notify/**]
+    acceptance: ["Device token registered with hub; tapping a notification opens the task"]
+    verify: ["Leader confirms on device"]
+
+  - id: M3-review
+    title: M3 exit review
+    milestone: M3
+    owner: leader
+    deps: [M3-003, M3-005, M3-006, M3-007]
+    acceptance: ["Plan §5 M3 exit criteria on desktop + physical phone"]
+    verify: ["cargo test --workspace"]
+
+  # ───────────────────────── M4 — workspaces ─────────────────────────
+  - id: M4-001
+    title: "cli: golden template build + checkpoint, rebuilt in CI"
+    milestone: M4
+    size: M
+    deps: [M1A-011]
+    paths: [crates/cli/src/template/**, .github/workflows/template.yml]
+    acceptance: ["Installs toolchains, ACP harnesses, sidecar service; checkpoints; records template id in hub"]
+    verify: ["cargo run -p cli -- template build --dry-run"]
+
+  - id: M4-002
+    title: "hub: workspace create from template with labels + policies"
+    milestone: M4
+    deps: [M4-001, M2-001]
+    paths: [crates/hub/src/workspaces/**]
+    acceptance: ["Creates a Sprite per workspace, restores the template, sets labels and default-deny network/privileges/memory policies, registers its sidecar as an agent"]
+    verify: ["cargo test -p hub workspaces"]
+
+  - id: M4-003
+    title: "hub: connector management + secret injection"
+    milestone: M4
+    deps: [M4-002]
+    paths: [crates/hub/src/connectors/**, crates/sidecar/src/secrets/**]
+    acceptance: ["Create/list API-key, OAuth and custom-API connectors; sidecar obtains credentials at run time; nothing written to disk (test asserts)"]
+    verify: ["cargo test -p hub connectors && cargo test -p sidecar secrets"]
+
+  - id: M4-004
+    title: "Checkpoint timeline: list, restore, fork-to-new-workspace"
+    milestone: M4
+    deps: [M4-002]
+    paths: [crates/hub/src/checkpoints/**]
+    acceptance: ["API lists checkpoints with task/turn labels; restore rewinds; fork creates a new workspace from a checkpoint"]
+    verify: ["cargo test -p hub checkpoints"]
+
+  - id: M4-005
+    title: "hub: exec + fs proxy for terminal and file tree"
+    milestone: M4
+    deps: [M4-002]
+    paths: [crates/hub/src/proxy/**]
+    acceptance: ["WS terminal proxied to Sprites exec with auth; fs list/read/write proxied; path confined"]
+    verify: ["cargo test -p hub proxy"]
+
+  - id: M4-006
+    title: "client: workspace screens (timeline, terminal, files, preview)"
+    milestone: M4
+    size: M
+    deps: [M4-004, M4-005, M3-002]
+    paths: [crates/client-gpui/src/workspace/**]
+    acceptance: ["Timeline restore/fork; alacritty terminal; file tree + editor; preview opens Sprite URL"]
+    verify: ["cargo test -p client-gpui workspace"]
+
+  - id: M4-review
+    title: M4 exit review
+    milestone: M4
+    owner: leader
+    deps: [M4-003, M4-006]
+    acceptance: ["Plan §5 M4 exit criteria"]
+    verify: ["cargo test --workspace"]
+
+  # ───────────────────────── M5 — fleet, loadouts, networking ─────────────────────────
+  - id: M5-001
+    title: "loadout crate: schema, merge (org→workspace→task), validation"
+    milestone: M5
+    deps: [M0-002]
+    paths: [crates/loadout/**]
+    acceptance: ["Parses plan §4.6 YAML; merge precedence tested; JSON Schema exported"]
+    verify: ["cargo test -p loadout"]
+
+  - id: M5-002
+    title: "loadout renderers: claude + codex (skills, commands, subagents, hooks, MCP)"
+    milestone: M5
+    deps: [M5-001]
+    paths: [crates/loadout/src/render/claude*, crates/loadout/src/render/codex*, crates/loadout/tests/render_*]
+    context: ["manifest/claude-settings, manifest/codex-settings (v1 layouts)"]
+    acceptance: ["Snapshot tests of rendered trees; v1 manifest/ reproduced as the default loadout"]
+    verify: ["cargo test -p loadout render"]
+
+  - id: M5-003
+    title: "loadout renderers: opencode + pi + gemini + goose"
+    milestone: M5
+    deps: [M5-001]
+    paths: [crates/loadout/src/render/opencode*, crates/loadout/src/render/pi*, crates/loadout/src/render/gemini*, crates/loadout/src/render/goose*]
+    context: ["manifest/pi-settings (v1)", "https://opencode.ai/docs/acp"]
+    acceptance: ["Snapshot tests per harness; unsupported features reported, not dropped silently"]
+    verify: ["cargo test -p loadout render"]
+
+  - id: M5-004
+    title: "Harness conformance checklist runner (per ACP adapter)"
+    milestone: M5
+    size: M
+    deps: [M1A-013, M5-002, M5-003]
+    paths: [crates/cli/src/conformance/**, docs/harness-matrix.md]
+    acceptance: ["For claude, codex, opencode, pi, gemini, goose: checks permission prompts, diffs, terminals, MCP via session/new, resume/fork; writes docs/harness-matrix.md"]
+    verify: ["cargo run -p cli -- conformance --all --report docs/harness-matrix.md"]
+
+  - id: M5-005
+    title: "MCP injection via ACP session/new + connector auth"
+    milestone: M5
+    deps: [M5-001, M4-003]
+    paths: [crates/sidecar/src/mcp/**]
+    acceptance: ["Loadout MCP servers passed as mcpServers; remote HTTP MCP auth via connector; native-config fallback for harnesses that ignore it"]
+    verify: ["cargo test -p sidecar mcp"]
+
+  - id: M5-006
+    title: "netprofile: public + wireguard (boringtun) + SOCKS for harness"
+    milestone: M5
+    size: M
+    risk: high
+    deps: [M0-008, M5-001]
+    paths: [crates/netprofile/**]
+    acceptance: ["Profiles applied by sidecar; egress test against a WireGuard peer in CI (docker); denied-domain log"]
+    verify: ["cargo test -p netprofile"]
+
+  - id: M5-007
+    title: "Egress gateway Fly Machine image (tailnet/WireGuard/6PN)"
+    milestone: M5
+    size: M
+    deps: [M0-008]
+    paths: [gateway/**]
+    acceptance: ["Image joins tailnet via ephemeral key from connector; mTLS proxy for Sprites; deploy doc"]
+    verify: ["docker build gateway/"]
+
+  - id: M5-008
+    title: "E2E: third-party BYO A2A agent"
+    milestone: M5
+    deps: [M2-review]
+    paths: [examples/byo-agent/**, crates/cli/src/e2e/byo*]
+    acceptance: ["A sample agent built on an official A2A SDK (Python or Go) registered by URL renders as chat + artifacts through hub and client"]
+    verify: ["cargo run -p cli -- e2e byo"]
+
+  - id: M5-009
+    title: "Delegation: agent→agent tasks through the hub + Subagent* events"
+    milestone: M5
+    size: M
+    deps: [M2-review]
+    paths: [crates/hub/src/delegation/**]
+    acceptance: ["A task can spawn child tasks on other agents; parent/child linkage; AG-UI SubagentStarted/Finished/Error emitted"]
+    verify: ["cargo test -p hub delegation"]
+
+  - id: M5-010
+    title: "Usage/cost: Sprites usage + connector spend → dashboard"
+    milestone: M5
+    deps: [M4-003]
+    paths: [crates/hub/src/usage/**, crates/client-gpui/src/usage/**]
+    acceptance: ["Daily rollup per workspace/agent/model; client chart"]
+    verify: ["cargo test -p hub usage"]
+
+  - id: M5-review
+    title: M5 exit review
+    milestone: M5
+    owner: leader
+    deps: [M5-004, M5-005, M5-006, M5-007, M5-008, M5-009, M5-010]
+    acceptance: ["Plan §5 M5 exit criteria"]
+    verify: ["cargo test --workspace"]
+
+  # ───────────────────────── M5b — app plugins ─────────────────────────
+  - id: M5B-001
+    title: "plugin-host: wasmtime + WIT interface v0"
+    milestone: M5b
+    size: M
+    risk: high
+    deps: [M0-002]
+    paths: [crates/plugin-host/**, wit/**]
+    acceptance: ["WIT worlds for task-hook and renderer; deny-by-default capabilities; fuel/memory limits; example plugin test"]
+    verify: ["cargo test -p plugin-host"]
+
+  - id: M5B-002
+    title: "First-party plugins: Slack notifier + custom renderer"
+    milestone: M5b
+    deps: [M5B-001, M2-review]
+    paths: [plugins/**]
+    acceptance: ["Both build to wasm32-wasip2 and load in hub/client tests"]
+    verify: ["cargo test -p plugin-host --features e2e"]
+
+  - id: M5B-003
+    title: "Org plugin/skill catalog with pinning + allowlist"
+    milestone: M5b
+    deps: [M5B-001, M5-001]
+    paths: [crates/hub/src/catalog/**]
+    acceptance: ["Sources: ACP registry, MCP registry, git; versions pinned; allowlist enforced for harness-native plugins"]
+    verify: ["cargo test -p hub catalog"]
+
+  # ───────────────────────── M6 — ship ─────────────────────────
+  - id: M6-001
+    title: "GitHub PR flow via connector"
+    milestone: M6
+    deps: [M4-003]
+    paths: [crates/hub/src/github/**]
+    acceptance: ["From a workspace: branch, push, open PR; PR link artifact"]
+    verify: ["cargo test -p hub github"]
+
+  - id: M6-002
+    title: Authorize mcp.fly.io for the org
+    milestone: M6
+    owner: human
+    deps: []
+    howto: "Connect https://mcp.fly.io/ via its browser flow; select org, allowed apps and Sprites permissions."
+    acceptance: ["Leader can list approved apps through the MCP"]
+    verify: []
+
+  - id: M6-003
+    title: "Promote workspace to a Fly app via mcp.fly.io"
+    milestone: M6
+    risk: high
+    deps: [M6-002, M5-005]
+    paths: [crates/hub/src/promote/**]
+    acceptance: ["Guided task creates Machine, volume, secrets on an approved app from the workspace service definition"]
+    verify: ["cargo test -p hub promote"]
+
+  - id: M6-004
+    title: "ACP proxy: Open in Zed"
+    milestone: M6
+    deps: [M2-review]
+    paths: [crates/acp-bridge/**]
+    acceptance: ["Local stdio↔WS bridge binary; Zed agent_servers config documented; prompt round-trips to a fleet agent"]
+    verify: ["cargo test -p acp-bridge"]
+
+  - id: M6-005
+    title: Retire v1 TypeScript apps/packages
+    milestone: M6
+    deps: [M2-010, M3-review]
+    paths: [apps/**, packages/**, package.json, pnpm-*.yaml, .github/workflows/ci.yml, .github/workflows/deploy.yml, .github/workflows/eas-build.yml, Dockerfile, fly.toml]
+    acceptance: ["v1 code removed (tag v1-final first); CI only Rust"]
+    verify: ["cargo test --workspace"]
+
+  - id: M6-006
+    title: "Release builds: desktop signing/notarization, TestFlight, Play internal"
+    milestone: M6
+    owner: human
+    deps: [M3-review, M1B-001]
+    howto: "Provide signing certs/keys as CI secrets; approve store listings."
+    acceptance: ["Signed builds installable on all five platforms"]
+    verify: []
+
+  - id: M6-review
+    title: M6 exit review
+    milestone: M6
+    owner: leader
+    deps: [M6-001, M6-003, M6-004, M6-005, M6-006]
+    acceptance: ["Plan §5 M6 exit criteria"]
+    verify: ["cargo test --workspace"]
