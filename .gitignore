@@ -36,7 +36,8 @@ android/
 # tooling caches
 .playwright-mcp/
 .omx/
-.claude/
+.claude/*
+!.claude/skills/
 
 # Expo / EAS generated outputs
 apps/mobile/dist-web/
