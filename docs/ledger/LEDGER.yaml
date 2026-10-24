@@ -43,7 +43,7 @@ items:
     acceptance:
       - 'Root Cargo.toml: `[workspace] members = ["crates/*"]`, resolver 2, shared [workspace.dependencies] (tokio, serde, serde_json, axum, reqwest, tracing, thiserror, anyhow)'
       - 'rust-toolchain.toml pins stable with rustfmt, clippy and targets x86_64-unknown-linux-musl, wasm32-wasip2'
-      - 'Crates exist with one trivial test each: protocol (src/{a2a,acp,agui,mapping}/mod.rs stubs, schemas/), sprites, loadout (src/render/mod.rs stub), netprofile, plugin-host, sidecar (src/{acp,a2a,bridge,store,keepalive,auth,preview,checkpoint}/mod.rs stubs), acp-mock, agui-fixture, hub, client-core, acp-bridge, cli'
+      - 'Crates exist with one trivial test each: protocol (src/{a2a,acp,agui,mapping}/mod.rs stubs, schemas/), sprites, loadout (src/render/mod.rs stub), netprofile, plugin-host, sidecar (src/{acp,a2a,bridge,store,keepalive,auth,preview,checkpoint}/mod.rs stubs), acp-mock, agui-fixture, hub, client-core, acp-bridge, flow, fleet-mcp, cli'
       - 'rust.yml runs fmt --check, clippy -D warnings, test on push/PR to v2 with a postgres service; legacy TS CI untouched'
     verify:
       - cargo fmt --all --check
@@ -1699,6 +1699,257 @@ items:
     deps: [M5-007, M5-008b, M5-010, M5-011, M5-012, M5-013, M5-014, M5-015, M5-016, M5-017]
     acceptance: ['Plan §5 M5 criteria with evidence']
     verify: ['cargo test --workspace']
+
+  # ════════════════════════ M5c — multi-agent flows & loops ════════════════════════
+  - id: M5C-001
+    title: 'flow: YAML schema, CEL conditions, validation'
+    milestone: M5c
+    priority: 1
+    deps: [M0-002]
+    paths: [crates/flow/src/schema/**, crates/flow/src/cel*, crates/flow/tests/schema.rs]
+    context:
+      [
+        'docs/PLAN-v2-ade.md §4.9 (Flow definition, Step types)',
+        'https://github.com/cel-rust/cel-rust',
+      ]
+    acceptance:
+      - 'Parses every §4.9 step type; loops without max_iterations are rejected; step ids unique; CEL expressions type-checked against step outputs at load time'
+      - 'JSON Schema for flow files exported; the §4.9 example validates'
+    verify: ['cargo test -p flow --test schema']
+
+  - id: M5C-002
+    title: 'flow engine core: durable state machine in Postgres'
+    milestone: M5c
+    size: M
+    risk: high
+    deps: [M5C-001, M2-001]
+    paths: [crates/flow/src/engine/**, crates/hub/migrations/*flow*, crates/flow/tests/engine.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (Guardrails), §1.2 (Flow run row)', 'crates/hub/src/db']
+    acceptance:
+      - 'flow_runs + flow_steps(run_id, step_id, iteration, status, output, idempotency_key) tables'
+      - 'Sequential + branch steps execute through a StepRunner trait; engine crash mid-step resumes without re-running completed steps (kill/restart test)'
+      - 'Cancel cascades to running steps; pause/resume'
+    verify: ['cargo test -p flow --test engine']
+
+  - id: M5C-003
+    title: 'flow steps: agent (A2A task) with structured output'
+    milestone: M5c
+    deps: [M5C-002, M2-005]
+    paths: [crates/flow/src/steps/agent*, crates/flow/tests/step_agent.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (agent step)', 'crates/hub/src/ingest']
+    acceptance:
+      [
+        'Agent selected by id/label/skill; prompt template rendered from inputs and prior outputs; output validated against JSON Schema (retry once with the validation error); ext/flow metadata + referenceTaskIds on the task',
+      ]
+    verify: ['cargo test -p flow --test step_agent']
+
+  - id: M5C-004
+    title: 'flow steps: parallel / map with join modes and concurrency limit'
+    milestone: M5c
+    deps: [M5C-002]
+    paths: [crates/flow/src/steps/parallel*, crates/flow/tests/step_parallel.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (parallel/map)']
+    acceptance:
+      [
+        'join all | any | quorum(n); `any` cancels the losers; concurrency limit honoured; map over a list output',
+      ]
+    verify: ['cargo test -p flow --test step_parallel']
+
+  - id: M5C-005
+    title: 'flow steps: loop with until/while, max_iterations, no-progress detection'
+    milestone: M5c
+    deps: [M5C-002]
+    paths: [crates/flow/src/steps/loop*, crates/flow/tests/step_loop.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (loop), §7 (runaway loops)']
+    acceptance:
+      [
+        'Stops on condition, on max_iterations, or when an iteration produces the same diff / same failing test set as the previous one; iteration outputs addressable as steps.x[i]',
+      ]
+    verify: ['cargo test -p flow --test step_loop']
+
+  - id: M5C-006
+    title: 'flow steps: run (workspace exec) + judge (verdict schema)'
+    milestone: M5c
+    deps: [M5C-003, M4-006]
+    paths:
+      [
+        crates/flow/src/steps/run*,
+        crates/flow/src/steps/judge*,
+        crates/flow/tests/step_run_judge.rs,
+      ]
+    context: ['docs/PLAN-v2-ade.md §4.9', 'crates/hub/src/proxy (exec)']
+    acceptance:
+      [
+        'run returns exit_code/stdout/stderr (truncated, redacted); judge enforces {verdict, notes} schema and drives a loop in a test',
+      ]
+    verify: ['cargo test -p flow --test step_run_judge']
+
+  - id: M5C-007
+    title: 'flow steps: human gate + action + subflow'
+    milestone: M5c
+    deps: [M5C-002, M2-011]
+    paths:
+      [
+        crates/flow/src/steps/human*,
+        crates/flow/src/steps/action*,
+        crates/flow/src/steps/subflow*,
+        crates/flow/tests/step_human.rs,
+      ]
+    context: ['docs/PLAN-v2-ade.md §4.9', 'AG-UI interrupts']
+    acceptance:
+      [
+        'Gate raises an interrupt + push; timeout with on_timeout stop|continue|default; actions registry (notify, open_pr stub); subflow with its own budget slice',
+      ]
+    verify: ['cargo test -p flow --test step_human']
+
+  - id: M5C-008
+    title: 'Workspace strategies: shared, worktree-per-branch, sprite-per-branch + merge step'
+    milestone: M5c
+    size: M
+    risk: high
+    deps: [M5C-004, M4-005]
+    paths:
+      [crates/flow/src/workspace/**, crates/sidecar/src/worktree/**, crates/flow/tests/workspace.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (Workspace strategies), §4.3 (Fork = copy)']
+    acceptance:
+      [
+        "worktree-per-branch creates git worktrees inside one Sprite and routes each branch's agent cwd there; merge step merges branches, conflicts become an agent or human step; sprite-per-branch respects admission control",
+      ]
+    verify: ['cargo test -p flow --test workspace']
+
+  - id: M5C-009
+    title: 'Budgets and guardrails across a flow run'
+    milestone: M5c
+    deps: [M5C-003, M5-015]
+    paths: [crates/flow/src/budget/**, crates/flow/tests/budget.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (Guardrails)']
+    acceptance:
+      [
+        'USD (usage + connector spend), wall clock, task count and iterations checked before each step; exceeding stops the run with a clear reason; subflows draw from the parent budget',
+      ]
+    verify: ['cargo test -p flow --test budget']
+
+  - id: M5C-010
+    title: 'AG-UI projection for flow runs (Step*, Subagent*, flow state)'
+    milestone: M5c
+    deps: [M5C-002, M2-007]
+    paths:
+      [
+        crates/protocol/src/mapping/flow_agui*,
+        crates/protocol/tests/golden_flow_agui.rs,
+        crates/protocol/tests/golden/flow_agui/**,
+      ]
+    context:
+      ['docs/PLAN-v2-ade.md §4.9 (AG-UI view)', 'https://docs.ag-ui.com (steps, subagents, state)']
+    acceptance:
+      [
+        'Golden: parallel + loop + gate flow produces paired StepStarted/Finished, Subagent* per agent task, StateDelta for graph/iterations/budget, interrupt for the gate',
+      ]
+    verify: ['cargo test -p protocol --test golden_flow_agui']
+
+  - id: M5C-011
+    title: 'fleet-mcp: agent-initiated delegation tools'
+    milestone: M5c
+    size: M
+    deps: [M5-014, M5-007]
+    paths: [crates/fleet-mcp/**]
+    context:
+      [
+        'docs/PLAN-v2-ade.md §4.9 (Agent-initiated delegation)',
+        'https://modelcontextprotocol.io/specification',
+      ]
+    acceptance:
+      - 'MCP server (streamable HTTP, served by hub) with list_agents, delegate(agent, prompt, wait), await_task, cancel_task, start_flow'
+      - 'Auth bound to the calling task; depth (default 3), fan-out and budget inherited; child tasks linked to the parent'
+      - 'Added to the default Loadout for managed agents'
+    verify: ['cargo test -p fleet-mcp --test tools']
+
+  - id: M5C-012
+    title: 'Flows as A2A agents (per published flow card)'
+    milestone: M5c
+    deps: [M5C-003, M2-008]
+    paths: [crates/hub/src/flows/a2a*, crates/hub/tests/flow_agent.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (Flows as agents)', 'A2A spec §8']
+    acceptance:
+      [
+        'Publishing a flow serves an Agent Card; an inbound SendMessage starts a run and streams step results as A2A events',
+      ]
+    verify: ['cargo test -p hub --test flow_agent']
+
+  - id: M5C-013
+    title: 'Triggers: manual, GitHub webhooks, hub cron'
+    milestone: M5c
+    deps: [M5C-002, M2-003b]
+    paths: [crates/hub/src/triggers/**, crates/hub/tests/triggers.rs]
+    context: ['docs/PLAN-v2-ade.md §4.9 (Triggers)']
+    acceptance:
+      [
+        'GitHub webhook signature verified; issue labelled / PR comment `/agent` / CI failed start a flow with mapped inputs; cron with jitter and overlap policy',
+      ]
+    verify: ['cargo test -p hub --test triggers']
+
+  - id: M5C-014
+    title: 'Built-in templates incl. ledger (leader/worker/review)'
+    milestone: M5c
+    size: M
+    deps: [M5C-005, M5C-006, M5C-008]
+    paths: [crates/flow/templates/**, crates/flow/src/steps/ledger*, crates/flow/tests/templates.rs]
+    context:
+      [
+        '.claude/skills/ledger/ (the process to productize)',
+        'docs/PLAN-v2-ade.md §4.9 (Built-in ledger pattern)',
+      ]
+    acceptance:
+      [
+        'Templates: ledger, test-fix loop, plan→implement→review, fan-out review + synthesis, best-of-N with judge; all validate; ledger step drives a worker pool with verify + leader review + model escalation',
+      ]
+    verify: ['cargo test -p flow --test templates']
+
+  - id: M5C-015
+    title: 'client: flow run graph view + ledger board'
+    milestone: M5c
+    size: M
+    deps: [M5C-010, M3-008]
+    paths: [crates/client-gpui/src/flows/run*]
+    context: ['docs/PLAN-v2-ade.md §3 (surface 7)']
+    acceptance:
+      [
+        "Live graph with branches, loop iterations, gates; drill into any step's task; pause/resume/cancel/retry; budget meters; ledger board for ledger steps",
+      ]
+    verify: ['cargo test -p client-gpui --test flow_run']
+
+  - id: M5C-016
+    title: 'client: flow editor + template gallery'
+    milestone: M5c
+    deps: [M5C-001, M5C-014, M3-004]
+    paths: [crates/client-gpui/src/flows/editor*, crates/client-gpui/src/flows/gallery*]
+    context: ['docs/PLAN-v2-ade.md §3 (surface 7)']
+    acceptance:
+      [
+        'Schema-validated YAML editor with live graph preview; start a run from a template with an inputs form',
+      ]
+    verify: ['cargo test -p client-gpui --test flow_editor']
+
+  - id: M5C-017
+    title: 'E2E: ledger template completes a toy goal with fixture agents'
+    milestone: M5c
+    risk: high
+    deps: [M5C-014, M5C-009, M5C-011]
+    paths: [crates/cli/src/e2e/flow*, examples/flows/**]
+    context: ['docs/PLAN-v2-ade.md §5 M5c']
+    acceptance:
+      [
+        'Toy repo goal: leader plans 3 items, 2 workers in worktrees, one rejected then fixed, all merged, verify green; plus cascade-cancel and budget-stop scenarios',
+      ]
+    verify: ['cargo run -p cli -- e2e flows']
+
+  - id: M5C-review
+    title: M5c exit review
+    milestone: M5c
+    owner: leader
+    deps: [M5C-007, M5C-012, M5C-013, M5C-015, M5C-016, M5C-017]
+    acceptance: ['Plan §5 M5c criteria quoted with evidence']
+    verify: ['cargo test --workspace', 'cargo run -p cli -- e2e flows']
 
   # ════════════════════════ M5b — app plugins ════════════════════════
   - id: M5B-001

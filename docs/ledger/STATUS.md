@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 0/135 · in-flight — · blocked 8 (human: M0-001, M0-012, M0-014, M1B-001, M1B-010, M3-016, M6-002, M6-006) · attempts 0/250
+done 0/153 · in-flight — · blocked 8 (human: M0-001, M0-012, M0-014, M1B-001, M1B-010, M3-016, M6-002, M6-006) · attempts 0/250
 
 ## Next up
 

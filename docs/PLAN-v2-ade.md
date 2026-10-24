@@ -63,18 +63,19 @@ dedupe stream and push deliveries exactly.
 
 **Our extensions** (`https://sprite-machine.dev/ext/<name>/v1`, all `required: false`):
 `seq`, `workspace`, `tool`, `plan`, `approval`, `elicitation`, `terminal`, `usage`,
-`checkpoint`, `reasoning`, `session-config`.
+`checkpoint`, `reasoning`, `session-config`, `flow` (flow run id, step id, iteration, parent task).
 
 - Extension parts are only emitted when the request's `A2A-Extensions` header names them, and each Message/Artifact lists the URIs it uses.
 - BYO agents without extensions render as plain chat + artifacts. Their dedup is best-effort, on a structural key.
 
 ### 1.2 Identity model
 
-| Concept             | ACP                | A2A                               | AG-UI                                   | Hub table                                   |
-| ------------------- | ------------------ | --------------------------------- | --------------------------------------- | ------------------------------------------- |
-| Conversation        | sessionId          | contextId                         | threadId                                | `contexts`                                  |
-| One prompt turn     | prompt request     | task (terminal at end of turn)    | 1..n runs                               | `tasks`                                     |
-| Approval round-trip | permission request | `INPUT_REQUIRED` on the same task | run ends in interrupt; resume = new run | `interrupts`, `runs(task_id, resume_index)` |
+| Concept             | ACP                | A2A                                                                                                           | AG-UI                                                                   | Hub table                                             |
+| ------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
+| Conversation        | sessionId          | contextId                                                                                                     | threadId                                                                | `contexts`                                            |
+| One prompt turn     | prompt request     | task (terminal at end of turn)                                                                                | 1..n runs                                                               | `tasks`                                               |
+| Approval round-trip | permission request | `INPUT_REQUIRED` on the same task                                                                             | run ends in interrupt; resume = new run                                 | `interrupts`, `runs(task_id, resume_index)`           |
+| Flow run            | —                  | one task per step execution, in the step's own context; `referenceTaskIds` + `ext/flow` link it to the parent | one thread; `StepStarted/Finished` per step, `Subagent*` per agent task | `flow_runs`, `flow_steps(run_id, step_id, iteration)` |
 
 - A follow-up prompt creates a **new task** in the same context.
 - A message sent while a task is `WORKING` is accepted as a new task in `SUBMITTED` state and queued until the session is idle. It is visible to the client and can be removed.
@@ -142,7 +143,14 @@ dedupe stream and push deliveries exactly.
    - Loadouts;
    - notifications (event classes × mute × quiet hours);
    - org members and roles.
-7. **Multi-agent**: delegation with subagent views.
+7. **Multi-agent flows** (§4.9):
+   - start a flow from a template or YAML;
+   - live graph view (steps, parallel branches, loop iterations, gates) with drill-down into each step's task;
+   - pause, resume, cancel (cascading), retry a step;
+   - budget and iteration meters;
+   - template gallery: ledger (leader/worker), test-fix loop, plan → implement → review, fan-out review + synthesis, best-of-N with a judge;
+   - triggers: manual, GitHub events, schedule;
+   - agents can also delegate to other fleet agents themselves, through the fleet MCP server.
 8. **Ship**: GitHub PR; promote to Fly; Open in Zed (desktop).
 9. **Desktop power use**: command palette, shortcuts (⌘K, ⌘N, ⌘↵, task navigation).
 10. **Cross-cutting**:
@@ -437,24 +445,120 @@ pre-installed gateway skill teaches agents to list connectors. So:
    - push spoofing;
    - BYO-agent SSRF.
 
+### 4.9 Multi-agent flows and loops
+
+Single delegation is not enough. The hub runs a **durable flow engine**, so
+multi-agent work survives Sprites sleeping, clients disconnecting and hub
+restarts. A flow is a declarative graph of steps; each step that calls an agent
+is an ordinary A2A task, so every managed or BYO agent can take part.
+
+**Flow definition** (YAML, versioned; conditions in **CEL** via the `cel` crate):
+
+```yaml
+flow: test-fix-review
+inputs: { repo: string, goal: string }
+budget: { usd: 20, wall_clock: 2h, max_agent_tasks: 40 }
+workspace: { strategy: shared } # shared | worktree-per-branch | sprite-per-branch
+steps:
+  - id: plan
+    agent: { select: 'skill:planning', model_hint: opus }
+    prompt: 'Plan how to achieve: {{inputs.goal}}'
+    output: { schema: plan.json } # structured output, validated
+  - id: implement
+    loop:
+      until: "steps.verify.exit_code == 0 && steps.review.verdict == 'approve'"
+      max_iterations: 5
+      no_progress: { same_diff_twice: true } # stop if an iteration changes nothing
+    steps:
+      - id: code
+        agent: { select: 'label:worker', model_hint: haiku }
+        prompt: "{{steps.plan.output}}\n\nFix: {{steps.review.notes}}"
+      - id: verify
+        run: 'cargo test --workspace' # executed in the workspace via exec
+      - id: review
+        agent: { select: 'label:reviewer' }
+        judge: { schema: verdict.json } # {verdict: approve|changes, notes}
+  - id: gate
+    human: { prompt: 'Open a PR?', timeout: 24h, on_timeout: stop }
+  - id: ship
+    action: github.open_pr
+```
+
+**Step types**:
+
+| Type               | What it does                                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`            | Sends an A2A task to an agent chosen by id, label or skill. Supports a prompt template, attachments, structured output (JSON Schema) and a model hint. |
+| `parallel` / `map` | Runs branches concurrently, or the same steps over a list (e.g. one review per lens). `join: all \| any \| quorum(n)`, with a concurrency limit.       |
+| `loop`             | `while` / `until` CEL condition, `max_iterations` (required), and no-progress detection (same diff twice, same failing test set).                      |
+| `branch`           | CEL `if` / `switch`.                                                                                                                                   |
+| `run`              | A command in the flow's workspace via Sprites exec; exit code, stdout and stderr become step output.                                                   |
+| `judge`            | An agent step whose output must match a verdict schema; it drives loops and branches.                                                                  |
+| `human`            | An approval or form gate (AG-UI interrupt, push notification), with a timeout and `on_timeout` behaviour.                                              |
+| `merge`            | Merges branch worktrees or Sprites back into the main workspace; conflicts go to an agent step or a human.                                             |
+| `action`           | Built-ins (open PR, promote, notify), plus WASM plugin actions.                                                                                        |
+| `ledger`           | The built-in **leader / worker / review** pattern (below).                                                                                             |
+| `subflow`          | Calls another flow.                                                                                                                                    |
+
+**Built-in `ledger` pattern**: the same process our `ledger` skill uses, as a product feature.
+
+- A leader agent (`model_hint: opus`) turns a goal into a ledger, then assigns ready items to a worker pool (`haiku`) in parallel, each in its own git worktree.
+- Every result goes through `run` verify + leader review. A failed item gets a re-attempt that escalates to a stronger model; a passing one is merged.
+- It loops until every item is done or waiting on a human.
+- The ledger is shown as a live board in the client.
+
+**Workspace strategies** for parallel branches:
+
+- `shared`: sequential steps on one workspace.
+- `worktree-per-branch`: one Sprite with a git worktree per branch. This is fast and the default for parallel coding.
+- `sprite-per-branch`: full isolation. It's slow because forks are copies (§4.3) and it counts against `running_limit`.
+
+**Agent-initiated delegation**:
+
+- Every managed agent's Loadout includes a **fleet MCP server** served by the hub. Its tools are `list_agents`, `delegate(agent, prompt, wait)`, `await_task`, `cancel_task` and `start_flow`.
+- So Claude Code, Codex and the rest can spawn other fleet agents mid-turn. Child tasks link to the parent and show as `Subagent*` events.
+- Limits: depth (default 3), fan-out and budget are inherited from the parent.
+- Harness-internal subagents (e.g. Claude Code's Task tool) are rendered as nested activity when the ACP tool call identifies them.
+
+**Flows as agents**: a published flow gets its own A2A Agent Card from the hub. Other
+agents, other hubs and Zed (through the ACP bridge) can call it like any agent.
+
+**Triggers**: manual, A2A inbound, GitHub webhooks (issue labelled, PR comment
+`/agent …`, CI failed), and schedules (a hub cron now; Sprites 2.0 schedules later).
+
+**Guardrails**:
+
+- Budgets enforced before every step (USD from usage + connector spend, wall clock, task count, loop iterations).
+- Cancellation cascades to every running task.
+- Step retries are idempotent (idempotency key per step × iteration).
+- Admission control respects Sprite limits.
+- Every flow run is replayable from `flow_steps`.
+
+**AG-UI view**: a flow run is one thread.
+
+- Steps → `StepStarted/StepFinished`; agent tasks → `Subagent*` (nested `Raw` per child event).
+- Flow state (graph, iteration counters, budgets, ledger board) → `StateSnapshot/StateDelta`.
+- Human gates → interrupts.
+
 ---
 
 ## 5. Milestones
 
 Exit criteria are restated as ledger `*-review` items.
 
-| #       | Milestone        | Exit criteria                                                                                                                                                                                                                                                       |
-| ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0**  | Revive + unblock | Cargo workspace + dev toolchain script. Sprites token (restricted). Protocol types pass 1.0 fixtures. Sprites client. Spikes answered: smoke (labels, checkpoint-stops-service), checkpoint fork, connector gateway, Sprite URL auth, Tasks keep-alive, networking. |
-| **M1a** | Sidecar          | Claude via ACP served as an A2A agent from a Sprite service. Conformance kit passes on JSON-RPC (pinned commit). Durable across restart/cold wake. Path-routed auth. Keep-alive. Permission/cancel races covered. Checkpoint per turn.                              |
-| **M1b** | Client spike     | Gates written first. gpui-kit + Flutter task screen. Desktop decision (no devices). Mobile decision from on-device gates. ADRs.                                                                                                                                     |
-| **M2**  | Hub              | Ingest with exact dedup + reconciliation. AG-UI runs + subscription. OIDC, roles, audit. Secrets at rest. Notifications. Attachments. Titles/search. Retention. Ops. Deployed on Fly + MPG.                                                                         |
-| **M3**  | Client core      | Desktop then mobile: onboarding, composer, inbox, task view, approvals, diff, agents, notifications, a11y, offline queue. `cli e2e app` drives a task from the client.                                                                                              |
-| **M4**  | Workspaces       | Recipe template. Workspace from repo/issue. Hardening. Connector gateway. Timeline restore/fork/compare. Terminal/files/preview/lifecycle UIs. Auto-allow presets. Reaper. Exfiltration test. Managed agent launch.                                                 |
-| **M5**  | Fleet            | Loadouts + renderers for 6 harnesses + conformance matrix. MCP. Network profiles. Gateway. BYO E2E. Delegation. Usage. ACP v2 adapter (flagged).                                                                                                                    |
-| **M5b** | App plugins      | WASM host, two first-party plugins, catalog.                                                                                                                                                                                                                        |
-| **M6**  | Ship             | PR flow. Promote via Machines API. Zed bridge. Release workflows + signing. Retire v1.                                                                                                                                                                              |
-| Later   |                  | A2UI. Scheduled tasks (Sprites 2.0). MPG skill. Read-only web share page. Billing.                                                                                                                                                                                  |
+| #       | Milestone        | Exit criteria                                                                                                                                                                                                                                                                       |
+| ------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0**  | Revive + unblock | Cargo workspace + dev toolchain script. Sprites token (restricted). Protocol types pass 1.0 fixtures. Sprites client. Spikes answered: smoke (labels, checkpoint-stops-service), checkpoint fork, connector gateway, Sprite URL auth, Tasks keep-alive, networking.                 |
+| **M1a** | Sidecar          | Claude via ACP served as an A2A agent from a Sprite service. Conformance kit passes on JSON-RPC (pinned commit). Durable across restart/cold wake. Path-routed auth. Keep-alive. Permission/cancel races covered. Checkpoint per turn.                                              |
+| **M1b** | Client spike     | Gates written first. gpui-kit + Flutter task screen. Desktop decision (no devices). Mobile decision from on-device gates. ADRs.                                                                                                                                                     |
+| **M2**  | Hub              | Ingest with exact dedup + reconciliation. AG-UI runs + subscription. OIDC, roles, audit. Secrets at rest. Notifications. Attachments. Titles/search. Retention. Ops. Deployed on Fly + MPG.                                                                                         |
+| **M3**  | Client core      | Desktop then mobile: onboarding, composer, inbox, task view, approvals, diff, agents, notifications, a11y, offline queue. `cli e2e app` drives a task from the client.                                                                                                              |
+| **M4**  | Workspaces       | Recipe template. Workspace from repo/issue. Hardening. Connector gateway. Timeline restore/fork/compare. Terminal/files/preview/lifecycle UIs. Auto-allow presets. Reaper. Exfiltration test. Managed agent launch.                                                                 |
+| **M5**  | Fleet            | Loadouts + renderers for 6 harnesses + conformance matrix. MCP. Network profiles. Gateway. BYO E2E. Delegation. Usage. ACP v2 adapter (flagged).                                                                                                                                    |
+| **M5c** | Flows            | Durable flow engine (agent/parallel/map/loop/branch/run/judge/human/merge/action/ledger/subflow steps). Workspace strategies. Fleet MCP delegation. Flows as A2A agents. Triggers. Budgets. Templates incl. ledger. Graph view + editor. E2E: ledger template completes a toy goal. |
+| **M5b** | App plugins      | WASM host, two first-party plugins, catalog.                                                                                                                                                                                                                                        |
+| **M6**  | Ship             | PR flow. Promote via Machines API. Zed bridge. Release workflows + signing. Retire v1.                                                                                                                                                                                              |
+| Later   |                  | A2UI. Scheduled tasks (Sprites 2.0). MPG skill. Read-only web share page. Billing.                                                                                                                                                                                                  |
 
 ---
 
@@ -475,6 +579,8 @@ crates/
   client-core/
   client-gpui/   (or apps/client-flutter via flutter_rust_bridge)
   acp-bridge/    local stdio ↔ hub bridge for Zed
+  flow/          flow schema, CEL, durable engine, step runners, templates
+  fleet-mcp/     MCP server exposing delegation tools to agents
   cli/           smoke, spikes, deploy, template, conformance, e2e
 gateway/         egress gateway image
 spikes/          gpui/, flutter/, bench/
@@ -502,5 +608,6 @@ protocol, `USER_TOKEN`, and the auth-file upload.
 10. **VPN inside Sprites**: may be impossible; the public-hostname gateway is the fallback.
 11. **Plugin & supply-chain security**: §4.8, pinned lockfiles, SBOM.
 12. **ACP v2 / remote transport**: draft. The `TurnEvent` layer and flagged adapter limit churn.
-13. **Container limits for the ledger run**: no macOS, devices or Docker daemon; 4 vCPU. Human items plus CI cover these.
-14. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform.
+13. **Runaway multi-agent cost / loops**: required `max_iterations`, no-progress detection, budgets checked before each step, depth/fan-out limits on agent-initiated delegation, cascade cancel.
+14. **Container limits for the ledger run**: no macOS, devices or Docker daemon; 4 vCPU. Human items plus CI cover these.
+15. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform.
