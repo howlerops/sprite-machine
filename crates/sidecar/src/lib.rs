@@ -3,9 +3,11 @@
 pub mod acp;
 pub mod bridge;
 pub mod checkpoint;
+pub mod config;
 pub mod host;
 pub mod keepalive;
 pub mod preview;
+pub mod server;
 pub mod store;
 
 /// Crate name, used by the skeleton smoke test.
