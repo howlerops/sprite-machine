@@ -1059,6 +1059,10 @@ items:
     phase: P0
     lane: docs
     priority: 1
+    status: "done"
+    evidence: "merged 84a8c7e; verify: gates.yaml present (5 numeric, 12 hard gates, default-to-hybrid + version-pin rules); ADR 0001"
+    assignee: "leader"
+    attempt: 1
     owner: leader
     deps: []
     paths:

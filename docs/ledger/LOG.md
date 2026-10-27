@@ -12,3 +12,4 @@
 2026-10-27T22:18Z SPEC-002 todo→done merged 24908dd
 2026-10-27T22:18Z M0-003 todo→assigned attempt 1 (haiku, client lane)
 2026-10-27T22:18Z M0-006 todo→assigned attempt 1 (haiku, rust lane)
+2026-10-27T22:20Z M1B-003 todo→done merged 84a8c7e

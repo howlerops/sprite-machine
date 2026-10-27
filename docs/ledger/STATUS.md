@@ -2,15 +2,15 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 7/187 (3 dropped) · in-flight M0-003,M0-006 · blocked 9 (human: M0-014, M0-019, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 5/120
+done 8/187 (3 dropped) · in-flight M0-003,M0-006 · blocked 9 (human: M0-014, M0-019, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 6/120
 
-Batch 1: M0-003 + M0-006 assigned. Leader does M1B-003 meanwhile.
+Batch 1: M0-003 + M0-006 in flight.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
-| P0 | 12 | 3 | 2 |
+| P0 | 12 | 4 | 2 |
 | P1 | 25 | 0 | 0 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 0 | 0 |
@@ -33,7 +33,7 @@ Batch 1: M0-003 + M0-006 assigned. Leader does M1B-003 meanwhile.
 | M1A-002 | worker | rust | todo | acp-mock: scriptable ACP v1 agent |
 | GPUI-000 | leader | client | todo | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |
 | M1B-002 | worker | rust | todo | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
-| M1B-003 | leader | docs | todo | Client-stack gates written before prototypes |
+| M1B-003 | leader | docs | done | Client-stack gates written before prototypes |
 | M1B-004a | worker | client | todo | gpui spike: app shell + virtualized transcript pane |
 
 ## Waiting on the human
