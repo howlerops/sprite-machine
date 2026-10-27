@@ -1,0 +1,26 @@
+# M0-017 spike. Local only: run with `wrangler dev --local` (see test.sh).
+# The ids below are placeholders; `--local` never talks to Cloudflare.
+name = "cf-spike"
+main = "build/index.js"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "worker-build --release"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cf-spike"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "cf-spike"

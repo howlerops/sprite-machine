@@ -1,0 +1,29 @@
+[package]
+name = "cf-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "M0-017 spike: workers-rs + axum, SQLite Durable Object + hibernatable WebSocket, D1, R2"
+
+# Standalone: keep this out of the root workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worker = { version = "=0.8.7", features = ["http", "axum", "d1"] }
+worker-macros = { version = "=0.8.7", features = ["http"] }
+axum = { version = "0.8", default-features = false, features = ["json"] }
+tower-service = "0.3"
+serde = { version = "1", features = ["derive"] }
+
+# Size profile. worker-build runs wasm-opt afterwards, which strips debug info anyway.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+# `strip = true` breaks worker-build 0.8.7: wasm-bindgen fails with
+# "externref table required for catch wrappers". Leave it off.
+strip = false
+# panic = "abort" builds but is ~0.6 KB larger and loses panic recovery; not used.
