@@ -1,5 +1,7 @@
 //! Client core: TurnEvent subscription, view models, cache, outbound queue.
 
+pub mod tracer;
+
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 

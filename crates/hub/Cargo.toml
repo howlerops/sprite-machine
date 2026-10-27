@@ -6,5 +6,18 @@ license.workspace = true
 publish = false
 description = "The hub Cloudflare Worker (wasm32, no tokio): routes and Durable Objects (thread, machine, flow), D1, R2, queues."
 
+# cdylib for worker-build (wasm32); rlib so `cargo test -p hub` builds natively.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 protocol = { path = "../protocol" }
+serde.workspace = true
+serde_json.workspace = true
+
+# Workers glue (spike M0-017 pins). wasm32 only, so native builds and tests stay plain Rust.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+worker = { version = "=0.8.7", features = ["http", "axum"] }
+worker-macros = { version = "=0.8.7", features = ["http"] }
+axum = { version = "0.8", default-features = false, features = ["json"] }
+tower-service = "0.3"
