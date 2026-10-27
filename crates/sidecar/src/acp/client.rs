@@ -1,0 +1,664 @@
+//! The ACP client: JSON-RPC 2.0 over newline-delimited JSON to one agent connection.
+//!
+//! [`AcpClient`] talks to one agent, either a child process it spawns
+//! ([`AcpClient::spawn`], killed on drop) or any reader and writer pair
+//! ([`AcpClient::connect`]). It advertises the client capabilities the runner supports
+//! ([`client_capabilities`]) and keeps the session table ([`super::sessions`]). Each
+//! `session/update` goes to the channel the caller passes in. Requests the agent sends
+//! (permissions, elicitation, `fs/*`, `terminal/*`) go to the caller's [`ClientHandler`].
+//!
+//! One prompt runs at a time per session. A prompt sent while one is in flight waits as a
+//! pending task and runs after it. `session/cancel` ends the running prompt with
+//! `cancelled`, and any permission or elicitation request the agent is waiting on is
+//! answered with a cancel.
+
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use protocol::acp::{
+    CancelNotification, ClientCapabilities, ContentBlock, CreateElicitationRequest,
+    CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse, ElicitationAction,
+    ElicitationCapabilities, ElicitationFormCapabilities, ElicitationMode, ElicitationScope,
+    ElicitationUrlCapabilities, FileSystemCapabilities, Implementation, InitializeRequest,
+    InitializeResponse, KillTerminalRequest, KillTerminalResponse, McpServer, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
+    StopReason, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
+
+use super::sessions::{PendingTask, PromptResult, SessionTable, TaskId, lock};
+
+const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+const INTERNAL_ERROR: i64 = -32603;
+
+/// Errors from the ACP client.
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    /// Reading from or writing to the agent failed, or the child could not be spawned.
+    #[error("I/O error talking to the agent: {0}")]
+    Io(#[from] std::io::Error),
+    /// A message could not be encoded or decoded.
+    #[error("malformed ACP message: {0}")]
+    Json(#[from] serde_json::Error),
+    /// The agent answered a request with a JSON-RPC error.
+    #[error("agent error {code}: {message}")]
+    Rpc {
+        /// The JSON-RPC error code.
+        code: i64,
+        /// The JSON-RPC error message.
+        message: String,
+    },
+    /// The connection closed before the request was answered.
+    #[error("the agent connection is closed")]
+    Closed,
+    /// No session has this id.
+    #[error("unknown session {0}")]
+    UnknownSession(String),
+    /// The pending task was removed before it ran.
+    #[error("the pending task was removed before it ran")]
+    Removed,
+}
+
+/// The client-side handler for requests the agent sends.
+///
+/// The client answers each request with what the handler returns. An `Err` becomes a
+/// JSON-RPC internal error for the agent. A permission or elicitation request is answered
+/// with a cancel, without asking the handler further, when the session is cancelled while
+/// the handler is still working on it.
+pub trait ClientHandler: Send + Sync + 'static {
+    /// Answers `session/request_permission`.
+    fn request_permission(
+        &self,
+        request: RequestPermissionRequest,
+    ) -> impl Future<Output = anyhow::Result<RequestPermissionResponse>> + Send;
+
+    /// Answers `elicitation/create`, in form or URL mode.
+    fn create_elicitation(
+        &self,
+        request: CreateElicitationRequest,
+    ) -> impl Future<Output = anyhow::Result<CreateElicitationResponse>> + Send;
+
+    /// Answers `fs/read_text_file`.
+    fn read_text_file(
+        &self,
+        request: ReadTextFileRequest,
+    ) -> impl Future<Output = anyhow::Result<ReadTextFileResponse>> + Send;
+
+    /// Answers `fs/write_text_file`.
+    fn write_text_file(
+        &self,
+        request: WriteTextFileRequest,
+    ) -> impl Future<Output = anyhow::Result<WriteTextFileResponse>> + Send;
+
+    /// Answers `terminal/create`.
+    fn create_terminal(
+        &self,
+        request: CreateTerminalRequest,
+    ) -> impl Future<Output = anyhow::Result<CreateTerminalResponse>> + Send;
+
+    /// Answers `terminal/output`.
+    fn terminal_output(
+        &self,
+        request: TerminalOutputRequest,
+    ) -> impl Future<Output = anyhow::Result<TerminalOutputResponse>> + Send;
+
+    /// Answers `terminal/wait_for_exit`.
+    fn wait_for_terminal_exit(
+        &self,
+        request: WaitForTerminalExitRequest,
+    ) -> impl Future<Output = anyhow::Result<WaitForTerminalExitResponse>> + Send;
+
+    /// Answers `terminal/kill`.
+    fn kill_terminal(
+        &self,
+        request: KillTerminalRequest,
+    ) -> impl Future<Output = anyhow::Result<KillTerminalResponse>> + Send;
+
+    /// Answers `terminal/release`.
+    fn release_terminal(
+        &self,
+        request: ReleaseTerminalRequest,
+    ) -> impl Future<Output = anyhow::Result<ReleaseTerminalResponse>> + Send;
+}
+
+/// The client capabilities the runner advertises in `initialize`: text file read and
+/// write, terminals, and elicitation in form and URL modes.
+pub fn client_capabilities() -> ClientCapabilities {
+    ClientCapabilities::new()
+        .fs(FileSystemCapabilities::new()
+            .read_text_file(true)
+            .write_text_file(true))
+        .terminal(true)
+        .elicitation(
+            ElicitationCapabilities::new()
+                .form(ElicitationFormCapabilities::new())
+                .url(ElicitationUrlCapabilities::new()),
+        )
+}
+
+/// The receiving end of `session/update` notifications is the caller's own channel.
+pub type UpdateSender = mpsc::UnboundedSender<SessionNotification>;
+
+/// A prompt submitted with [`AcpClient::submit`].
+pub struct Submitted {
+    /// The task id, for [`AcpClient::remove_pending`].
+    pub task: TaskId,
+    /// `true` when the session was busy and the task waits as a pending task.
+    pub queued: bool,
+    /// Resolves with the stop reason, or an error if the task is removed or the
+    /// connection closes first.
+    pub done: oneshot::Receiver<PromptResult>,
+}
+
+/// One connection to an ACP agent.
+///
+/// Dropping the client closes the connection, fails the waiting prompts, and kills the
+/// agent process when the client spawned it.
+pub struct AcpClient<H: ClientHandler> {
+    inner: Arc<Inner<H>>,
+    reader: JoinHandle<()>,
+    child: Option<Child>,
+}
+
+impl<H: ClientHandler> AcpClient<H> {
+    /// Connects to an agent over any reader and writer. Messages from the agent are read
+    /// from `reader` and requests to it are written to `writer`.
+    pub fn connect<R, W>(reader: R, writer: W, handler: H, updates: UpdateSender) -> Self
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+        W: AsyncWrite + Send + Unpin + 'static,
+    {
+        Self::assemble(Box::new(reader), Box::new(writer), handler, updates, None)
+    }
+
+    /// Spawns an agent process and talks to it over its stdin and stdout. The process is
+    /// killed when the client is dropped. The agent's stderr is left as the command sets it.
+    pub fn spawn(
+        mut command: Command,
+        handler: H,
+        updates: UpdateSender,
+    ) -> Result<Self, ClientError> {
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = command.spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("agent stdin is not piped"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("agent stdout is not piped"))?;
+        Ok(Self::assemble(
+            Box::new(stdout),
+            Box::new(stdin),
+            handler,
+            updates,
+            Some(child),
+        ))
+    }
+
+    fn assemble(
+        reader: Box<dyn AsyncRead + Send + Unpin>,
+        writer: Box<dyn AsyncWrite + Send + Unpin>,
+        handler: H,
+        updates: UpdateSender,
+        child: Option<Child>,
+    ) -> Self {
+        let inner = Arc::new(Inner {
+            handler,
+            writer: tokio::sync::Mutex::new(writer),
+            calls: Mutex::new(Calls::default()),
+            sessions: SessionTable::default(),
+            updates,
+        });
+        let reader = tokio::spawn(read_loop(Arc::clone(&inner), reader));
+        Self {
+            inner,
+            reader,
+            child,
+        }
+    }
+
+    /// The process id of the spawned agent, or `None` for a connection made with
+    /// [`AcpClient::connect`].
+    pub fn child_id(&self) -> Option<u32> {
+        self.child.as_ref().and_then(Child::id)
+    }
+
+    /// Sends `initialize` with the capabilities from [`client_capabilities`].
+    pub async fn initialize(&self) -> Result<InitializeResponse, ClientError> {
+        // ACP v1. The version type is not re-exported by `protocol::acp`, so it is built
+        // from its JSON form (`1`).
+        let version = serde_json::from_value(json!(1))?;
+        let request = InitializeRequest::new(version)
+            .client_capabilities(client_capabilities())
+            .client_info(Implementation::new("sidecar", env!("CARGO_PKG_VERSION")));
+        let value = self
+            .inner
+            .call("initialize", serde_json::to_value(request)?)
+            .await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    /// Sends `session/new` and adds the session to the table.
+    pub async fn new_session(
+        &self,
+        cwd: impl Into<PathBuf>,
+        mcp_servers: Vec<McpServer>,
+    ) -> Result<SessionId, ClientError> {
+        let request = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
+        let value = self
+            .inner
+            .call("session/new", serde_json::to_value(request)?)
+            .await?;
+        let response: NewSessionResponse = serde_json::from_value(value)?;
+        self.inner.sessions.insert(&response.session_id);
+        Ok(response.session_id)
+    }
+
+    /// Queues a prompt for `session`. It runs at once when the session is idle, and after
+    /// the prompt in flight otherwise.
+    pub fn submit(
+        &self,
+        session: &SessionId,
+        prompt: Vec<ContentBlock>,
+    ) -> Result<Submitted, ClientError> {
+        let enqueued = self.inner.sessions.enqueue(session, prompt)?;
+        if enqueued.start_driver {
+            tokio::spawn(drive(Arc::clone(&self.inner), session.clone()));
+        }
+        Ok(Submitted {
+            task: enqueued.task,
+            queued: enqueued.queued,
+            done: enqueued.done,
+        })
+    }
+
+    /// Sends a prompt and waits for its stop reason. Updates arrive on the update channel
+    /// as they stream.
+    pub async fn prompt(
+        &self,
+        session: &SessionId,
+        prompt: Vec<ContentBlock>,
+    ) -> Result<StopReason, ClientError> {
+        let submitted = self.submit(session, prompt)?;
+        match submitted.done.await {
+            Ok(result) => result,
+            Err(_) => Err(ClientError::Closed),
+        }
+    }
+
+    /// The pending tasks of `session` in the order they will run.
+    pub fn pending_tasks(&self, session: &SessionId) -> Result<Vec<PendingTask>, ClientError> {
+        self.inner.sessions.pending(session)
+    }
+
+    /// Removes a pending task. Its `done` resolves with `ClientError::Removed`. Returns the
+    /// removed task, or `None` when no pending task has that id.
+    pub fn remove_pending(
+        &self,
+        session: &SessionId,
+        task: TaskId,
+    ) -> Result<Option<PendingTask>, ClientError> {
+        self.inner.sessions.remove_pending(session, task)
+    }
+
+    /// The task whose prompt is in flight in `session`, if any.
+    pub fn running_task(&self, session: &SessionId) -> Result<Option<TaskId>, ClientError> {
+        self.inner.sessions.running(session)
+    }
+
+    /// Cancels `session`. Sends `session/cancel` when a prompt is in flight, and answers
+    /// the agent's waiting permission and elicitation requests with a cancel. Pending
+    /// tasks are not removed, so they run after the cancelled prompt.
+    pub async fn cancel(&self, session: &SessionId) -> Result<(), ClientError> {
+        let running = self.inner.sessions.request_cancel(session)?;
+        if !running {
+            return Ok(());
+        }
+        let notification = serde_json::to_value(CancelNotification::new(session.clone()))?;
+        self.inner.notify("session/cancel", notification).await
+    }
+}
+
+impl<H: ClientHandler> Drop for AcpClient<H> {
+    fn drop(&mut self) {
+        self.inner.close();
+        self.reader.abort();
+        // `child` is dropped after this, and `kill_on_drop` kills and reaps the process.
+    }
+}
+
+/// State shared by the client, its reader task and its driver tasks.
+struct Inner<H> {
+    handler: H,
+    writer: tokio::sync::Mutex<Box<dyn AsyncWrite + Send + Unpin>>,
+    calls: Mutex<Calls>,
+    sessions: SessionTable,
+    updates: UpdateSender,
+}
+
+/// Requests we sent that are waiting for an answer.
+#[derive(Default)]
+struct Calls {
+    next_id: u64,
+    waiting: HashMap<u64, oneshot::Sender<Result<Value, ClientError>>>,
+    closed: bool,
+}
+
+/// A JSON-RPC error to send back to the agent.
+struct Failure {
+    code: i64,
+    message: String,
+}
+
+impl Failure {
+    fn new(code: i64, message: impl Display) -> Self {
+        Self {
+            code,
+            message: message.to_string(),
+        }
+    }
+}
+
+impl<H: ClientHandler> Inner<H> {
+    async fn send(&self, message: &Value) -> Result<(), ClientError> {
+        let mut bytes = serde_json::to_vec(message)?;
+        bytes.push(b'\n');
+        let mut writer = self.writer.lock().await;
+        writer.write_all(&bytes).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    async fn notify(&self, method: &str, params: Value) -> Result<(), ClientError> {
+        self.send(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
+            .await
+    }
+
+    /// Sends a request and waits for its response.
+    async fn call(&self, method: &str, params: Value) -> Result<Value, ClientError> {
+        let (id, reply) = {
+            let mut calls = lock(&self.calls);
+            if calls.closed {
+                return Err(ClientError::Closed);
+            }
+            calls.next_id += 1;
+            let id = calls.next_id;
+            let (reply, waiter) = oneshot::channel();
+            calls.waiting.insert(id, reply);
+            (id, waiter)
+        };
+        let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        if let Err(error) = self.send(&request).await {
+            lock(&self.calls).waiting.remove(&id);
+            return Err(error);
+        }
+        match reply.await {
+            Ok(result) => result,
+            Err(_) => Err(ClientError::Closed),
+        }
+    }
+
+    /// Stops accepting calls, fails the waiting ones and the queued prompts.
+    fn close(&self) {
+        let waiting = {
+            let mut calls = lock(&self.calls);
+            calls.closed = true;
+            std::mem::take(&mut calls.waiting)
+        };
+        // Dropping each sender wakes its caller with `ClientError::Closed`.
+        drop(waiting);
+        self.sessions.fail_queued();
+    }
+
+    /// Runs one prompt on the wire and returns its stop reason.
+    async fn run_prompt(
+        &self,
+        session: &SessionId,
+        prompt: Vec<ContentBlock>,
+    ) -> Result<StopReason, ClientError> {
+        let request = serde_json::to_value(PromptRequest::new(session.clone(), prompt))?;
+        let value = self.call("session/prompt", request).await?;
+        let response: PromptResponse = serde_json::from_value(value)?;
+        Ok(response.stop_reason)
+    }
+
+    /// Answers a request the agent sent us.
+    async fn route(&self, method: &str, params: Value) -> Result<Value, Failure> {
+        match method {
+            "session/request_permission" => {
+                let request: RequestPermissionRequest = parse(params)?;
+                let cancel = self.session_cancel(&request.session_id)?;
+                let answer = tokio::select! {
+                    answer = self.handler.request_permission(request) => answer,
+                    () = cancelled(cancel) => Ok(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    )),
+                };
+                reply(answer)
+            }
+            "elicitation/create" => {
+                let request: CreateElicitationRequest = parse(params)?;
+                let cancel = self.elicitation_cancel(&request)?;
+                let answer = tokio::select! {
+                    answer = self.handler.create_elicitation(request) => answer,
+                    () = cancelled(cancel) => Ok(CreateElicitationResponse::new(
+                        ElicitationAction::Cancel,
+                    )),
+                };
+                reply(answer)
+            }
+            "fs/read_text_file" => {
+                let request = parse(params)?;
+                reply(self.handler.read_text_file(request).await)
+            }
+            "fs/write_text_file" => {
+                let request = parse(params)?;
+                reply(self.handler.write_text_file(request).await)
+            }
+            "terminal/create" => {
+                let request = parse(params)?;
+                reply(self.handler.create_terminal(request).await)
+            }
+            "terminal/output" => {
+                let request = parse(params)?;
+                reply(self.handler.terminal_output(request).await)
+            }
+            "terminal/wait_for_exit" => {
+                let request = parse(params)?;
+                reply(self.handler.wait_for_terminal_exit(request).await)
+            }
+            "terminal/kill" => {
+                let request = parse(params)?;
+                reply(self.handler.kill_terminal(request).await)
+            }
+            "terminal/release" => {
+                let request = parse(params)?;
+                reply(self.handler.release_terminal(request).await)
+            }
+            other => Err(Failure::new(
+                METHOD_NOT_FOUND,
+                format!("method not found: {other}"),
+            )),
+        }
+    }
+
+    fn session_cancel(&self, session: &SessionId) -> Result<watch::Receiver<bool>, Failure> {
+        self.sessions
+            .cancel_signal(session)
+            .ok_or_else(|| Failure::new(INVALID_PARAMS, format!("unknown session {}", session.0)))
+    }
+
+    /// The cancel signal for an elicitation. A session-scoped one follows its session. A
+    /// request-scoped one belongs to no session, so `session/cancel` never answers it.
+    fn elicitation_cancel(
+        &self,
+        request: &CreateElicitationRequest,
+    ) -> Result<watch::Receiver<bool>, Failure> {
+        let scope = match &request.mode {
+            ElicitationMode::Form(form) => Some(&form.scope),
+            ElicitationMode::Url(url) => Some(&url.scope),
+            _ => None,
+        };
+        match scope {
+            Some(ElicitationScope::Session(scope)) => self.session_cancel(&scope.session_id),
+            _ => Ok(watch::channel(false).1),
+        }
+    }
+}
+
+/// Runs the queued prompts of one session, one at a time, until its queue is empty.
+async fn drive<H: ClientHandler>(inner: Arc<Inner<H>>, session: SessionId) {
+    while let Some(started) = inner.sessions.take_next(&session) {
+        let result = inner.run_prompt(&session, started.prompt).await;
+        inner.sessions.finish(&session);
+        // The caller may have stopped waiting for this prompt. Then nobody reads the result.
+        let _ = started.done.send(result);
+    }
+}
+
+/// Reads the agent's messages until the connection ends, then closes the client.
+async fn read_loop<H: ClientHandler>(
+    inner: Arc<Inner<H>>,
+    reader: Box<dyn AsyncRead + Send + Unpin>,
+) {
+    let mut lines = BufReader::new(reader).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<Value>(&line) {
+                    Ok(message) => dispatch(&inner, message),
+                    // An agent that writes logs to stdout is not fatal; the line is skipped.
+                    Err(error) => tracing::warn!(%error, "skipping an agent line that is not JSON"),
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                tracing::warn!(%error, "reading from the agent failed");
+                break;
+            }
+        }
+    }
+    inner.close();
+}
+
+/// Routes one message from the agent: a request to answer, a notification, or a response
+/// to one of our calls.
+fn dispatch<H: ClientHandler>(inner: &Arc<Inner<H>>, message: Value) {
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    match (method, message.get("id").cloned()) {
+        (Some(method), Some(id)) => {
+            let params = message.get("params").cloned().unwrap_or(Value::Null);
+            let inner = Arc::clone(inner);
+            tokio::spawn(async move { answer(&inner, id, &method, params).await });
+        }
+        (Some(method), None) => notification(inner, &method, message.get("params")),
+        (None, Some(id)) => response(inner, &id, &message),
+        (None, None) => tracing::warn!("ignoring an agent message with neither method nor id"),
+    }
+}
+
+fn notification<H: ClientHandler>(inner: &Arc<Inner<H>>, method: &str, params: Option<&Value>) {
+    if method != "session/update" {
+        tracing::debug!(method, "ignoring an agent notification");
+        return;
+    }
+    let Some(params) = params else {
+        tracing::warn!("session/update without params");
+        return;
+    };
+    match serde_json::from_value::<SessionNotification>(params.clone()) {
+        Ok(update) => {
+            if inner.updates.send(update).is_err() {
+                tracing::warn!("no receiver for session updates; dropping one");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "session/update does not parse"),
+    }
+}
+
+fn response<H: ClientHandler>(inner: &Arc<Inner<H>>, id: &Value, message: &Value) {
+    let Some(id) = id.as_u64() else {
+        tracing::warn!("response with an unknown id {id}");
+        return;
+    };
+    let result = match message.get("error") {
+        Some(error) => Err(ClientError::Rpc {
+            code: error
+                .get("code")
+                .and_then(Value::as_i64)
+                .unwrap_or(INTERNAL_ERROR),
+            message: error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        }),
+        None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
+    };
+    let waiter = lock(&inner.calls).waiting.remove(&id);
+    match waiter {
+        // The caller may have stopped waiting. Then nobody reads the result.
+        Some(waiter) => {
+            let _ = waiter.send(result);
+        }
+        None => tracing::warn!(id, "response to a request that is not waiting"),
+    }
+}
+
+/// Answers one request from the agent and writes the response.
+async fn answer<H: ClientHandler>(inner: &Inner<H>, id: Value, method: &str, params: Value) {
+    let message = match inner.route(method, params).await {
+        Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        Err(failure) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": failure.code, "message": failure.message },
+        }),
+    };
+    if let Err(error) = inner.send(&message).await {
+        tracing::warn!(%error, method, "could not answer a request from the agent");
+    }
+}
+
+/// Waits until the session is cancelled. A closed signal never fires, so the request
+/// keeps waiting on its handler.
+async fn cancelled(mut signal: watch::Receiver<bool>) {
+    let closed = signal.wait_for(|cancelled| *cancelled).await.is_err();
+    if closed {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Serializes a handler's answer, mapping a handler error to an internal error.
+fn reply<R: Serialize>(answer: anyhow::Result<R>) -> Result<Value, Failure> {
+    let value = answer.map_err(|error| Failure::new(INTERNAL_ERROR, format!("{error:#}")))?;
+    serde_json::to_value(value).map_err(|error| Failure::new(INTERNAL_ERROR, error))
+}
+
+fn parse<T: DeserializeOwned>(params: Value) -> Result<T, Failure> {
+    serde_json::from_value(params).map_err(|error| Failure::new(INVALID_PARAMS, error))
+}
