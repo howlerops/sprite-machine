@@ -1,6 +1,6 @@
-# sprite-machine v2 — a multi-protocol Agent Development Environment on Sprites
+# sprite-machine v2 — a multi-protocol Agent Development Environment on Cloudflare
 
-> Status: plan / RFC · rev 5 · 2026-10-27
+> Status: plan / RFC · rev 6 · 2026-10-28
 >
 > - Rev 4 incorporated the four-lens review.
 > - Rev 5 adds the consistency + strategy reviews and these decisions:
@@ -8,6 +8,7 @@
 >   - an **interim mobile web page** for the phone;
 >   - **everything stays in v2.0**, delivered in phases;
 >   - the **hub runs on Cloudflare**, not Fly.
+> - Rev 6: **all Cloudflare**. Managed cloud workspaces move from Fly Sprites to **Cloudflare Sandboxes**; no Fly dependency remains.
 >
 > Goal: a **native app for mobile and desktop** (iOS, Android, macOS, Windows, Linux).
 > Connect **any** agent fleet and drive it like Claude Code Remote Control:
@@ -18,10 +19,10 @@
 > Where agents run:
 >
 > - **your machines**, through the `sm` runner;
-> - **Fly.io Sprites** (managed cloud);
+> - **Cloudflare Sandboxes** (managed cloud workspaces);
 > - **any A2A agent** (bring-your-own).
 >
-> The control plane ("hub") runs on **Cloudflare Workers + Durable Objects**. Work is
+> Everything cloud-side (hub and workspaces) runs in **one Cloudflare account**. Work is
 > executed from `docs/ledger/LEDGER.yaml` with the `ledger` skill; §8 is the start plan.
 
 ---
@@ -41,12 +42,12 @@ third party exists**, we speak the open standard:
 | Our agents & flows → the world (outbound)                                              | **A2A 1.0** server: Agent Cards per agent/flow, JSON-RPC, streaming, push                           | Any A2A client can call our fleet agents and flows.                                                                                                                                                                                       |
 | Hub → third-party UIs                                                                  | **AG-UI 1.0** adapter (HTTP+SSE)                                                                    | Lets AG-UI frontends (CopilotKit etc.) drive our agents.                                                                                                                                                                                  |
 | Agent-generated widgets (later)                                                        | **A2UI**                                                                                            |                                                                                                                                                                                                                                           |
-| Agent ↔ tools / infra                                                                  | **MCP**: per-Loadout servers, the **fleet MCP** (delegation), `sprites.dev/mcp`, `mcp.fly.io`       |                                                                                                                                                                                                                                           |
+| Agent ↔ tools / infra                                                                  | **MCP**: per-Loadout servers, the **fleet MCP** (delegation), Cloudflare remote MCP servers         |                                                                                                                                                                                                                                           |
 | Desktop ↔ Zed                                                                          | **ACP** through the local `acp-bridge`                                                              |                                                                                                                                                                                                                                           |
 
 ```
  Harness CLIs ─ACP─ runner / sidecar ══TurnEvent tunnel══ HUB (Cloudflare) ══TurnEvent══ desktop app · mobile web · TUI · native mobile
- (your laptop, or a Sprite)                                 │   ├─ A2A edge ── BYO agents (in)  /  A2A clients (out)
+ (your laptop, or a sandbox)                                │   ├─ A2A edge ── BYO agents (in)  /  A2A clients (out)
                                                             │   └─ AG-UI edge ── third-party UIs
 ```
 
@@ -70,7 +71,7 @@ variants. Each row lists the ACP source and how the A2A and AG-UI adapters map i
 | `StateDelta{usage}`                                   | `usage_update`                                                     | task metadata                                                                                       | `StateDelta`                               |
 | `Subagent{Started,Finished,Error}`                    | delegation / flow step tasks                                       | child tasks                                                                                         | same                                       |
 | `Step{Started,Finished}`                              | flow steps                                                         | `ext/flow`                                                                                          | same                                       |
-| `Checkpoint`                                          | end of turn (Sprite snapshot or shadow-git commit)                 | `ext/checkpoint` artifact                                                                           | `ActivitySnapshot`                         |
+| `Checkpoint`                                          | end of turn (sandbox `DirectoryBackup` or shadow-git commit)       | `ext/checkpoint` artifact                                                                           | `ActivitySnapshot`                         |
 | `RunFinished{success}` / `RunError{cancelled\|error}` | `stopReason` [v2 `state_update`] / `session/cancel`                | `COMPLETED` / `CANCELED` / `FAILED`                                                                 | same                                       |
 | `Presence`                                            | — (runner/machine online/asleep/offline)                           | —                                                                                                   | `Custom`                                   |
 | user `FilePart`                                       | → ACP `image` / `resource`                                         | `FilePart`                                                                                          | —                                          |
@@ -101,14 +102,12 @@ All of them live in `crates/protocol`, with the raw source payload preserved in 
 
 ## 2. What changed upstream
 
-| Upstream                                                                                                                                                                                                      | Impact                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sprites Block Device** (Sprites since 10/6): verified block storage; checkpoints are versioned snapshots; restore ≈ a restart.                                                                              | Checkpoint per turn is cheap and reliable → undo turn. **Restore works only within the same Sprite.** The API has no cross-Sprite restore and no way to create a Sprite from a checkpoint, so fork and template become copy/recipe operations (§4.3; spike M0-010). Restore restarts the environment: the sidecar must be restart-safe. Old Sprites need the storage upgrade, which drops their old checkpoints. |
-| **Sprites API 0.1.12**: services (only **one** can own the HTTP port), fs, exec, policies (network / privileges / resources), connectors **gateway**, usage, labels (read-only in the API, settable via CLI). | Sidecar = the sole HTTP service, which also proxies previews. Credentials never enter the Sprite: harnesses call the connector gateway. Per-workspace hardening.                                                                                                                                                                                                                                                 |
-| **Lifecycle**: idle ~30 s → warm → cold. Cold = processes restart, in-memory state lost; services don't keep a Sprite awake; the Tasks API does.                                                              | The sidecar holds a Task during a turn, persists its state, and re-attaches ACP sessions after wake (§4.1).                                                                                                                                                                                                                                                                                                      |
-| **`mcp.fly.io`**, **`sprites.dev/mcp`**                                                                                                                                                                       | Agent-side tools in Loadouts. Promotion uses the Machines API with an app-scoped deploy token.                                                                                                                                                                                                                                                                                                                   |
-| **ACP** registry + Rust SDK (`agent-client-protocol` 3.x), **A2A 1.0**, **AG-UI 1.0**                                                                                                                         | ACP inside the runner; A2A and AG-UI at the edges (§1).                                                                                                                                                                                                                                                                                                                                                          |
-| **Cloudflare** Workers + Durable Objects (SQLite, hibernatable WebSockets, alarms), D1, R2, Queues, Containers (GA April 2026)                                                                                | The hub runs here instead of on Fly (§4.2).                                                                                                                                                                                                                                                                                                                                                                      |
+| Upstream                                                                                                                                                                                                                                                                                                                                                 | Impact                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cloudflare Sandboxes** (Containers GA April 2026; `@cloudflare/sandbox` 1.0, Sept 2026): microVM per sandbox driven by a Durable Object; snapshots (public beta); `DirectoryBackup` to R2 restorable into **any** sandbox; per-hostname outbound handling; `S3Mount`; terminals; previews on your own hostnames. Instance max 4 vCPU / 12 GiB / 20 GB. | Managed workspaces (§4.3). Fork = restore into a new sandbox (cheap). Credentials stay in the Worker. Backup/restore needs FUSE, so it only works deployed, not under `wrangler dev`. The SDK is TypeScript, so one thin TS Workspace DO is needed. |
+| Cloudflare remote **MCP servers** (bindings, builds, observability)                                                                                                                                                                                                                                                                                      | Agent-side tools in Loadouts; promotion deploys to Workers/Containers (§4.3).                                                                                                                                                                       |
+| **ACP** registry + Rust SDK (`agent-client-protocol` 3.x), **A2A 1.0**, **AG-UI 1.0**                                                                                                                                                                                                                                                                    | ACP inside the runner; A2A and AG-UI at the edges (§1).                                                                                                                                                                                             |
+| **Cloudflare** Workers + Durable Objects (SQLite, hibernatable WebSockets, alarms), D1, R2, Queues, Containers (GA April 2026)                                                                                                                                                                                                                           | The hub runs here instead of on Fly (§4.2).                                                                                                                                                                                                         |
 
 ---
 
@@ -117,15 +116,15 @@ All of them live in `crates/protocol`, with the raw source payload preserved in 
 **Nouns**:
 
 - **Fleet**: agents grouped by labels.
-- **Agent**: has an A2A card. Managed agents also have an ACP harness and a Sprite.
-- **Workspace**: repo + branch + Sprite + checkpoint lineage.
+- **Agent**: has an A2A card. Managed agents also have an ACP harness and a cloud sandbox.
+- **Workspace**: repo + branch + sandbox (or a local folder) + checkpoint lineage.
 - **Context**: a conversation.
 - **Task**: one turn.
 - **Artifact**: diffs, files, terminals, PRs, previews.
 
 **Surfaces**:
 
-0. **Onboarding**: sign in, then either (a) paste a Sprites org token + add a model connector, or (b) add a BYO A2A URL, or (c) **run `sm rc` on your computer and scan the QR code**, which needs no Sprites token, connector or cloud setup at all. Target: first streamed token in **< 2 min** on a phone. BYO-only works with no Sprites token. Every list has an empty state with one primary action.
+0. **Onboarding**: sign in, then either (a) add a model API key (stored in Cloudflare Secrets Store) for cloud workspaces, or (b) add a BYO A2A URL, or (c) **run `sm rc` on your computer and scan the QR code**, which needs no keys or cloud workspaces at all. Target: first streamed token in **< 2 min** on a phone. BYO-only and local-only work with no model key in the cloud. Every list has an empty state with one primary action.
 1. **New task**:
    - repo/issue → workspace (new or existing) → agent → prompt;
    - mode/model when the card advertises them;
@@ -149,13 +148,13 @@ All of them live in `crates/protocol`, with the raw source payload preserved in 
    - terminal (desktop pane; mobile key bar);
    - files (view on mobile, edit on desktop);
    - preview (hub-signed URL; system browser sheet on mobile);
-   - Sprite lifecycle (sleep/wake/delete, storage, memory, cost).
+   - sandbox lifecycle (sleep/wake/delete, instance size, disk, cost).
 5. **Agents**:
    - add BYO by URL;
    - launch managed (ACP agent + connector + policy + Loadout);
    - card, skills, health.
 6. **Settings**:
-   - Sprites token (set/rotate/test), connectors, policies and egress view;
+   - model keys and service credentials (set/rotate/test), egress allowlists and denied-domain view;
    - Loadouts;
    - notifications (event classes × mute × quiet hours);
    - org members and roles.
@@ -172,8 +171,8 @@ All of them live in `crates/protocol`, with the raw source payload preserved in 
    - Phone, desktop app and terminal stay in sync and can all send messages and answer approvals.
    - QR code / session link; a machines list with presence.
    - Dispatch a new task to a chosen machine from the phone.
-   - "Continue in cloud" moves a local session to a Sprite workspace; "Pull to my computer" brings a cloud one back.
-9. **Ship**: GitHub PR; promote to Fly; Open in Zed (desktop).
+   - "Continue in cloud" moves a local session to a cloud sandbox; "Pull to my computer" brings a cloud one back.
+9. **Ship**: GitHub PR; promote to Cloudflare Workers/Containers; Open in Zed (desktop).
 10. **Desktop power use**: command palette, shortcuts (⌘K, ⌘N, ⌘↵, task navigation).
 11. **Cross-cutting**:
     - screen-reader labels and focus order;
@@ -182,7 +181,7 @@ All of them live in `crates/protocol`, with the raw source payload preserved in 
     - offline queue for messages and approvals.
 
 **Carried over from v1** (must not be lost): auto-titles, image attachments, file
-explorer, search/filter, delete/archive, Sprite suspend/resume/delete,
+explorer, search/filter, delete/archive, workspace suspend/resume/delete,
 per-message cost, the settings→worker sync (now Loadouts).
 
 **Phone before native mobile**: a **mobile web page** served by the hub (sessions,
@@ -196,19 +195,19 @@ third-party agents' compute.
 
 ## 4. Architecture
 
-### 4.1 Runner core (`sm`), with host modes `local` and `sprite`
+### 4.1 Runner core (`sm`), with host modes `local` and `sandbox`
 
 One Rust binary runs the agent everywhere: on your laptop (`local`, §4.10) and inside
-each Sprite (`sprite`). A `HostMode` trait swaps only what differs between the two.
+each Cloudflare Sandbox (`sandbox`). A `HostMode` trait swaps only what differs between the two.
 
-| Concern       | `local`                                    | `sprite`                                                                                                                                      |
-| ------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Transport     | outbound tunnel to the hub                 | **the same outbound tunnel** (no inbound A2A, no per-Sprite bearer)                                                                           |
-| Supervision   | user process / desktop app                 | Sprite **service** (restarts on cold wake); it owns the HTTP port **only** for `/preview/<port>/` and `/healthz`                              |
-| Staying awake | n/a                                        | Sprites **Task** (5 min expiry, 60 s heartbeat) during a turn and while an approval is pending (approval TTL, default **10 min** for dogfood) |
-| Checkpoints   | shadow git commits `refs/sm/checkpoints/*` | Sprites checkpoint after the task settles; keep last K = 20; prune via `sprite-env`                                                           |
-| Credentials   | your own logins                            | connector-gateway base URLs only (§4.3)                                                                                                       |
-| Identity      | trusted-device credential (keychain)       | per-Sprite machine credential written via the fs API (0600, sidecar user)                                                                     |
+| Concern       | `local`                                    | `sandbox`                                                                                                                                          |
+| ------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport     | outbound tunnel to the hub                 | **the same outbound tunnel** (started by the Workspace DO with a short-lived machine credential)                                                   |
+| Supervision   | user process / desktop app                 | container entrypoint; the Workspace DO restarts it and re-attaches sessions after wake                                                             |
+| Staying awake | n/a                                        | the Workspace DO keeps the sandbox running during a turn and while an approval is pending (approval TTL, default **10 min**); idle → backup → stop |
+| Checkpoints   | shadow git commits `refs/sm/checkpoints/*` | `DirectoryBackup` of `/workspace` to R2 per turn (+ shadow-git commit); keep last K = 20                                                           |
+| Credentials   | your own logins                            | none in the sandbox; the outbound handler injects keys per hostname (§4.3)                                                                         |
+| Identity      | trusted-device credential (keychain)       | per-sandbox machine credential passed at start (env), rotated per start                                                                            |
 
 **Common core**:
 
@@ -217,31 +216,33 @@ each Sprite (`sprite`). A `HostMode` trait swaps only what differs between the t
   - one prompt in flight per session; further messages queue as pending tasks;
   - advertises fs (confined to the workspace), terminals (PTY, tee'd into `Activity{terminal}`) and elicitation{form,url}.
 - **Mapping**: ACP → TurnEvent, with `seq` per thread. A v2 adapter sits behind a feature flag.
-- **Durability**: SQLite holds threads, tasks, session table, pending outbound events and the last acked seq. After a restart or cold wake, the next message calls `session/resume` (fallback `session/load`) before the prompt. The hub is the source of truth, and the runner re-syncs after a Sprite restore.
+- **Durability**: SQLite holds threads, tasks, session table, pending outbound events and the last acked seq. After a restart or cold wake, the next message calls `session/resume` (fallback `session/load`) before the prompt. The hub is the source of truth, and the runner re-syncs after a restore.
 - **Cancellation**: `session/cancel`, and any pending permission is answered `cancelled`. If an approval TTL expires, the task fails with an `expired` reason and the UI offers "retry turn".
 - **Attachments**: images become ACP image blocks; other files go into `.sm/attachments/` and are passed as `@path` references.
-- **Harness user separation** (sprite mode): the harness runs as a separate Unix user from the runner.
+- **Harness user separation** (sandbox mode): the harness runs as a separate Unix user from the runner.
 
 ### 4.2 Hub on Cloudflare
 
 The hub is a **Rust Worker** (`workers-rs`, axum through the `http` feature,
 compiled to wasm32). There is **no tokio** on Workers, so the `hub` crate and
 everything it uses (`protocol`, shared logic) are **runtime-agnostic**. Anything
-that needs a full Linux runtime runs in **Cloudflare Containers** (GA since April 2026) behind a Worker binding.
+that needs a full Linux runtime runs in **Cloudflare Containers**. Cloud workspaces are Sandboxes driven by the TypeScript **Workspace DO** (§4.3), bound into the Rust Worker.
 
-| Cloudflare piece                           | Used for                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Thread Durable Object** (SQLite storage) | One per thread / flow run: append-only event log with `seq`, interrupts (first answer wins), runs, pending tasks, subscription fan-out over **hibernatable WebSockets**, catch-up from `?after=seq` (snapshot + replay from a run boundary). Single-threaded per object, which gives ordering and exactly-once seq for free. |
-| **Machine Durable Object**                 | One per runner (laptop or Sprite): tunnel endpoint, presence (online / asleep / offline), offline queue of messages and approvals, delivery with ack, dispatch capacity.                                                                                                                                                     |
-| **Flow Durable Object**                    | One per flow run: durable state machine; **DO alarms** for timers, timeouts and retries (§4.9).                                                                                                                                                                                                                              |
-| **D1**                                     | Org-wide metadata: users, orgs, members/roles, devices, machines, agents (kind, card cache), workspaces, task index with **FTS5** search, notification prefs, audit log, usage rollups.                                                                                                                                      |
-| **R2**                                     | Attachments (signed URLs), workspace archives, handoff git bundles/patches, template artifacts + SBOMs, exported transcripts.                                                                                                                                                                                                |
-| **Queues**                                 | Push notification fan-out (APNs/FCM/Web Push), BYO A2A push-webhook ingest, usage rollups, audit export.                                                                                                                                                                                                                     |
-| **Cron Triggers**                          | Reaper, retention/TTL, scheduled flow triggers, usage pulls from Sprites.                                                                                                                                                                                                                                                    |
-| **Secrets Store / Worker secrets**         | Master key for envelope-encrypting per-org Sprites tokens, Fly deploy tokens, GitHub app secret, APNs/FCM keys.                                                                                                                                                                                                              |
-| **Workers Static Assets**                  | The **mobile web page** (interim phone client, PWA) and, later, read-only share pages and universal-link files (`apple-app-site-association`, `assetlinks.json`).                                                                                                                                                            |
-| **Workers Logs/Traces, Analytics Engine**  | Observability and metrics. Alerts via notifications.                                                                                                                                                                                                                                                                         |
-| **Cloudflare Tunnel + Access**             | The private-network path for agents (§4.7).                                                                                                                                                                                                                                                                                  |
+| Cloudflare piece                                                 | Used for                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Thread Durable Object** (SQLite storage)                       | One per thread / flow run: append-only event log with `seq`, interrupts (first answer wins), runs, pending tasks, subscription fan-out over **hibernatable WebSockets**, catch-up from `?after=seq` (snapshot + replay from a run boundary). Single-threaded per object, which gives ordering and exactly-once seq for free. |
+| **Machine Durable Object**                                       | One per runner (laptop or sandbox): tunnel endpoint, presence (online / asleep / offline), offline queue of messages and approvals, delivery with ack, dispatch capacity.                                                                                                                                                    |
+| **Flow Durable Object**                                          | One per flow run: durable state machine; **DO alarms** for timers, timeouts and retries (§4.9).                                                                                                                                                                                                                              |
+| **Workspace Durable Object** (TypeScript, `@cloudflare/sandbox`) | One per cloud workspace: start/stop the sandbox, snapshots, `DirectoryBackup`/restore, outbound handler (credential injection + egress allowlist), previews (§4.3).                                                                                                                                                          |
+| **D1**                                                           | Org-wide metadata: users, orgs, members/roles, devices, machines, agents (kind, card cache), workspaces, task index with **FTS5** search, notification prefs, audit log, usage rollups.                                                                                                                                      |
+| **R2**                                                           | Attachments (signed URLs), workspace backups and archives, handoff git bundles/patches, template artifacts + SBOMs, exported transcripts.                                                                                                                                                                                    |
+| **Queues**                                                       | Push notification fan-out (APNs/FCM/Web Push), BYO A2A push-webhook ingest, usage rollups, audit export.                                                                                                                                                                                                                     |
+| **Cron Triggers**                                                | Reaper, retention/TTL, scheduled flow triggers, usage rollups.                                                                                                                                                                                                                                                               |
+| **Secrets Store / Worker secrets**                               | Model API keys and service credentials injected by the outbound handler; GitHub app secret; APNs/FCM keys; master key for envelope-encrypting per-org credentials in D1.                                                                                                                                                     |
+| **Workers Static Assets**                                        | The **mobile web page** (interim phone client, PWA) and, later, read-only share pages and universal-link files (`apple-app-site-association`, `assetlinks.json`).                                                                                                                                                            |
+| **Workers Logs/Traces, Analytics Engine**                        | Observability and metrics. Alerts via notifications.                                                                                                                                                                                                                                                                         |
+| **Cloudflare Tunnel + Access**                                   | The private-network path for agents (§4.7).                                                                                                                                                                                                                                                                                  |
+| **Container registry**                                           | The pinned workspace image (§4.3).                                                                                                                                                                                                                                                                                           |
 
 **Auth**:
 
@@ -283,48 +284,46 @@ unit-tested natively with `cargo test`.
 
 All are checked in a spike (M0-017).
 
-### 4.3 Sprites orchestration
+### 4.3 Cloud workspaces on Cloudflare Sandboxes
 
-**Tokens**
+Managed agents run in **Cloudflare Sandboxes**: Containers (a microVM per
+instance) controlled from a Durable Object with **`@cloudflare/sandbox` 1.0**.
+Everything lives in one Cloudflare account. There is no Fly / Sprites dependency.
 
-- Fly tokens are **not** used for the Sprites API: a Fly token returned 401, and nothing documents Fly tokens there.
-- The hub uses a **restricted** Sprites org token (name prefix `sm-<org>-`, creation cap) for orchestration.
-- A separate **unrestricted / `usage.read`** token is held only by the billing job, for `/v1/usage*` and connector usage.
-- CI uses its own restricted token (`sm-ci-`, cap 2).
+**Workspace Durable Object (TypeScript)**: the one deliberate exception to Rust.
 
-**Template = recipe**
+- **Why**: `workers-rs` can start, signal and port-forward containers, but the Sandbox SDK features (snapshots, `DirectoryBackup`, per-hostname outbound handling, `S3Mount`, `Files`, terminals) are TypeScript-only.
+- **Shape**: one small `WorkspaceDO` class (≈ a few hundred lines) in `workers/workspace/`, bound into the Rust hub Worker by DO namespace + RPC. It exposes only:
+  - `start(image, instance)`, `stop()`, `status()`;
+  - `snapshot()` / `restore(id)`, `backup(dir)` / `restoreBackup(handle)`;
+  - `exec()` (for the runner bootstrap), `preview(port)`.
+- **Everything else lives in the runner** inside the sandbox (`sm --host sandbox`), which dials the hub over the same tunnel as a laptop.
 
-- A pinned build script plus an artifact tarball (toolchains, ACP adapters, sidecar). Applied to a fresh Sprite, then checkpointed _inside that Sprite_ as its local baseline.
-- ACP adapters are installed from a committed lockfile with integrity hashes (`npm ci --ignore-scripts` plus an allowlist of packages permitted to run install scripts).
-- Binaries are pinned by sha256; an SBOM is stored with each template version.
+**Workspace lifecycle**:
 
-**Fork = copy**
+| Concern       | How                                                                                                                                                                                                                                                                                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Image         | One pinned **workspace image** (toolchains, ACP adapters, `sm`) built in CI and pushed to the Cloudflare registry. ACP adapters come from a committed lockfile with integrity hashes (`npm ci --ignore-scripts` + an allowlist); binaries are pinned by sha256; an SBOM is stored per image version.                                                          |
+| Instance size | `standard-2` default (1 vCPU / 6 GiB / 12 GB), `standard-4` max (4 vCPU / 12 GiB / 20 GB). **Repos that don't fit run on a local runner** (§4.10).                                                                                                                                                                                                            |
+| Persistence   | Container disk is tied to the running instance. The **source of truth for a workspace is**: its git remote + a `DirectoryBackup` of `/workspace` to R2 (squashfs, copy-on-write restore) + a sandbox **snapshot** for fast resume (public beta, used when available). Caches (`~/.cargo`, `node_modules`) go in a per-workspace backup or an `S3Mount` on R2. |
+| Sleep / wake  | The Workspace DO stops the sandbox after an idle timeout (default 10 min; approvals pending → approval TTL). It backs up first, then stops. On the next message it starts the sandbox, restores, and the runner re-attaches the ACP session (`session/resume` or `session/load`).                                                                             |
+| Checkpoints   | Per turn: a `DirectoryBackup` of `/workspace` (+ shadow-git commit for diff/compare). Keep the last K = 20 plus named ones. Undo = restore a backup into the running sandbox.                                                                                                                                                                                 |
+| **Fork**      | Restore any backup or snapshot into a **new** sandbox, including one on a newer image. That makes forks, parallel flow branches and best-of-N cheap, which wasn't possible on Sprites.                                                                                                                                                                        |
+| Credentials   | Never inside the sandbox. The Workspace DO's **outbound handler** intercepts requests per hostname and injects keys from **Secrets Store**, e.g. `x-api-key` for `api.anthropic.com` and the GitHub token for `api.github.com`. `S3Mount` signs R2 requests in the Worker.                                                                                    |
+| Egress        | `enableInternet: false` by default; only hostnames on the workspace allowlist pass the outbound handler. Denied hostnames are logged for the egress view.                                                                                                                                                                                                     |
+| Preview       | Sandbox ports exposed on **our own hostnames** behind hub auth (signed, 10-min URLs).                                                                                                                                                                                                                                                                         |
+| Limits & cost | Admission control against the account's concurrent vCPU/memory; per-org budgets from container usage; reaper archives idle workspaces (backup kept in R2, sandbox deleted) after the TTL (default 14 days).                                                                                                                                                   |
 
-- Create a Sprite, apply the recipe, then copy the workspace tree from the source checkpoint (`/.sprite/checkpoints/<id>/` exposes the last five) or after an in-place restore.
-- Expect minutes. M0-010 tests whether a faster path exists.
+**Local dev**: `wrangler dev` runs Workers and DOs locally, but **backup/restore needs
+FUSE and only works deployed**. So workspace items carry an "on deployed preview
+environment" verify, run by the leader once Cloudflare credentials exist (P4).
 
-**Per-workspace hardening**
+**Subscription logins** (Claude Pro/Max OAuth) can't be injected through the outbound
+handler and are not supported in cloud workspaces. They work through local runners.
 
-- One label `ws:<id>` (labels via the CLI path or an undocumented create field, checked in M0-006; otherwise the name-prefix `sm-<org>-<ws>-`).
-- Network policy: an **explicit allowlist, never the `defaults` preset**.
-- Privileges profile `minimal` + `noNewPrivileges`.
-- Memory `limit_mb` per harness.
-
-**Credentials via the connector gateway**
-
-- Harness base-URL variables (e.g. `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`) point at `api.sprites.dev/v1/gateway/<provider>/<id>`. No credential material exists in the Sprite.
-- Connector access policies use the workspace label and narrow `allowed_endpoints`.
-- Providers without a native connector use a `custom_api` connector.
-- Harnesses that need a subscription OAuth login are marked **unsupported** for managed workspaces. BYO-token-on-disk is possible only behind an explicit warning.
-
-**Lifecycle**
-
-- Admission control against `running_limit` / `warm_limit` and the 10-creates/min limit.
-- Reaper: workspaces idle beyond the TTL (default 14 days) are archived to a tarball in object storage, then the Sprite is deleted; restore from archive is supported.
-- Budgets per org from `/v1/usage`.
-
-**Promote to production**: the Fly Machines API with an **app-scoped deploy token**
-stored per org (create Machine, volume, secrets from the workspace service definition).
+**Promote to production**: deploy the workspace's service to **Cloudflare Workers /
+Containers** with an account-scoped deploy token (`wrangler deploy` from a template).
+Other targets (e.g. Fly) are optional later.
 
 ### 4.4 Clients: native desktop + mobile, interim mobile web
 
@@ -412,45 +411,42 @@ A **Loadout** (YAML; org → workspace → task merge) declares:
 
 ### 4.7 Networking and VPNs
 
-Sprites network policy is DNS-based:
+Sandbox egress goes through the Workspace DO's **outbound handler**: only allowlisted hostnames pass (`enableInternet: false` otherwise), and every decision is logged. Private networks are reached through Cloudflare, not through a VPN inside the sandbox.
 
-- raw IPs are blocked unless resolved from an allowed domain;
-- **private IPs are always blocked**, so Fly 6PN / `.internal` cannot be reached from a Sprite.
-
-| Profile             | How                                                                                                                                                                                                                                                                             | Status                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `public`            | explicit allowlist                                                                                                                                                                                                                                                              | default                                                   |
-| `tailnet`           | userspace `tailscaled`, DERP over 443, DERP hostnames allowlisted, ephemeral key                                                                                                                                                                                                | **spike M0-008**. A community report says UDP is blocked. |
-| `wireguard`         | `boringtun` in the sidecar + SOCKS for the harness; peer must be a hostname                                                                                                                                                                                                     | spike M0-008                                              |
-| `cloudflare-tunnel` | The private network runs `cloudflared`, exposing internal services on hostnames protected by **Cloudflare Access** service tokens. The Sprite allowlists those hostnames and presents the service token through a `custom_api` connector, so the token never enters the Sprite. | **preferred**: no VPN inside the Sprite                   |
-| `gateway`           | Fallback for non-HTTP protocols: a per-org egress gateway at a **public hostname** (Cloudflare Container or any VM), mTLS / CONNECT proxy. It provides the private hop (tailnet/WireGuard).                                                                                     | fallback                                                  |
-| client side         | native apps reach a self-hosted hub over the OS VPN / embedded `libtailscale` on desktop                                                                                                                                                                                        |                                                           |
+| Profile             | How                                                                                                                                                                                                                                                              | Status                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `public`            | explicit allowlist                                                                                                                                                                                                                                               | default                                  |
+| `tailnet`           | userspace `tailscaled` in the sandbox over DERP (443), DERP hostnames allowlisted, ephemeral key; only if the spike shows it works through the outbound handler                                                                                                  | **spike M0-015**                         |
+| `wireguard`         | `boringtun` in the runner + SOCKS for the harness; peer must be a hostname                                                                                                                                                                                       | spike M0-015                             |
+| `cloudflare-tunnel` | The private network runs `cloudflared`, exposing internal services on hostnames protected by **Cloudflare Access** service tokens. The outbound handler allowlists those hostnames and attaches the Access service token, so the token never enters the sandbox. | **preferred**: no VPN inside the sandbox |
+| `gateway`           | Fallback for non-HTTP protocols: a per-org egress gateway at a **public hostname** (Cloudflare Container or any VM), mTLS / CONNECT proxy. It provides the private hop (tailnet/WireGuard).                                                                      | fallback                                 |
+| client side         | native apps reach a self-hosted hub over the OS VPN / embedded `libtailscale` on desktop                                                                                                                                                                         |                                          |
 
 The UI shows each workspace's effective egress and a denied-domain log.
 
-### 4.8 Security model (Sprite-internal trust)
+### 4.8 Security model (sandbox-internal trust)
 
-Any process in a Sprite can call every connector whose policy matches the Sprite.
-That includes the harness, plugins and npm postinstall scripts, and the
-pre-installed gateway skill teaches agents to list connectors. So:
+Any process in a sandbox (harness, plugins, npm postinstall scripts) can use every
+credential the outbound handler injects for that workspace's allowlisted hostnames.
+So:
 
-1. One label per workspace; connector policies scoped to it, with endpoint allowlists (e.g. GitHub `/repos/<org>/*`) and blocked admin paths.
-2. An explicit network allowlist, shown as a diff in the UI. The `defaults` preset is never used, because it allows write-capable exfiltration channels (gists, package publish).
-3. Privileges `minimal` + `noNewPrivileges`; the harness user is separate from the sidecar user. The sidecar state directory is 0700, and the push token is held in sidecar memory only.
-4. The hub validates every inbound event against the push config that authenticated it.
+1. Credentials are scoped per workspace and **per path**: the outbound handler injects a key only for allowlisted hostname + path prefixes (e.g. GitHub `/repos/<org>/<repo>/*`) and blocks admin paths.
+2. An explicit egress allowlist (`enableInternet: false` + handler), shown as a diff in the UI. No blanket defaults, because they allow write-capable exfiltration channels (gists, package publish).
+3. The harness user is separate from the runner user; the runner state directory is 0700; the machine credential is held in runner memory only and rotated per sandbox start.
+4. The hub validates every tunnel event against the machine credential that authenticated the tunnel.
 5. Harness-native plugins: org allowlist **and** only on workspaces whose connectors are read-only.
 6. An **exfiltration E2E test** (M4) plus `docs/security/threat-model.md` covering:
    - prompt injection;
    - plugins;
-   - hub↔sidecar auth;
-   - push spoofing;
+   - hub↔runner tunnel auth;
+   - credential injection scope;
    - BYO-agent SSRF.
 
 ### 4.9 Multi-agent flows and loops
 
 Single delegation is not enough. The hub runs a **durable flow engine**: one
 **Flow Durable Object** per run, with SQLite state and **alarms** for timers,
-timeouts and retries. Multi-agent work therefore survives Sprites sleeping, clients
+timeouts and retries. Multi-agent work therefore survives sandboxes sleeping, clients
 disconnecting and Worker restarts. A flow is a declarative graph of steps; each
 step that calls an agent is an ordinary task: local, managed, or BYO through the
 A2A edge.
@@ -461,7 +457,7 @@ A2A edge.
 flow: test-fix-review
 inputs: { repo: string, goal: string }
 budget: { usd: 20, wall_clock: 2h, max_agent_tasks: 40 }
-workspace: { strategy: shared } # shared | worktree-per-branch | sprite-per-branch
+workspace: { strategy: shared } # shared | worktree-per-branch | sandbox-per-branch
 steps:
   - id: plan
     agent: { select: 'skill:planning', model_hint: opus }
@@ -495,10 +491,10 @@ steps:
 | `parallel` / `map` | Runs branches concurrently, or the same steps over a list (e.g. one review per lens). `join: all \| any \| quorum(n)`, with a concurrency limit.                                                |
 | `loop`             | `while` / `until` CEL condition, `max_iterations` (required), and no-progress detection (same diff twice, same failing test set).                                                               |
 | `branch`           | CEL `if` / `switch`.                                                                                                                                                                            |
-| `run`              | A command in the flow's workspace via Sprites exec; exit code, stdout and stderr become step output.                                                                                            |
+| `run`              | A command in the flow's workspace via the runner; exit code, stdout and stderr become step output.                                                                                              |
 | `judge`            | An agent step whose output must match a verdict schema; it drives loops and branches.                                                                                                           |
 | `human`            | An approval or form gate (`Interrupt`, push notification), with a timeout and `on_timeout` behaviour.                                                                                           |
-| `merge`            | Merges branch worktrees or Sprites back into the main workspace; conflicts go to an agent step or a human.                                                                                      |
+| `merge`            | Merges branch worktrees or sandboxes back into the main workspace; conflicts go to an agent step or a human.                                                                                    |
 | `action`           | Built-ins (open PR, promote, notify), plus WASM plugin actions.                                                                                                                                 |
 | `ledger`           | The built-in **leader / worker / review** pattern (below).                                                                                                                                      |
 | `subflow`          | Calls another flow.                                                                                                                                                                             |
@@ -513,8 +509,8 @@ steps:
 **Workspace strategies** for parallel branches:
 
 - `shared`: sequential steps on one workspace.
-- `worktree-per-branch`: one Sprite with a git worktree per branch. This is fast and the default for parallel coding.
-- `sprite-per-branch`: full isolation. It's slow because forks are copies (§4.3) and it counts against `running_limit`.
+- `worktree-per-branch`: one sandbox (or local folder) with a git worktree per branch. Fast, and the default for parallel coding on one machine.
+- `sandbox-per-branch`: full isolation. Each branch restores the parent's latest backup into a **new** sandbox, which is cheap on Cloudflare. It counts against the account's concurrent vCPU/memory.
 
 **Agent-initiated delegation**:
 
@@ -527,14 +523,14 @@ steps:
 agents, other hubs and Zed (through the ACP bridge) can call it like any agent.
 
 **Triggers**: manual, A2A inbound, GitHub webhooks (issue labelled, PR comment
-`/agent …`, CI failed), and schedules (a hub cron now; Sprites 2.0 schedules later).
+`/agent …`, CI failed), and schedules (Cron Triggers).
 
 **Guardrails**:
 
 - Budgets enforced before every step (USD from usage + connector spend, wall clock, task count, loop iterations).
 - Cancellation cascades to every running task.
 - Step retries are idempotent (idempotency key per step × iteration).
-- Admission control respects Sprite limits.
+- Admission control respects the account's container limits.
 - Every flow run is replayable from `flow_steps`.
 
 **Client view**: a flow run is one thread (`thread_id = flow_run.id`); child tasks keep their own threads, which appear only inside `Subagent*` events.
@@ -550,7 +546,7 @@ running there, and you pick it up on your phone (or another computer) in one ste
 Unlike Claude's, it works for **any ACP agent** and any harness login, and the same
 session can later move to the cloud.
 
-**Runner (`sm`)**: the sidecar core with a `local` host mode instead of `sprite`. It
+**Runner (`sm`)**: the runner core with the `local` host mode (the `sandbox` mode runs in the cloud). It
 ships as one static binary, and the desktop app embeds it.
 
 | Command                                    | Behaviour                                                                                                                                                                                                                                           |
@@ -576,11 +572,11 @@ ships as one static binary, and the desktop app embeds it.
 
 **Local environment**:
 
-- The runner discovers installed harnesses (claude, codex, opencode, pi, gemini, goose) and their ACP adapters, and uses **your existing logins**. That includes Claude subscription logins, which managed Sprites can't use (§7.4).
+- The runner discovers installed harnesses (claude, codex, opencode, pi, gemini, goose) and their ACP adapters, and uses **your existing logins**. That includes Claude subscription logins, which cloud sandboxes can't use (§7.4).
 - It also uses your local MCP servers, tools and project config.
 - Files and images sent from the phone land in the workspace and are passed to the agent as `@` file references or image blocks.
 
-**Local checkpoints**: there is no Sprite to snapshot, so each turn is a **shadow git
+**Local checkpoints**: there is no sandbox to back up, so each turn is a **shadow git
 commit** under `refs/sm/checkpoints/*`. Restore and undo work the same in the UI.
 
 **Dispatch**: the composer's **Where** picker offers your machines (with presence)
@@ -589,7 +585,7 @@ in `same-dir` or a new worktree.
 
 **Handoff**:
 
-- **Continue in cloud**: the runner sends a git bundle + an uncommitted-changes patch. The hub creates or forks a Sprite workspace and applies them. The conversation continues there:
+- **Continue in cloud**: the runner sends a git bundle + an uncommitted-changes patch. The hub creates (or forks from a backup) a cloud sandbox workspace and applies them. The conversation continues there:
   - if the harness's session files are portable (e.g. Claude Code's session JSONL), they are copied and loaded with `session/load`;
   - otherwise the new agent gets the transcript summary + plan as context.
     The phone stays on the same thread.
@@ -623,10 +619,10 @@ something usable ships early.
 | **P1 Engine**                            | Runner core (ACP client, mapping, durability, shadow-git checkpoints), hub Worker + Thread/Machine DOs + D1 on local workerd, client-core                                                                                                         | M1a (core), M2, M2b (core), M3-001       | nothing                                        |
 | **P2 Remote Control** → `v2.0.0-alpha.1` | `sm rc` / TUI / pairing / QR / trust / discovery (claude + opencode first), **mobile web page**, deployed hub, parity E2E                                                                                                                         | M2b, WEB                                 | **Cloudflare account + API token** (to deploy) |
 | **P3 Desktop app** → `alpha.2`           | gpui-kit desktop: shell, composer, task view, approvals, diff, inbox, embedded runner, palette, notifications; unsigned macOS builds from CI                                                                                                      | M3                                       | macOS CI runner enabled; a Mac to dogfood      |
-| **P4 Managed cloud** → `beta.1`          | Sprites client + spikes, `sm --host sprite`, keep-alive, checkpoints, template recipe, workspaces, connectors, timeline, terminal/files/preview, handoff, reaper, exfiltration test                                                               | M0 (Sprites part), M1a (sprite part), M4 | Sprites token, model connector                 |
+| **P4 Managed cloud** → `beta.1`          | Workspace DO (TS) + sandbox spikes, workspace image, `sm --host sandbox`, sleep/wake, backups/checkpoints, workspaces, credential injection, timeline, terminal/files/preview, handoff, reaper, exfiltration test                                 | M0 (Sprites part), M1a (sprite part), M4 | Sprites token, model connector                 |
 | **P5 Fleet & edges**                     | A2A edge (in + out, TCK), AG-UI edge, Loadouts + renderers (6 harnesses) + conformance, MCP, fleet-MCP delegation, usage, ACP v2                                                                                                                  | M5                                       | harness logins on your laptop for conformance  |
 | **P6 Flows, plugins, networking**        | Flow engine + templates + graph view, WASM plugins + catalog, network profiles + Cloudflare Tunnel path                                                                                                                                           | M5c, M5b, M5 (net)                       | tailnet/WireGuard test creds (optional)        |
-| **P7 Native mobile & ship** → `v2.0.0`   | Mobile client decision on devices + native app, PR flow, promote to Fly, Zed bridge, signed releases, retire v1                                                                                                                                   | M1b (devices), M3 (mobile), M6           | Apple account, devices, signing material       |
+| **P7 Native mobile & ship** → `v2.0.0`   | Mobile client decision on devices + native app, PR flow, promote to Cloudflare, Zed bridge, signed releases, retire v1                                                                                                                            | M1b (devices), M3 (mobile), M6           | Apple account, devices, signing material       |
 
 **v1 stays deployed and untouched** until v2 has cloud workspaces, checkpoint
 restore, image attachments and per-message cost. Then it is tagged `v1-final` and retired.
@@ -639,12 +635,13 @@ restore, image attachments and per-message cost. Then it is tagged `v1-final` an
 Cargo workspace (members = ["crates/*"]); gpui + gpui-component pinned by git rev
 crates/
   protocol/      turn_event/, acp/, a2a/, agui/, tunnel/, mapping/ (golden tests), schemas/
-  runner/        `sm` binary: host modes (local, sprite), tunnel client, TUI, pairing, server mode
+  runner/        `sm` binary: host modes (local, sandbox), tunnel client, TUI, pairing, server mode
   sidecar/       runner core library: acp/, bridge/, store/, keepalive/, checkpoint/, preview/
   hub/           Cloudflare Worker (wasm32, no tokio): routes, DOs (thread, machine, flow), D1, R2, queues
   a2a-edge/      A2A 1.0 client (BYO in) + server (our agents/flows out)
   agui-edge/     AG-UI 1.0 adapter for third-party UIs
-  sprites/       generated client + checkpoint NDJSON + exec WS + undocumented fields
+workers/workspace/  TypeScript Workspace DO (@cloudflare/sandbox): lifecycle, backups, outbound handler
+images/workspace/   the pinned workspace container image (Dockerfile + lockfiles)
   loadout/  netprofile/  plugin-host/  flow/  fleet-mcp/
   acp-mock/  agui-fixture/  acp-bridge/  cli/
   client-core/   view models, sync, cache, outbound queue (most UI logic, natively tested)
@@ -659,7 +656,7 @@ gateway/  spikes/  scripts/  manifest/ (→ default Loadout)
 
 ## 7. Open questions / risks
 
-1. **Sprites token** (P4) and **Cloudflare account** (P2) are the two account dependencies. P0–P1 need neither.
+1. **One account**: Cloudflare (needed from P2 to deploy; P4 for sandboxes; a model API key in Secrets Store for P4). P0–P1 need nothing.
 2. **Workers constraints**: no tokio, wasm bundle size, DO/D1 limits; the `workers-rs` D1 binding is marked alpha. Spike M0-017 confirms these early. Fallback: put the D1 work behind a "directory" DO, or move heavy routes to a Container.
 3. **gpui-kit mobile** is experimental. The interim mobile web page de-risks the phone. Native mobile is decided on devices in P7 by the gates (default: hybrid with Flutter if a hard gate fails).
 4. **GPUI for Haiku workers**: the API is pre-1.0 and fast-moving (gpui-component 0.8.1 was published 2026-10-26). Mitigations:
@@ -667,19 +664,19 @@ gateway/  spikes/  scripts/  manifest/ (→ default Loadout)
    - the first screen of each kind goes to Opus;
    - thin views over `client-core`;
    - a serialized client lane.
-5. **No cross-Sprite restore**: forks are copies (§4.3).
-6. **Model credentials in Sprites**: whether there is a native Anthropic connector is unverified (custom_api is the fallback). Subscription logins work only through local runners.
+5. **Sandbox maturity and limits**: SDK 1.0 is new, snapshots are beta, backup needs FUSE (deployed only), instances max 4 vCPU / 12 GiB / 20 GB. Big repos use local runners; spikes in P0/P4 confirm behaviour.
+6. **Model credentials in the cloud**: API keys only, injected by the outbound handler. Subscription logins work only through local runners.
 7. **Mapping fidelity**: golden tests per mapping; raw payloads preserved.
 8. **Community Rust SDKs** (A2A, AG-UI): they now sit only in the edge adapters, behind traits, checked against 1.0 fixtures.
 9. **Harness parity**: the conformance matrix; claude + opencode first.
 10. **Remote Control trust**: trusted devices, revocation, workspace trust, local permission mode, remote terminal off by default, audit. Transcripts are stored in the hub for sync.
 11. **Runaway multi-agent cost**: required `max_iterations`, no-progress detection, budgets before each step, delegation depth/fan-out limits, cascade cancel.
-12. **Sprites limits & cost**: admission control, reaper, retention, budgets; approval TTL 10 min by default.
+12. **Container limits & cost**: admission control, reaper, retention, budgets; idle stop after 10 min; approval TTL 10 min by default.
 13. **Ledger-run economics**:
     - full ledger: ≈270–300 worker attempts, ≈$200–450 model spend, 3–5 weeks of continuous running;
     - P0–P2: ≈$60–120 and ~1.5 weeks.
     - Container: 4 vCPU / 15 GB / 30 GB disk.
-14. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform. Fly Machines/MPG for the hub were replaced by Cloudflare.
+14. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform. Fly (Machines/MPG for the hub, Sprites for workspaces) was replaced by Cloudflare in rev 5–6; v1 keeps running on Sprites until retired.
 
 ---
 
@@ -719,7 +716,7 @@ gateway/  spikes/  scripts/  manifest/ (→ default Loadout)
 
 1. **Cloudflare account + API token** (Workers Paid, DOs, D1, R2, Queues) as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. Needed by P2 to deploy.
 2. **macOS runner** enabled for the repo's GitHub Actions. Needed by P3 dogfood builds.
-3. **Sprites token + model connector**. Needed by P4.
+3. **A model API key** (e.g. Anthropic) added to Cloudflare Secrets Store. Needed by P4.
 4. **Apple account + phones**. Needed by P7.
 
 **How you follow along**:
