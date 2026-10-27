@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/UserMessage.schema.json",
+  "title": "UserMessage",
+  "description": "The user prompt that opens a task (from ACP session/prompt input; A2A user message).",
+  "x-scope": "task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "message_id",
+    "parts",
+    "author"
+  ],
+  "properties": {
+    "type": {
+      "const": "UserMessage"
+    },
+    "message_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/ContentPart"
+      }
+    },
+    "author": {
+      "$ref": "../common.schema.json#/$defs/Actor"
+    }
+  }
+}

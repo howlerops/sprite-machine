@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/Presence.schema.json",
+  "title": "Presence",
+  "description": "The machine hosting this thread changed presence (published by the Machine DO).",
+  "x-scope": "thread",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "machine_id",
+    "state",
+    "since"
+  ],
+  "properties": {
+    "type": {
+      "const": "Presence"
+    },
+    "machine_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "state": {
+      "enum": [
+        "online",
+        "asleep",
+        "offline"
+      ]
+    },
+    "since": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    }
+  }
+}

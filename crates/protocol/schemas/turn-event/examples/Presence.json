@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "seq": 26,
+  "thread_id": "th_1",
+  "task_id": null,
+  "run_id": null,
+  "ts": "2026-10-27T22:00:26.000Z",
+  "event": {
+    "type": "Presence",
+    "machine_id": "mch_laptop",
+    "state": "asleep",
+    "since": "2026-10-27T22:03:00.000Z"
+  }
+}

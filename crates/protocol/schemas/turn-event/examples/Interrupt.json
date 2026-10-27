@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "seq": 16,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:16.000Z",
+  "event": {
+    "type": "Interrupt",
+    "interrupt_id": "int_1",
+    "kind": "approval",
+    "title": "Allow edit to src/main.rs?",
+    "expires_at": "2026-10-27T22:10:00.000Z",
+    "tool_call_id": "tc_1",
+    "options": [
+      {
+        "option_id": "allow",
+        "name": "Allow",
+        "kind": "allow_once"
+      },
+      {
+        "option_id": "reject",
+        "name": "Deny",
+        "kind": "reject_once"
+      }
+    ]
+  }
+}

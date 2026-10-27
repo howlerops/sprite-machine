@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "seq": 8,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:08.000Z",
+  "event": {
+    "type": "ReasoningMessageStart",
+    "message_id": "rsn_1",
+    "role": "reasoning"
+  }
+}

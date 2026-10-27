@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/ToolCallEnd.schema.json",
+  "title": "ToolCallEnd",
+  "description": "The tool call reached a final status (ACP tool_call_update status completed/failed).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "tool_call_id",
+    "status"
+  ],
+  "properties": {
+    "type": {
+      "const": "ToolCallEnd"
+    },
+    "tool_call_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    }
+  }
+}

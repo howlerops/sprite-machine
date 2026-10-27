@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/TextMessageStart.schema.json",
+  "title": "TextMessageStart",
+  "description": "Opens an assistant message (first ACP agent_message_chunk after a different update).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "message_id",
+    "role"
+  ],
+  "properties": {
+    "type": {
+      "const": "TextMessageStart"
+    },
+    "message_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "role": {
+      "const": "assistant"
+    }
+  }
+}

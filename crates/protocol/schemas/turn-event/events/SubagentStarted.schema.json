@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/SubagentStarted.schema.json",
+  "title": "SubagentStarted",
+  "description": "A child task on another agent started (fleet-MCP delegation, flow agent step, or a harness subagent identified by its tool call).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "subagent_run_id",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "SubagentStarted"
+    },
+    "subagent_run_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "child_thread_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "child_task_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "agent_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "parent_tool_call_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "parent_subagent_run_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    }
+  }
+}

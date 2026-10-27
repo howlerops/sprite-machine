@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/ToolCallArgs.schema.json",
+  "title": "ToolCallArgs",
+  "description": "The full tool input (ACP rawInput); replaces any earlier args for this id.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "tool_call_id",
+    "raw_input"
+  ],
+  "properties": {
+    "type": {
+      "const": "ToolCallArgs"
+    },
+    "tool_call_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "raw_input": {}
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "seq": 32,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_2",
+  "ts": "2026-10-27T22:00:32.000Z",
+  "event": {
+    "type": "RunStarted",
+    "reason": "resume",
+    "parent_run_id": "run_1"
+  }
+}

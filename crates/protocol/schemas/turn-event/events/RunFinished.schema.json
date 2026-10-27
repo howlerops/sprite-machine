@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/RunFinished.schema.json",
+  "title": "RunFinished",
+  "description": "The run ended normally (ACP stopReason end_turn/max_tokens/max_turn_requests/refusal) or paused on interrupts.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "outcome"
+  ],
+  "properties": {
+    "type": {
+      "const": "RunFinished"
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "success"
+            },
+            "stop_reason": {
+              "enum": [
+                "end_turn",
+                "max_tokens",
+                "max_turn_requests",
+                "refusal"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "interrupt_ids"
+          ],
+          "properties": {
+            "type": {
+              "const": "interrupt"
+            },
+            "interrupt_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "../common.schema.json#/$defs/Id"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

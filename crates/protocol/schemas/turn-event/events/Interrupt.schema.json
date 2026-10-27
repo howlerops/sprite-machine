@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/Interrupt.schema.json",
+  "title": "Interrupt",
+  "description": "The run needs human input: approval (ACP session/request_permission), form or auth (ACP elicitation/create form/url).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "interrupt_id",
+    "kind",
+    "title",
+    "expires_at"
+  ],
+  "properties": {
+    "type": {
+      "const": "Interrupt"
+    },
+    "interrupt_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "kind": {
+      "enum": [
+        "approval",
+        "form",
+        "auth"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "tool_call_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "option_id",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "option_id": {
+            "$ref": "../common.schema.json#/$defs/Id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "allow_once",
+              "allow_always",
+              "reject_once",
+              "reject_always"
+            ]
+          }
+        }
+      }
+    },
+    "response_schema": {
+      "type": "object",
+      "description": "form: JSON Schema of the answer"
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "description": "auth: URL to open"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "seq": 25,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:25.000Z",
+  "event": {
+    "type": "Checkpoint",
+    "checkpoint_id": "cp_7",
+    "kind": "shadow_git",
+    "git_ref": "refs/sm/checkpoints/th_1/7",
+    "files_changed": 1
+  }
+}

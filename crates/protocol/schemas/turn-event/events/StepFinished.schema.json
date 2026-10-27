@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/StepFinished.schema.json",
+  "title": "StepFinished",
+  "description": "A flow step ended.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "step_id",
+    "step_name",
+    "outcome"
+  ],
+  "properties": {
+    "type": {
+      "const": "StepFinished"
+    },
+    "step_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "step_name": {
+      "type": "string"
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "failed",
+        "skipped",
+        "cancelled"
+      ]
+    }
+  }
+}

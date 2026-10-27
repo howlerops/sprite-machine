@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "seq": 1,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": null,
+  "ts": "2026-10-27T22:00:01.000Z",
+  "event": {
+    "type": "UserMessage",
+    "message_id": "msg_u1",
+    "parts": [
+      {
+        "type": "text",
+        "text": "Add a /healthz route"
+      },
+      {
+        "type": "file",
+        "name": "screen.png",
+        "mime_type": "image/png",
+        "url": "https://hub.example/att/a1?sig=x",
+        "size": 20480
+      }
+    ],
+    "author": {
+      "kind": "user",
+      "id": "usr_1",
+      "name": "Jacob",
+      "device_id": "dev_phone"
+    }
+  }
+}

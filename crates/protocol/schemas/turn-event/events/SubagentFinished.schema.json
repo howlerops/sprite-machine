@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/SubagentFinished.schema.json",
+  "title": "SubagentFinished",
+  "description": "The child task completed.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "subagent_run_id"
+  ],
+  "properties": {
+    "type": {
+      "const": "SubagentFinished"
+    },
+    "subagent_run_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "result": {}
+  }
+}

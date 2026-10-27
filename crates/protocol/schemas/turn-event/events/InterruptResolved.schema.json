@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/InterruptResolved.schema.json",
+  "title": "InterruptResolved",
+  "description": "The first answer to an interrupt was accepted (later answers get 409), or it expired / was cancelled.",
+  "x-scope": "task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "interrupt_id",
+    "outcome",
+    "resolved_by"
+  ],
+  "properties": {
+    "type": {
+      "const": "InterruptResolved"
+    },
+    "interrupt_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "option_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "selected"
+            },
+            "option_id": {
+              "$ref": "../common.schema.json#/$defs/Id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "submitted"
+            },
+            "data": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "cancelled",
+                "expired",
+                "declined"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "resolved_by": {
+      "$ref": "../common.schema.json#/$defs/Actor"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/RunError.schema.json",
+  "title": "RunError",
+  "description": "The run ended with an error or was cancelled (ACP stopReason cancelled, session/cancel, harness crash, approval TTL expiry).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "reason",
+    "message"
+  ],
+  "properties": {
+    "type": {
+      "const": "RunError"
+    },
+    "reason": {
+      "enum": [
+        "cancelled",
+        "error"
+      ]
+    },
+    "code": {
+      "type": "string",
+      "description": "machine-readable: expired | harness_exited | protocol | timeout | budget | ..."
+    },
+    "message": {
+      "type": "string"
+    }
+  }
+}

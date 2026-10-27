@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "seq": 18,
+  "thread_id": "th_1",
+  "task_id": null,
+  "run_id": null,
+  "ts": "2026-10-27T22:00:18.000Z",
+  "event": {
+    "type": "StateSnapshot",
+    "scope": "session",
+    "snapshot": {
+      "available_commands": [
+        {
+          "name": "review",
+          "description": "Review the diff"
+        }
+      ],
+      "current_mode_id": "default",
+      "modes": [
+        {
+          "id": "default",
+          "name": "Default"
+        },
+        {
+          "id": "plan",
+          "name": "Plan"
+        }
+      ],
+      "config_options": []
+    }
+  }
+}

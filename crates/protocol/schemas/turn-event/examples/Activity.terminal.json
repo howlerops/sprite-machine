@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "seq": 29,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:29.000Z",
+  "event": {
+    "type": "Activity",
+    "activity_id": "term_1",
+    "activity_type": "terminal",
+    "mode": "append",
+    "content": {
+      "terminal_id": "term_1",
+      "output": "test result: ok. 3 passed\n"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "seq": 19,
+  "thread_id": "th_1",
+  "task_id": null,
+  "run_id": null,
+  "ts": "2026-10-27T22:00:19.000Z",
+  "event": {
+    "type": "StateDelta",
+    "scope": "usage",
+    "patch": [
+      {
+        "op": "replace",
+        "path": "/context_used",
+        "value": 48211
+      },
+      {
+        "op": "replace",
+        "path": "/context_size",
+        "value": 200000
+      },
+      {
+        "op": "replace",
+        "path": "/cost",
+        "value": {
+          "amount": 0.042,
+          "currency": "USD"
+        }
+      }
+    ]
+  }
+}

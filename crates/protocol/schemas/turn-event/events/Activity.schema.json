@@ -1,0 +1,319 @@
+{
+  "$defs": {
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "new_text"
+      ],
+      "properties": {
+        "tool_call_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "old_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new_text": {
+          "type": "string"
+        },
+        "chunk": {
+          "$ref": "../common.schema.json#/$defs/Chunk"
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entries"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "content",
+              "priority",
+              "status"
+            ],
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "priority": {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "terminal_id"
+      ],
+      "properties": {
+        "terminal_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "tool_call_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string",
+          "description": "UTF-8 (lossy) output bytes; appended in mode append"
+        },
+        "exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exit_code": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_call_id",
+        "decision",
+        "rule"
+      ],
+      "properties": {
+        "tool_call_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "activity_type": {
+            "const": "diff"
+          },
+          "mode": {
+            "enum": [
+              "snapshot",
+              "append"
+            ]
+          }
+        },
+        "required": [
+          "activity_type",
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/diff"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "activity_type": {
+            "const": "plan"
+          },
+          "mode": {
+            "enum": [
+              "snapshot",
+              "append"
+            ]
+          }
+        },
+        "required": [
+          "activity_type",
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/plan"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "activity_type": {
+            "const": "terminal"
+          },
+          "mode": {
+            "enum": [
+              "snapshot",
+              "append"
+            ]
+          }
+        },
+        "required": [
+          "activity_type",
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/terminal"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "activity_type": {
+            "const": "policy"
+          },
+          "mode": {
+            "enum": [
+              "snapshot",
+              "append"
+            ]
+          }
+        },
+        "required": [
+          "activity_type",
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/policy"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "patch"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "patch"
+        ]
+      }
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/Activity.schema.json",
+  "title": "Activity",
+  "description": "A structured activity: diff (ACP diff content), plan (ACP plan), terminal (tee'd client terminal), policy (auto-allow decision). Keyed by activity_id.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "activity_id",
+    "activity_type",
+    "mode"
+  ],
+  "properties": {
+    "type": {
+      "const": "Activity"
+    },
+    "activity_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "activity_type": {
+      "enum": [
+        "diff",
+        "plan",
+        "terminal",
+        "policy"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "snapshot",
+        "append",
+        "patch"
+      ]
+    },
+    "content": {
+      "type": "object"
+    },
+    "patch": {
+      "$ref": "../common.schema.json#/$defs/JsonPatch"
+    }
+  }
+}

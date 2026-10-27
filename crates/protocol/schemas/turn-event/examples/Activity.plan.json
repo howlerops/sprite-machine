@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "seq": 28,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:28.000Z",
+  "event": {
+    "type": "Activity",
+    "activity_id": "plan",
+    "activity_type": "plan",
+    "mode": "snapshot",
+    "content": {
+      "entries": [
+        {
+          "content": "Add route",
+          "priority": "high",
+          "status": "in_progress"
+        },
+        {
+          "content": "Add test",
+          "priority": "medium",
+          "status": "pending"
+        }
+      ]
+    }
+  }
+}

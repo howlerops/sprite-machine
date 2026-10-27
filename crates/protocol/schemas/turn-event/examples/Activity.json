@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "seq": 15,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:15.000Z",
+  "event": {
+    "type": "Activity",
+    "activity_id": "tc_1:src/main.rs",
+    "activity_type": "diff",
+    "mode": "snapshot",
+    "content": {
+      "tool_call_id": "tc_1",
+      "path": "src/main.rs",
+      "old_text": "let app = Router::new();\n",
+      "new_text": "let app = Router::new().route(\"/healthz\", get(ok));\n"
+    }
+  }
+}

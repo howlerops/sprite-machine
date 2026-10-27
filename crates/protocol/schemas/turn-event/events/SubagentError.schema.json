@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/SubagentError.schema.json",
+  "title": "SubagentError",
+  "description": "The child task failed or was cancelled.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "subagent_run_id",
+    "message"
+  ],
+  "properties": {
+    "type": {
+      "const": "SubagentError"
+    },
+    "subagent_run_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "message": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    }
+  }
+}

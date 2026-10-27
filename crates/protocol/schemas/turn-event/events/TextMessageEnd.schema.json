@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/TextMessageEnd.schema.json",
+  "title": "TextMessageEnd",
+  "description": "Closes the message (the next non-chunk update, or the end of the run).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "message_id"
+  ],
+  "properties": {
+    "type": {
+      "const": "TextMessageEnd"
+    },
+    "message_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    }
+  }
+}

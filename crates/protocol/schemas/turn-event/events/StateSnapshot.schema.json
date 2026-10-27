@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/StateSnapshot.schema.json",
+  "title": "StateSnapshot",
+  "description": "Full state for one scope: session (commands, modes, config), usage, thread (pending tasks, title), flow (graph, counters, budget).",
+  "x-scope": "thread",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "scope",
+    "snapshot"
+  ],
+  "properties": {
+    "type": {
+      "const": "StateSnapshot"
+    },
+    "scope": {
+      "enum": [
+        "session",
+        "usage",
+        "thread",
+        "flow"
+      ]
+    },
+    "snapshot": {
+      "type": "object"
+    }
+  }
+}

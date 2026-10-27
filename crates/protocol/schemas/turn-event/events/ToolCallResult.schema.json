@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/ToolCallResult.schema.json",
+  "title": "ToolCallResult",
+  "description": "Tool output (ACP tool_call content of type content, and rawOutput). Diff and terminal content become Activity events instead.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "tool_call_id",
+    "content"
+  ],
+  "properties": {
+    "type": {
+      "const": "ToolCallResult"
+    },
+    "tool_call_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "content": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/ContentPart"
+      }
+    },
+    "raw_output": {}
+  }
+}

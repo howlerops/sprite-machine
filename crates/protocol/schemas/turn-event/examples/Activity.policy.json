@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "seq": 30,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:30.000Z",
+  "event": {
+    "type": "Activity",
+    "activity_id": "tc_2:policy",
+    "activity_type": "policy",
+    "mode": "snapshot",
+    "content": {
+      "tool_call_id": "tc_2",
+      "decision": "allow",
+      "rule": "preset:read"
+    }
+  }
+}

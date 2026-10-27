@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "seq": 27,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:27.000Z",
+  "event": {
+    "type": "Raw",
+    "source": "child",
+    "child_thread_id": "th_child1",
+    "event": {
+      "v": 1,
+      "seq": 4,
+      "thread_id": "th_child1",
+      "task_id": "tk_child1",
+      "run_id": "run_c1",
+      "ts": "2026-10-27T22:01:00.000Z",
+      "event": {
+        "type": "TextMessageContent",
+        "message_id": "msg_c",
+        "delta": "Looks good."
+      }
+    }
+  }
+}

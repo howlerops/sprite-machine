@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "seq": 20,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:20.000Z",
+  "event": {
+    "type": "SubagentStarted",
+    "subagent_run_id": "sub_1",
+    "name": "reviewer",
+    "child_thread_id": "th_child1",
+    "child_task_id": "tk_child1",
+    "agent_id": "agt_codex",
+    "parent_tool_call_id": "tc_9"
+  }
+}

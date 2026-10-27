@@ -1,0 +1,37 @@
+{
+  "v": 1,
+  "seq": 11,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:11.000Z",
+  "event": {
+    "type": "ToolCallStart",
+    "tool_call_id": "tc_1",
+    "title": "Edit src/main.rs",
+    "kind": "edit",
+    "status": "pending",
+    "locations": [
+      {
+        "path": "src/main.rs",
+        "line": 12
+      }
+    ]
+  },
+  "raw": {
+    "source": "acp",
+    "payload": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "tc_1",
+      "title": "Edit src/main.rs",
+      "kind": "edit",
+      "status": "pending",
+      "locations": [
+        {
+          "path": "src/main.rs",
+          "line": 12
+        }
+      ]
+    }
+  }
+}

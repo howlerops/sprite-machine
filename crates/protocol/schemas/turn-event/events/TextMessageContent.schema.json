@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/TextMessageContent.schema.json",
+  "title": "TextMessageContent",
+  "description": "A text chunk (ACP agent_message_chunk with a text block).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "message_id",
+    "delta"
+  ],
+  "properties": {
+    "type": {
+      "const": "TextMessageContent"
+    },
+    "message_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "delta": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

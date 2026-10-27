@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/StateDelta.schema.json",
+  "title": "StateDelta",
+  "description": "An RFC 6902 patch against the last snapshot of one scope (ACP available_commands_update, current_mode_update, config_option_update, usage_update; pending-task queue).",
+  "x-scope": "thread",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "scope",
+    "patch"
+  ],
+  "properties": {
+    "type": {
+      "const": "StateDelta"
+    },
+    "scope": {
+      "enum": [
+        "session",
+        "usage",
+        "thread",
+        "flow"
+      ]
+    },
+    "patch": {
+      "$ref": "../common.schema.json#/$defs/JsonPatch"
+    }
+  }
+}

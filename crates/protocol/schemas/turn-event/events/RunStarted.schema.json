@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/RunStarted.schema.json",
+  "title": "RunStarted",
+  "description": "A run begins (ACP session/prompt sent, or resume after an interrupt).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "reason"
+  ],
+  "properties": {
+    "type": {
+      "const": "RunStarted"
+    },
+    "reason": {
+      "enum": [
+        "prompt",
+        "resume",
+        "retry"
+      ]
+    },
+    "parent_run_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "agent_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "machine_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    }
+  }
+}

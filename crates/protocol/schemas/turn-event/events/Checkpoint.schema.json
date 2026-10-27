@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/Checkpoint.schema.json",
+  "title": "Checkpoint",
+  "description": "A per-turn checkpoint was taken (sandbox DirectoryBackup and/or shadow-git commit).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "checkpoint_id",
+    "kind"
+  ],
+  "properties": {
+    "type": {
+      "const": "Checkpoint"
+    },
+    "checkpoint_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "kind": {
+      "enum": [
+        "shadow_git",
+        "backup",
+        "snapshot"
+      ]
+    },
+    "git_ref": {
+      "type": "string"
+    },
+    "backup_handle": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "files_changed": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

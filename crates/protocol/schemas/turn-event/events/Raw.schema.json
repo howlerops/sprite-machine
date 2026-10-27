@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/Raw.schema.json",
+  "title": "Raw",
+  "description": "An event from a child thread nested in a parent (flow runs, delegation), or an unmapped source event kept for fidelity.",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "source",
+    "event"
+  ],
+  "properties": {
+    "type": {
+      "const": "Raw"
+    },
+    "source": {
+      "enum": [
+        "child",
+        "acp",
+        "a2a",
+        "flow"
+      ]
+    },
+    "child_thread_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "event": {
+      "type": "object"
+    }
+  }
+}

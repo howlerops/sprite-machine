@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-machine.dev/schemas/turn-event/v1/events/ToolCallStart.schema.json",
+  "title": "ToolCallStart",
+  "description": "Creates a tool call, or merges changed fields into an existing one with the same id (upsert; ACP tool_call / tool_call_update).",
+  "x-scope": "run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "tool_call_id"
+  ],
+  "properties": {
+    "type": {
+      "const": "ToolCallStart"
+    },
+    "tool_call_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "title": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "switch_mode",
+        "other"
+      ]
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "in_progress"
+      ]
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/Location"
+      }
+    },
+    "parent_message_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    }
+  }
+}

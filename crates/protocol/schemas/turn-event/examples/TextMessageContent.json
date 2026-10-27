@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "seq": 6,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": "run_1",
+  "ts": "2026-10-27T22:00:06.000Z",
+  "event": {
+    "type": "TextMessageContent",
+    "message_id": "msg_a1",
+    "delta": "Adding the route now."
+  },
+  "raw": {
+    "source": "acp",
+    "payload": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Adding the route now."
+      }
+    }
+  }
+}

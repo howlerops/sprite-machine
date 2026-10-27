@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "seq": 17,
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "run_id": null,
+  "ts": "2026-10-27T22:00:17.000Z",
+  "event": {
+    "type": "InterruptResolved",
+    "interrupt_id": "int_1",
+    "outcome": {
+      "type": "selected",
+      "option_id": "allow"
+    },
+    "resolved_by": {
+      "kind": "user",
+      "id": "usr_1",
+      "name": "Jacob",
+      "device_id": "dev_phone"
+    }
+  }
+}
