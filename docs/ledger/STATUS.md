@@ -4,7 +4,7 @@ _Rewritten by the leader on every ledger commit._
 
 done 9/187 (3 dropped) · in-flight M0-003,M0-006 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 6/120
 
-Batch 1: M0-003 + M0-006 in flight.
+Batch 2: M1A-002 assigned; M0-003 still in flight.
 
 ## Per phase
 
