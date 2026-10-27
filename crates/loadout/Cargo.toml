@@ -1,0 +1,7 @@
+[package]
+name = "loadout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Loadouts: YAML model, org/workspace/task merge, per-harness renderers."

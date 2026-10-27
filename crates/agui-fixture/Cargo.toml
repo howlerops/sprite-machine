@@ -1,0 +1,7 @@
+[package]
+name = "agui-fixture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "AG-UI / TurnEvent fixture server for client development."

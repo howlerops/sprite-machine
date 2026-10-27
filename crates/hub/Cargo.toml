@@ -1,0 +1,10 @@
+[package]
+name = "hub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The hub Cloudflare Worker (wasm32, no tokio): routes and Durable Objects (thread, machine, flow), D1, R2, queues."
+
+[dependencies]
+protocol = { path = "../protocol" }

@@ -51,3 +51,6 @@ apps/mobile/expo-env.d.ts
 
 # skills CLI lockfile (per-machine)
 /skills-lock.json
+
+# Rust
+target/

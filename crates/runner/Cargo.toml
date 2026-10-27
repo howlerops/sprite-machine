@@ -1,0 +1,11 @@
+[package]
+name = "runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The `sm` runner: host modes (local, sandbox), tunnel client, TUI, pairing, server mode."
+
+[[bin]]
+name = "sm"
+path = "src/main.rs"

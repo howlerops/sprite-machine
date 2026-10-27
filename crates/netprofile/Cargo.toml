@@ -1,0 +1,7 @@
+[package]
+name = "netprofile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Network profiles: egress allowlists, tunnel and gateway configuration."

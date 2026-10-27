@@ -1,0 +1,11 @@
+[package]
+name = "protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Shared wire types: the TurnEvent envelope, ACP, A2A, AG-UI, tunnel frames and the mappings between them. Runtime-agnostic (builds for wasm32)."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
