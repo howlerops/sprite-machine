@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 12/187 (3 dropped) · in-flight M1A-002,GPUI-000 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 9/120
+done 12/187 (3 dropped) · in-flight M1A-002,GPUI-000,M2B-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 10/120
 
-Batch 3: M0-017 merged; leader on GPUI-000; M1A-002 in flight.
+Batch 4: M2B-001 assigned; leader on GPUI-000; M1A-002 in flight.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 7 | 2 |
-| P1 | 25 | 0 | 0 |
+| P1 | 25 | 0 | 1 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |

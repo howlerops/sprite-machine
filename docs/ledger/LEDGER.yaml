@@ -1629,6 +1629,9 @@ items:
     milestone: M2b
     phase: P1
     priority: 1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     deps: [SPEC-002, M0-002]
     paths:
       - 'crates/protocol/src/tunnel/**'
