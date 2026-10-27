@@ -21,3 +21,4 @@
 2026-10-27T22:34Z GPUI-000 todo→assigned (leader, client lane)
 2026-10-27T22:53Z M0-017 assigned→done merged 7e1a66a (opus); leader decision: 'no tokio' → 'no tokio runtime' (worker 0.8.7 depends on tokio with no features); plan §4.2, M0-002/M0-017/M2-* criteria and rust.yml now use scripts/check-no-tokio-runtime.sh. Discovered: hibernation externs + deployed hibernation check noted for M2-008/M2B-002 briefs, not new items
 2026-10-27T22:54Z M2B-001 todo→assigned attempt 1 (haiku; P1 pick — no P0 rust item ready, slot kept free for MVP-000)
+2026-10-27T23:06Z leader: container restart (OOM from parallel builds) — reconciled, nothing lost; M1A-002 + M2B-001 review passed, merge queued behind GPUI-000; added M2B-001a (strict frames); M2B-004 context += M2B-001 report

@@ -1645,6 +1645,26 @@ items:
     verify:
       - 'cargo test -p protocol --test tunnel_frames --test tunnel_seq'
 
+  - id: M2B-001a
+    title: 'protocol: strict tunnel frame parsing + unknown command kind helper'
+    milestone: M2b
+    phase: P1
+    priority: 2
+    deps: [M2B-001]
+    paths:
+      - crates/protocol/src/tunnel/**
+      - crates/protocol/tests/tunnel_strict.rs
+    context:
+      - 'docs/specs/tunnel.md §3.5 (unknown kind → command_result unsupported), §6 step 1 (a frame that does not match the spec → close protocol_error)'
+      - 'docs/ledger/reports/M2B-001.md (spec issues 2 and 6)'
+    acceptance:
+      - 'Every tunnel frame and command type rejects unknown fields (serde deny_unknown_fields or equivalent); a frame with an extra field or an unknown `t` fails to parse'
+      - '`protocol::tunnel::parse_command_frame` returns either the typed Command or `Unsupported{seq, idempotency_key, kind}` for an unknown `kind`, from which the runner builds `command_result{ok:false, code:"unsupported"}`'
+      - 'Every JSON example in docs/specs/tunnel.md still round-trips (tunnel_frames stays green)'
+    verify:
+      - cargo test -p protocol --test tunnel_strict --test tunnel_frames
+    min_tests: 4
+
   - id: M2B-002
     title: 'hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration'
     milestone: M2b
@@ -1704,8 +1724,9 @@ items:
       - 'crates/runner/src/tunnel/**'
       - 'crates/runner/tests/tunnel_client.rs'
     context:
-      - 'docs/specs/tunnel.md'
-      - 'docs/PLAN-v2-ade.md §4.10 (Connection)'
+      - "docs/specs/tunnel.md"
+      - "docs/PLAN-v2-ade.md §4.10 (Connection)"
+      - "docs/ledger/reports/M2B-001.md (Discovered work: rebuild Sender from the durable outbox; connection timers/backoff live here, not in protocol)"
     acceptance:
       - 'Outbound-only (test asserts no listening sockets); heartbeats; exponential backoff with jitter; resume token; detects OS sleep/wake gaps and reconnects'
       - 'Implements the bridge EventSink: un-acked events from the store are re-sent after reconnect and pruned on ack; commands are fed to the CommandSource; replaces the MVP-000 runner tunnel stub'
