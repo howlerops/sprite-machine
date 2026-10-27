@@ -21,6 +21,13 @@ agent-client-protocol = { version = "3", default-features = false }
 axum = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# Desktop UI (client-gpui only). gpui-component/gpui-kit are pinned by git rev; gpui is the
+# exact `gpui-pre` snapshot that rev is built against (see its Cargo.toml). Bump together,
+# re-vendor docs/vendor/gpui-component-<rev>/ and re-run scripts/gpui-render-proof.sh.
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "c8917c3661ed1090870f403c312b39e0d8a62e0b" }
+gpui-kit = { git = "https://github.com/longbridge/gpui-component", rev = "c8917c3661ed1090870f403c312b39e0d8a62e0b" }
+
 [profile.dev]
 debug = "line-tables-only"
 

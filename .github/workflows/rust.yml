@@ -15,8 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install lld
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq lld
+      - name: Install lld + GPUI build deps
+        run: >-
+          sudo apt-get update -qq && sudo apt-get install -y -qq lld
+          libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev
+          libfontconfig1-dev libfreetype-dev libvulkan-dev libssl-dev pkg-config
       - name: Toolchain (from rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
