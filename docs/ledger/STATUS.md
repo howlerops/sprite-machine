@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 8/187 (3 dropped) · in-flight M0-003,M0-006 · blocked 9 (human: M0-014, M0-019, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 6/120
+done 9/187 (3 dropped) · in-flight M0-003,M0-006 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 6/120
 
 Batch 1: M0-003 + M0-006 in flight.
 
@@ -13,7 +13,7 @@ Batch 1: M0-003 + M0-006 in flight.
 | P0 | 12 | 4 | 2 |
 | P1 | 25 | 0 | 0 |
 | P2 | 22 | 1 | 0 |
-| P3 | 19 | 0 | 0 |
+| P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
@@ -41,7 +41,6 @@ Batch 1: M0-003 + M0-006 in flight.
 | Item | Phase | Needed |
 | ---- | ----- | ------ |
 | M0-014 | P6 | Add TS_AUTHKEY (ephemeral, pre-authorized Tailscale key) and WG_TEST_PEER (a WireGuard peer config with a public hostname endpoint) as environment secrets; restart the session. |
-| M0-019 | P3 | Enable GitHub-hosted `macos-latest` runners for this repository (Settings → Actions; check the org allows them and the billing limit covers them), or register a self-hosted Mac runner labelled `macos-latest`. Then re-run the rust.yml workflow on v2. |
 | M0-020 | P4 | Cloudflare dashboard → Secrets Store (account level) → create a store if there is none → Create secret: a name such as ANTHROPIC_API_KEY, the value = your model API key (e.g. Anthropic), scope Workers. Tell the leader only the secret name and the store id. Never paste the key into chat. The Workspace DO outbound handler injects it for api.anthropic.com (plan §4.3); it never enters a sandbox. |
 | M1B-001 | P7 | Provide an Apple Developer account, a physical iPhone, a mid-range Android phone, and a Mac or approval for GitHub macOS runners (iOS cannot build in the Linux container). |
 | M1B-010 | P7 | Build both spikes on a Mac per their READMEs; run spikes/bench on the iPhone and Android; commit results to spikes/bench/results/ with screen recordings for hard gates. |

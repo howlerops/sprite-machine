@@ -538,8 +538,9 @@ items:
     milestone: M0
     phase: P3
     owner: human
-    status: blocked
-    blocked_on: human
+    status: "done"
+    evidence: "rust.yml run 40593841232 on v2 @2dd859c: macos job (macos-latest) success, cargo test --workspace passed"
+    blocked_on: null
     deps: [M0-002]
     acceptance:
       - 'The macos-latest job of rust.yml has a successful run on v2 (`gh run list --workflow rust.yml --branch v2`)'

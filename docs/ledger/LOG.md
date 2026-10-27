@@ -13,3 +13,4 @@
 2026-10-27T22:18Z M0-003 todo→assigned attempt 1 (haiku, client lane)
 2026-10-27T22:18Z M0-006 todo→assigned attempt 1 (haiku, rust lane)
 2026-10-27T22:20Z M1B-003 todo→done merged 84a8c7e
+2026-10-27T22:20Z M0-019 blocked→done (macos-latest job green on v2, run 40593841232)
