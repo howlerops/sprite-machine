@@ -158,6 +158,65 @@ items:
       - 'cargo run -p cli -- e2e tracer'
       - 'cargo test -p protocol'
 
+  - id: MVP-000a
+    title: 'Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile'
+    milestone: M0
+    phase: P1
+    priority: 1
+    deps: [MVP-000]
+    paths:
+      - crates/hub/.gitignore
+      - Cargo.toml
+      - crates/cli/src/e2e/tracer*
+    context:
+      - 'docs/ledger/reports/MVP-000.md (spec issue 7: 1.49 MB wasm vs 0.49 MB in the spike; .wrangler deleted by hand; CARGO_PROFILE_RELEASE_STRIP env var)'
+      - 'docs/spikes/cloudflare.md (release profile: opt-level z, lto, codegen-units 1, strip off)'
+    acceptance:
+      - 'crates/hub/.gitignore ignores /.wrangler and /build; the tracer no longer deletes crates/hub/.wrangler itself, and `git status --porcelain` is empty after `cargo run -p cli -- e2e tracer`'
+      - 'The hub wasm is built with the spike''s size settings (opt-level "z", lto, codegen-units 1, strip off) without changing native release builds of other crates (per-package profile override for hub, or a dedicated profile); the CARGO_PROFILE_RELEASE_STRIP env var is gone'
+      - 'The tracer prints the gzip bundle size, and it is < 1 MiB'
+    verify:
+      - cargo run -p cli -- e2e tracer
+      - test -z "$(git status --porcelain)"
+
+  - id: MVP-000b
+    title: 'CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2'
+    milestone: M0
+    phase: P1
+    priority: 1
+    deps: [MVP-000]
+    paths:
+      - .github/workflows/rust.yml
+    context:
+      - 'docs/ledger/reports/MVP-000.md'
+      - 'docs/dev.md (pinned wrangler 4.154.0, worker-build 0.8.7)'
+    acceptance:
+      - 'A `tracer` job on ubuntu-latest installs the pinned worker-build and wrangler, runs `cargo run -p cli -- e2e tracer`, and fails the workflow if it fails; it never uses Cloudflare credentials'
+    verify:
+      - grep -q 'e2e tracer' .github/workflows/rust.yml
+
+  - id: SPEC-003
+    title: 'Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage'
+    milestone: M0
+    phase: P1
+    lane: docs
+    priority: 0
+    owner: leader
+    deps: [MVP-000]
+    paths:
+      - docs/specs/client-api.md
+      - docs/specs/turn-event.md
+      - docs/specs/tunnel.md
+    context:
+      - 'docs/ledger/reports/MVP-000.md (spec issues 1-5)'
+      - 'crates/hub/src/tracer/worker.rs (the shapes the tracer uses today)'
+    acceptance:
+      - 'client-api.md defines every client→hub HTTP route the P1–P2 clients need (create thread on a machine, prompt, list/remove pending tasks, answer an interrupt, cancel, subscribe), with request/response JSON, the Idempotency-Key header, error codes (409 body naming the resolver), and auth (placeholder until M2-003a)'
+      - 'States who emits UserMessage (the hub, when it accepts a prompt) and how a thread is created for a machine; turn-event.md and tunnel.md are updated consistently'
+    verify:
+      - test -s docs/specs/client-api.md
+      - grep -qi idempotency-key docs/specs/client-api.md
+
   - id: M0-003
     title: 'Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build)'
     milestone: M0
@@ -1476,7 +1535,10 @@ items:
     phase: P1
     size: M
     risk: high
-    deps: [M2-001, SPEC-001]
+    deps:
+      - "M2-001"
+      - "SPEC-001"
+      - "SPEC-003"
     paths:
       - 'crates/hub/src/do/thread*'
       - 'crates/hub/src/threads/**'
@@ -2102,7 +2164,11 @@ items:
     milestone: M3
     phase: P1
     size: M
-    deps: [SPEC-001, M0-006, MVP-000]
+    deps:
+      - "SPEC-001"
+      - "M0-006"
+      - "MVP-000"
+      - "SPEC-003"
     paths:
       - 'crates/client-core/**'
     context:

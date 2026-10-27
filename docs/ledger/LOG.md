@@ -30,3 +30,4 @@
 2026-10-27T23:13Z leader: could not delete stale branch leader/GPUI-000-wip (push --delete → HTTP 403)
 2026-10-27T23:21Z M1A-001 assigned→done merged 48a29b6 (discovered: SM_GIT_SHA build script → release items; hub URL validation → M2B-004; no new items)
 2026-10-27T23:22Z M1A-003 todo→assigned attempt 1 (haiku; no overlap with MVP-000)
+2026-10-27T23:48Z leader: added MVP-000a, MVP-000b, SPEC-003 from MVP-000 report; M2-008 + M3-001 now depend on SPEC-003; M1A-003 review passed (ignored re-exec helper accepted as logged exception → M1A-003b)
