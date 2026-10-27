@@ -2,15 +2,15 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 10/187 (3 dropped) · in-flight M0-003,M1A-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 7/120
+done 11/187 (3 dropped) · in-flight M0-017,M1A-002,GPUI-000 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 9/120
 
-Batch 2: M1A-002 assigned; M0-003 still in flight.
+Batch 3: M0-017 (opus) assigned; leader on GPUI-000; M1A-002 in flight.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
-| P0 | 12 | 5 | 2 |
+| P0 | 12 | 6 | 3 |
 | P1 | 25 | 0 | 0 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
@@ -27,11 +27,11 @@ Batch 2: M1A-002 assigned; M0-003 still in flight.
 | SPEC-001 | leader | docs | done | Spec: TurnEvent envelope (docs/specs/turn-event.md + JSON Schemas) |
 | SPEC-002 | leader | docs | done | Spec: runner ↔ hub tunnel (docs/specs/tunnel.md) |
 | MVP-000 | worker | rust | todo | Tracer bullet: acp-mock → runner core → tunnel → hub on wrangler dev → headless client |
-| M0-003 | worker | client | assigned | Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build) |
+| M0-003 | worker | client | done | Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build) |
 | M0-006 | worker | rust | done | protocol::acp — re-export ACP v1 schema from the official Rust SDK (agent-client-protocol 3.x) |
-| M0-017 | worker | rust | todo | Spike: Cloudflare Workers (workers-rs + axum, SQLite DO + hibernatable WebSocket, D1, R2) under wrangler dev |
+| M0-017 | worker | rust | assigned | Spike: Cloudflare Workers (workers-rs + axum, SQLite DO + hibernatable WebSocket, D1, R2) under wrangler dev |
 | M1A-002 | worker | rust | assigned | acp-mock: scriptable ACP v1 agent |
-| GPUI-000 | leader | client | todo | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |
+| GPUI-000 | leader | client | assigned | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |
 | M1B-002 | worker | rust | todo | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
 | M1B-003 | leader | docs | done | Client-stack gates written before prototypes |
 | M1B-004a | worker | client | todo | gpui spike: app shell + virtualized transcript pane |

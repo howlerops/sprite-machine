@@ -161,7 +161,8 @@ items:
     phase: P0
     lane: client
     priority: 1
-    status: "assigned"
+    status: "done"
+    evidence: "merged b9b0bbf; verify: 6/6 pass on leader re-run (setup-dev x2 idempotent, llvmpipe, tool versions, gpui hello_world screenshot 610 colours)"
     assignee: "worker:haiku"
     attempt: 1
     deps: [M0-002]
@@ -499,6 +500,9 @@ items:
     milestone: M0
     phase: P0
     priority: 1
+    status: "assigned"
+    assignee: "worker:opus"
+    attempt: 1
     risk: high
     deps: [M0-003]
     paths:
@@ -1008,6 +1012,9 @@ items:
     phase: P0
     lane: client
     priority: 1
+    status: "assigned"
+    assignee: "leader"
+    attempt: 1
     owner: leader
     deps: [M0-002, M0-003]
     paths:

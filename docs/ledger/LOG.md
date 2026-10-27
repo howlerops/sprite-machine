@@ -16,3 +16,6 @@
 2026-10-27T22:20Z M0-019 blocked→done (macos-latest job green on v2, run 40593841232)
 2026-10-27T22:32Z M0-006 assigned→done merged cb36372 (discovered work: SDK dep for the runner folds into M1A-003; schema-bump note kept in report; tokio/wasm guard already in rust.yml; no new items)
 2026-10-27T22:32Z M1A-002 todo→assigned attempt 1 (haiku, rust lane)
+2026-10-27T22:34Z M0-003 assigned→done merged b9b0bbf (discovered: clean-image test skipped, cloud-setup.sh already covers it; gpui cache-miss checked in GPUI-000)
+2026-10-27T22:34Z M0-017 todo→assigned attempt 1 (opus, risk high)
+2026-10-27T22:34Z GPUI-000 todo→assigned (leader, client lane)
