@@ -23,6 +23,7 @@ exactly two places: the sidecar (ACP ⇄ A2A) and the hub (A2A ⇄ AG-UI).
 | Agent-generated widgets (later)                                                 | **A2UI** over AG-UI                                                                                                                                          | Forms, pickers and cards that the client validates.                                                                                                                                                                                                                                                      |
 | Agent ↔ tools / infra                                                           | **MCP**: per-Loadout servers, `sprites.dev/mcp`, `mcp.fly.io` as _agent-side_ tools                                                                          | Production promotion uses the Fly Machines API (§4.3), not an interactive MCP.                                                                                                                                                                                                                           |
 | Desktop app ↔ Zed (bonus)                                                       | **ACP** through a local stdio↔hub bridge                                                                                                                     | ACP remote transport is a draft RFD, so we don't build on it.                                                                                                                                                                                                                                            |
+| Local runner (your computer) ↔ hub                                              | **A2A over an outbound WebSocket** (an A2A custom binding, spec §12). The runner dials out; the hub never connects in.                                       | Same model as Claude Code Remote Control: no inbound ports, works behind NAT, survives sleep. The hub routes A2A requests to the runner through the tunnel.                                                                                                                                              |
 
 ```
  Harness CLIs ──ACP v1 (stdio)── sidecar ──A2A 1.0── HUB ──AG-UI (SSE + subscription)── Native clients
@@ -76,6 +77,7 @@ dedupe stream and push deliveries exactly.
 | One prompt turn     | prompt request     | task (terminal at end of turn)                                                                                | 1..n runs                                                               | `tasks`                                               |
 | Approval round-trip | permission request | `INPUT_REQUIRED` on the same task                                                                             | run ends in interrupt; resume = new run                                 | `interrupts`, `runs(task_id, resume_index)`           |
 | Flow run            | —                  | one task per step execution, in the step's own context; `referenceTaskIds` + `ext/flow` link it to the parent | one thread; `StepStarted/Finished` per step, `Subagent*` per agent task | `flow_runs`, `flow_steps(run_id, step_id, iteration)` |
+| Machine             | —                  | an Agent of `kind: local` reached through its tunnel; presence online / asleep / offline                      | session list shows a computer icon + presence                           | `machines`, `runner_sessions`                         |
 
 - A follow-up prompt creates a **new task** in the same context.
 - A message sent while a task is `WORKING` is accepted as a new task in `SUBMITTED` state and queued until the session is idle. It is visible to the client and can be removed.
@@ -109,7 +111,7 @@ dedupe stream and push deliveries exactly.
 
 **Surfaces**:
 
-0. **Onboarding**: sign in, then either (a) paste a Sprites org token + add a model connector, or (b) add a BYO A2A URL. Target: first streamed token in **< 2 min** on a phone. BYO-only works with no Sprites token. Every list has an empty state with one primary action.
+0. **Onboarding**: sign in, then either (a) paste a Sprites org token + add a model connector, or (b) add a BYO A2A URL, or (c) **run `sm rc` on your computer and scan the QR code**, which needs no Sprites token, connector or cloud setup at all. Target: first streamed token in **< 2 min** on a phone. BYO-only works with no Sprites token. Every list has an empty state with one primary action.
 1. **New task**:
    - repo/issue → workspace (new or existing) → agent → prompt;
    - mode/model when the card advertises them;
@@ -151,9 +153,15 @@ dedupe stream and push deliveries exactly.
    - template gallery: ledger (leader/worker), test-fix loop, plan → implement → review, fan-out review + synthesis, best-of-N with a judge;
    - triggers: manual, GitHub events, schedule;
    - agents can also delegate to other fleet agents themselves, through the fleet MCP server.
-8. **Ship**: GitHub PR; promote to Fly; Open in Zed (desktop).
-9. **Desktop power use**: command palette, shortcuts (⌘K, ⌘N, ⌘↵, task navigation).
-10. **Cross-cutting**:
+8. **Remote Control** (§4.10): start work on your computer (terminal, desktop app or Zed) and pick it up on your phone.
+   - The session keeps running on your machine with your files, logins, MCP servers and tools.
+   - Phone, desktop app and terminal stay in sync and can all send messages and answer approvals.
+   - QR code / session link; a machines list with presence.
+   - Dispatch a new task to a chosen machine from the phone.
+   - "Continue in cloud" moves a local session to a Sprite workspace; "Pull to my computer" brings a cloud one back.
+9. **Ship**: GitHub PR; promote to Fly; Open in Zed (desktop).
+10. **Desktop power use**: command palette, shortcuts (⌘K, ⌘N, ⌘↵, task navigation).
+11. **Cross-cutting**:
     - screen-reader labels and focus order;
     - Dynamic Type and reduced motion;
     - strings in a Fluent catalog (en only at launch);
@@ -540,25 +548,92 @@ agents, other hubs and Zed (through the ACP bridge) can call it like any agent.
 - Flow state (graph, iteration counters, budgets, ledger board) → `StateSnapshot/StateDelta`.
 - Human gates → interrupts.
 
+### 4.10 Remote Control: local runner and handoff
+
+Goal: parity with Claude Code Remote Control. Work starts on your computer, keeps
+running there, and you pick it up on your phone (or another computer) in one step.
+Unlike Claude's, it works for **any ACP agent** and any harness login, and the same
+session can later move to the cloud.
+
+**Runner (`sm`)**: the sidecar core with a `local` host mode instead of `sprite`. It
+ships as one static binary, and the desktop app embeds it.
+
+| Command                                    | Behaviour                                                                                                                                                                                                                                           |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sm login`                                 | Device-code pairing (shown as a QR code). It enrolls the machine as a **trusted device**; the credential lives in the OS keychain.                                                                                                                  |
+| `sm rc`                                    | **Server mode.** Waits for sessions started from the phone. `--spawn same-dir \| worktree`, `--capacity N` (default 32), `--permission-mode`, `--name-prefix` (default: hostname), `-c/--continue`. Prints a session URL; spacebar shows a QR code. |
+| `sm` / `sm --rc [name]`                    | **Interactive TUI session** that is also live on the phone. You can type in the terminal and on the phone at the same time.                                                                                                                         |
+| `/rc` inside the TUI, a desktop-app toggle | Connect an existing local session. **Auto-connect** setting: every local session registers automatically.                                                                                                                                           |
+| `sm mobile`                                | QR code for installing the app.                                                                                                                                                                                                                     |
+
+**Connection**:
+
+- The runner makes **outbound HTTPS/WebSocket only** and never opens a port.
+- It registers with the hub and keeps a WebSocket tunnel, with heartbeats and a resume token. The hub routes A2A calls for that machine through it.
+- The transcript is stored on the hub (same retention and redaction rules as §4.2), so every device stays in sync and a reconnect replays from `seq`.
+
+**Sleep and disconnects**:
+
+- When the laptop sleeps or the network drops, presence goes **asleep / offline**.
+- Messages and approval answers sent from the phone are queued on the hub, and delivered in order when the runner reconnects with backoff.
+- The phone shows "waiting for my-laptop" and gets a push when the machine is back or needs an approval.
+- A running turn whose harness died is resumed through `session/resume`, as in §4.1.
+
+**Local environment**:
+
+- The runner discovers installed harnesses (claude, codex, opencode, pi, gemini, goose) and their ACP adapters, and uses **your existing logins**. That includes Claude subscription logins, which managed Sprites can't use (§7.4).
+- It also uses your local MCP servers, tools and project config.
+- Files and images sent from the phone land in the workspace and are passed to the agent as `@` file references or image blocks.
+
+**Local checkpoints**: there is no Sprite to snapshot, so each turn is a **shadow git
+commit** under `refs/sm/checkpoints/*`. Restore and undo work the same in the UI.
+
+**Dispatch**: the composer's **Where** picker offers your machines (with presence)
+and cloud workspaces. Picking a machine starts a session through its `sm rc` server,
+in `same-dir` or a new worktree.
+
+**Handoff**:
+
+- **Continue in cloud**: the runner sends a git bundle + an uncommitted-changes patch. The hub creates or forks a Sprite workspace and applies them. The conversation continues there:
+  - if the harness's session files are portable (e.g. Claude Code's session JSONL), they are copied and loaded with `session/load`;
+  - otherwise the new agent gets the transcript summary + plan as context.
+    The phone stays on the same thread.
+- **Pull to my computer** (teleport): the reverse. It fetches the branch + patch into a local worktree and resumes there.
+
+**Other front ends on the same session**: the desktop app and Zed (through
+`acp-bridge`) attach to a local session, so "start in Zed, continue on the phone" works.
+
+**Private agents**: a runner can also **relay BYO A2A agents** on its LAN or VPN
+through its tunnel, which covers private agents without a cloud VPN (§4.7).
+
+**Security**:
+
+- Trusted-device enrollment, plus a per-machine credential that can be revoked from the app. Orgs can _require trusted devices_.
+- A **workspace trust** prompt the first time a directory is used.
+- The local permission mode applies.
+- The phone can't open a raw shell on the computer unless the user turns on "allow remote terminal" for that machine.
+- All runner actions are recorded in the audit log.
+
 ---
 
 ## 5. Milestones
 
 Exit criteria are restated as ledger `*-review` items.
 
-| #       | Milestone        | Exit criteria                                                                                                                                                                                                                                                                       |
-| ------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0**  | Revive + unblock | Cargo workspace + dev toolchain script. Sprites token (restricted). Protocol types pass 1.0 fixtures. Sprites client. Spikes answered: smoke (labels, checkpoint-stops-service), checkpoint fork, connector gateway, Sprite URL auth, Tasks keep-alive, networking.                 |
-| **M1a** | Sidecar          | Claude via ACP served as an A2A agent from a Sprite service. Conformance kit passes on JSON-RPC (pinned commit). Durable across restart/cold wake. Path-routed auth. Keep-alive. Permission/cancel races covered. Checkpoint per turn.                                              |
-| **M1b** | Client spike     | Gates written first. gpui-kit + Flutter task screen. Desktop decision (no devices). Mobile decision from on-device gates. ADRs.                                                                                                                                                     |
-| **M2**  | Hub              | Ingest with exact dedup + reconciliation. AG-UI runs + subscription. OIDC, roles, audit. Secrets at rest. Notifications. Attachments. Titles/search. Retention. Ops. Deployed on Fly + MPG.                                                                                         |
-| **M3**  | Client core      | Desktop then mobile: onboarding, composer, inbox, task view, approvals, diff, agents, notifications, a11y, offline queue. `cli e2e app` drives a task from the client.                                                                                                              |
-| **M4**  | Workspaces       | Recipe template. Workspace from repo/issue. Hardening. Connector gateway. Timeline restore/fork/compare. Terminal/files/preview/lifecycle UIs. Auto-allow presets. Reaper. Exfiltration test. Managed agent launch.                                                                 |
-| **M5**  | Fleet            | Loadouts + renderers for 6 harnesses + conformance matrix. MCP. Network profiles. Gateway. BYO E2E. Delegation. Usage. ACP v2 adapter (flagged).                                                                                                                                    |
-| **M5c** | Flows            | Durable flow engine (agent/parallel/map/loop/branch/run/judge/human/merge/action/ledger/subflow steps). Workspace strategies. Fleet MCP delegation. Flows as A2A agents. Triggers. Budgets. Templates incl. ledger. Graph view + editor. E2E: ledger template completes a toy goal. |
-| **M5b** | App plugins      | WASM host, two first-party plugins, catalog.                                                                                                                                                                                                                                        |
-| **M6**  | Ship             | PR flow. Promote via Machines API. Zed bridge. Release workflows + signing. Retire v1.                                                                                                                                                                                              |
-| Later   |                  | A2UI. Scheduled tasks (Sprites 2.0). MPG skill. Read-only web share page. Billing.                                                                                                                                                                                                  |
+| #       | Milestone        | Exit criteria                                                                                                                                                                                                                                                                                                                |
+| ------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0**  | Revive + unblock | Cargo workspace + dev toolchain script. Sprites token (restricted). Protocol types pass 1.0 fixtures. Sprites client. Spikes answered: smoke (labels, checkpoint-stops-service), checkpoint fork, connector gateway, Sprite URL auth, Tasks keep-alive, networking.                                                          |
+| **M1a** | Sidecar          | Claude via ACP served as an A2A agent from a Sprite service. Conformance kit passes on JSON-RPC (pinned commit). Durable across restart/cold wake. Path-routed auth. Keep-alive. Permission/cancel races covered. Checkpoint per turn.                                                                                       |
+| **M1b** | Client spike     | Gates written first. gpui-kit + Flutter task screen. Desktop decision (no devices). Mobile decision from on-device gates. ADRs.                                                                                                                                                                                              |
+| **M2**  | Hub              | Ingest with exact dedup + reconciliation. AG-UI runs + subscription. OIDC, roles, audit. Secrets at rest. Notifications. Attachments. Titles/search. Retention. Ops. Deployed on Fly + MPG.                                                                                                                                  |
+| **M2b** | Remote Control   | `sm` runner (login/QR pairing, server mode, interactive TUI, auto-connect), outbound tunnel + hub routing, presence, sleep-safe queue, local checkpoints, trusted devices, dispatch to a machine, desktop-app embedding. E2E: start on a computer, continue from a phone client, survive a dropped tunnel. Needs no Sprites. |
+| **M3**  | Client core      | Desktop then mobile: onboarding, composer, inbox, task view, approvals, diff, agents, notifications, a11y, offline queue. `cli e2e app` drives a task from the client.                                                                                                                                                       |
+| **M4**  | Workspaces       | Recipe template. Workspace from repo/issue. Hardening. Connector gateway. Timeline restore/fork/compare. Terminal/files/preview/lifecycle UIs. Auto-allow presets. Reaper. Exfiltration test. Managed agent launch.                                                                                                          |
+| **M5**  | Fleet            | Loadouts + renderers for 6 harnesses + conformance matrix. MCP. Network profiles. Gateway. BYO E2E. Delegation. Usage. ACP v2 adapter (flagged).                                                                                                                                                                             |
+| **M5c** | Flows            | Durable flow engine (agent/parallel/map/loop/branch/run/judge/human/merge/action/ledger/subflow steps). Workspace strategies. Fleet MCP delegation. Flows as A2A agents. Triggers. Budgets. Templates incl. ledger. Graph view + editor. E2E: ledger template completes a toy goal.                                          |
+| **M5b** | App plugins      | WASM host, two first-party plugins, catalog.                                                                                                                                                                                                                                                                                 |
+| **M6**  | Ship             | PR flow. Promote via Machines API. Zed bridge. Release workflows + signing. Retire v1.                                                                                                                                                                                                                                       |
+| Later   |                  | A2UI. Scheduled tasks (Sprites 2.0). MPG skill. Read-only web share page. Billing.                                                                                                                                                                                                                                           |
 
 ---
 
@@ -579,6 +654,7 @@ crates/
   client-core/
   client-gpui/   (or apps/client-flutter via flutter_rust_bridge)
   acp-bridge/    local stdio ↔ hub bridge for Zed
+  runner/        `sm` binary: local host mode, tunnel client, TUI, pairing
   flow/          flow schema, CEL, durable engine, step runners, templates
   fleet-mcp/     MCP server exposing delegation tools to agents
   cli/           smoke, spikes, deploy, template, conformance, e2e
@@ -599,7 +675,7 @@ protocol, `USER_TOKEN`, and the auth-file upload.
 1. **Sprites auth**: we need a restricted Sprites org token (M0-001). Fly tokens are out.
 2. **gpui-kit mobile**: experimental. The gates + default-to-hybrid rule contain the risk.
 3. **Cross-Sprite fork**: not in the API. Copy-based fork is slow; M0-010 measures it.
-4. **Model credentials**: whether Sprites has a native Anthropic connector is unverified (custom_api is the fallback). Subscription-login harnesses can't be managed.
+4. **Model credentials**: whether Sprites has a native Anthropic connector is unverified (custom_api is the fallback). Subscription-login harnesses can't be managed in Sprites, but work through a local runner (§4.10).
 5. **Three-protocol mapping**: §1.1 as executable golden tests; raw payloads kept in the event log.
 6. **Community Rust SDKs** (A2A, AG-UI): wrapped behind our traits and checked against 1.0 fixtures.
 7. **Harness parity**: adapters differ (e.g. opencode's ACP reportedly auto-approves in some builds; pi adapters are community-maintained, with a changing package scope). The conformance matrix surfaces it.
@@ -608,6 +684,7 @@ protocol, `USER_TOKEN`, and the auth-file upload.
 10. **VPN inside Sprites**: may be impossible; the public-hostname gateway is the fallback.
 11. **Plugin & supply-chain security**: §4.8, pinned lockfiles, SBOM.
 12. **ACP v2 / remote transport**: draft. The `TurnEvent` layer and flagged adapter limit churn.
-13. **Runaway multi-agent cost / loops**: required `max_iterations`, no-progress detection, budgets checked before each step, depth/fan-out limits on agent-initiated delegation, cascade cancel.
-14. **Container limits for the ledger run**: no macOS, devices or Docker daemon; 4 vCPU. Human items plus CI cover these.
-15. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform.
+13. **Remote Control trust**: a phone can drive an agent on your computer. Mitigated by trusted devices, revocation, workspace trust, the local permission mode, remote terminal off by default, and audit. Transcripts are stored on the hub for sync.
+14. **Runaway multi-agent cost / loops**: required `max_iterations`, no-progress detection, budgets checked before each step, depth/fan-out limits on agent-initiated delegation, cascade cancel.
+15. **Container limits for the ledger run**: no macOS, devices or Docker daemon; 4 vCPU. Human items plus CI cover these.
+16. Evaluated and set aside: Tov, Expo/RN, Tauri, Compose Multiplatform.

@@ -43,7 +43,7 @@ items:
     acceptance:
       - 'Root Cargo.toml: `[workspace] members = ["crates/*"]`, resolver 2, shared [workspace.dependencies] (tokio, serde, serde_json, axum, reqwest, tracing, thiserror, anyhow)'
       - 'rust-toolchain.toml pins stable with rustfmt, clippy and targets x86_64-unknown-linux-musl, wasm32-wasip2'
-      - 'Crates exist with one trivial test each: protocol (src/{a2a,acp,agui,mapping}/mod.rs stubs, schemas/), sprites, loadout (src/render/mod.rs stub), netprofile, plugin-host, sidecar (src/{acp,a2a,bridge,store,keepalive,auth,preview,checkpoint}/mod.rs stubs), acp-mock, agui-fixture, hub, client-core, acp-bridge, flow, fleet-mcp, cli'
+      - 'Crates exist with one trivial test each: protocol (src/{a2a,acp,agui,mapping}/mod.rs stubs, schemas/), sprites, loadout (src/render/mod.rs stub), netprofile, plugin-host, sidecar (src/{acp,a2a,bridge,store,keepalive,auth,preview,checkpoint}/mod.rs stubs), acp-mock, agui-fixture, hub, client-core, acp-bridge, flow, fleet-mcp, runner, cli'
       - 'rust.yml runs fmt --check, clippy -D warnings, test on push/PR to v2 with a postgres service; legacy TS CI untouched'
     verify:
       - cargo fmt --all --check
@@ -1068,6 +1068,289 @@ items:
         'Plan §5 M2 criteria with evidence; drive an M1a sidecar task through the deployed hub with curl',
       ]
     verify: ['cargo test --workspace']
+
+  # ════════════════════════ M2b — Remote Control (local runner) ════════════════════════
+  - id: M2B-001
+    title: 'protocol: A2A-over-WebSocket tunnel binding (spec + types)'
+    milestone: M2b
+    priority: 1
+    deps: [M0-005]
+    paths: [crates/protocol/src/tunnel/**, crates/protocol/tests/tunnel_*.rs, docs/specs/tunnel.md]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Connection)', 'A2A spec §12 (custom bindings)']
+    acceptance:
+      - 'docs/specs/tunnel.md defines frames: hello(resume_token, machine_id, capabilities), a2a_request/response/stream_event (JSON-RPC payloads verbatim), ack(seq), ping/pong, presence, close'
+      - 'Types + serde round-trip tests; seq/ack makes delivery exactly-once across reconnects'
+    verify: ['cargo test -p protocol --test tunnel_frames']
+
+  - id: M2B-002
+    title: 'hub: tunnel endpoint, router, presence, offline queue'
+    milestone: M2b
+    size: M
+    risk: high
+    deps: [M2B-001, M2-005, M2-003a]
+    paths: [crates/hub/src/tunnel/**, crates/hub/migrations/*machines*, crates/hub/tests/tunnel.rs]
+    context:
+      ['docs/PLAN-v2-ade.md §4.10 (Connection, Sleep and disconnects)', 'crates/hub/src/ingest']
+    acceptance:
+      - 'machines + runner_sessions tables; runner authenticates with its device credential; presence online/asleep/offline with timestamps'
+      - 'A2A calls for a local agent are routed over the tunnel; calls while offline are queued (messages, approval answers) and delivered in order on reconnect; ingest treats tunnel events like stream events (ext/seq dedup)'
+      - 'Test drops the socket mid-turn and reconnects with the resume token: no loss, no duplicates'
+    verify: ['cargo test -p hub --test tunnel']
+
+  - id: M2B-003
+    title: 'sidecar: host-mode abstraction (sprite | local)'
+    milestone: M2b
+    priority: 1
+    deps: [M1A-006b, M1A-009]
+    paths: [crates/sidecar/src/host/**, crates/sidecar/tests/host_modes.rs]
+    context: ['docs/PLAN-v2-ade.md §4.1, §4.10']
+    acceptance:
+      [
+        'HostMode trait covers transport (HTTP server vs tunnel client), keep-alive (Sprites Task vs none), checkpoints (Sprites vs shadow git), auth (bearer file vs device credential); sprite mode behaviour unchanged (existing tests pass)',
+      ]
+    verify: ['cargo test -p sidecar --test host_modes', 'cargo test -p sidecar']
+
+  - id: M2B-004
+    title: 'runner: tunnel client with reconnect/backoff/resume'
+    milestone: M2b
+    deps: [M2B-001, M2B-003]
+    paths: [crates/runner/src/tunnel/**, crates/runner/tests/tunnel_client.rs]
+    context: ['docs/specs/tunnel.md', 'docs/PLAN-v2-ade.md §4.10']
+    acceptance:
+      [
+        'Outbound-only (test asserts no listening sockets); heartbeats; exponential backoff with jitter; resume token; detects OS sleep/wake gaps and reconnects',
+      ]
+    verify: ['cargo test -p runner --test tunnel_client']
+
+  - id: M2B-005
+    title: 'runner: `sm login` device-code pairing + trusted device + keychain'
+    milestone: M2b
+    deps: [M2B-004, M2-003b]
+    paths:
+      [
+        crates/runner/src/login/**,
+        crates/hub/src/devices/**,
+        crates/hub/tests/devices.rs,
+        crates/runner/tests/login.rs,
+      ]
+    context: ['RFC 8628 device authorization grant', 'docs/PLAN-v2-ade.md §4.10 (Security)']
+    acceptance:
+      [
+        "Device code shown as text + terminal QR; approval in the app enrolls the machine; per-machine credential in OS keychain (file fallback 0600); list/revoke devices API; org 'require trusted devices' enforced",
+      ]
+    verify: ['cargo test -p runner --test login', 'cargo test -p hub --test devices']
+
+  - id: M2B-006
+    title: 'runner: local harness discovery + local logins/MCP passthrough'
+    milestone: M2b
+    deps: [M2B-003]
+    paths: [crates/runner/src/harness/**, crates/runner/tests/discovery.rs]
+    context:
+      [
+        'docs/PLAN-v2-ade.md §4.10 (Local environment)',
+        'https://opencode.ai/docs/acp',
+        'pi ACP adapters',
+      ]
+    acceptance:
+      [
+        "Detects claude/codex/opencode/pi/gemini/goose and their ACP adapters on PATH (fake PATH in tests); advertises them as skills on the machine's card; uses the user's own env/logins; local MCP config forwarded as mcpServers",
+      ]
+    verify: ['cargo test -p runner --test discovery']
+
+  - id: M2B-007
+    title: 'runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue)'
+    milestone: M2b
+    size: M
+    deps: [M2B-004, M2B-006]
+    paths: [crates/runner/src/server/**, crates/runner/tests/server_mode.rs]
+    context:
+      [
+        'https://code.claude.com/docs/en/remote-control (server mode flags)',
+        'docs/PLAN-v2-ade.md §4.10',
+      ]
+    acceptance:
+      [
+        '--spawn same-dir|worktree (git worktree per session), --capacity (default 32), --permission-mode, --name-prefix (default hostname, names like host-word-word), -c/--continue resumes the last session for the directory; spawn mode saved per project',
+      ]
+    verify: ['cargo test -p runner --test server_mode']
+
+  - id: M2B-008
+    title: 'runner: workspace trust prompt + remote-terminal opt-in'
+    milestone: M2b
+    deps: [M2B-007]
+    paths: [crates/runner/src/trust/**, crates/runner/tests/trust.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Security)']
+    acceptance:
+      [
+        'First use of a directory asks `Trust <dir>? [y/N]` and persists; home directory never persisted; remote terminal disabled unless enabled per machine; runner actions audited via hub',
+      ]
+    verify: ['cargo test -p runner --test trust']
+
+  - id: M2B-009
+    title: 'runner: session URL, QR code, `sm mobile`, auto-connect setting'
+    milestone: M2b
+    deps: [M2B-007, M3-013]
+    paths: [crates/runner/src/qr/**, crates/runner/src/settings*, crates/runner/tests/qr.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Runner table)', 'M3-013 deep links https://<hub>/t/<id>']
+    acceptance:
+      [
+        'Prints session URL (universal link that opens the app); spacebar toggles a terminal QR; `sm mobile` prints an app-install QR; autoConnect=true registers every interactive session',
+      ]
+    verify: ['cargo test -p runner --test qr']
+
+  - id: M2B-010
+    title: 'runner: interactive TUI shared with remote devices (`sm --rc`)'
+    milestone: M2b
+    size: M
+    deps: [M2B-007, M3-001]
+    paths: [crates/runner/src/tui/**, crates/runner/tests/tui.rs]
+    context: ['ratatui', 'docs/PLAN-v2-ade.md §4.10', 'crates/client-core (subscription client)']
+    acceptance:
+      [
+        'Terminal chat UI over client-core; messages typed locally and from the phone both appear in order; approvals answerable on either side, first answer wins; `/rc` toggles remote, `/rc` indicator shows link; snapshot tests of the rendered buffer',
+      ]
+    verify: ['cargo test -p runner --test tui']
+
+  - id: M2B-011
+    title: 'runner: local checkpoints as shadow git commits'
+    milestone: M2b
+    deps: [M2B-003]
+    paths: [crates/runner/src/checkpoint/**, crates/runner/tests/shadow_git.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Local checkpoints)']
+    acceptance:
+      [
+        'Per-turn snapshot of tracked + untracked (non-ignored) files under refs/sm/checkpoints/<task> without touching index/HEAD/stash; restore and diff between checkpoints; ext/checkpoint emitted like Sprites',
+      ]
+    verify: ['cargo test -p runner --test shadow_git']
+
+  - id: M2B-012
+    title: 'Attachments from phone → local files / image blocks'
+    milestone: M2b
+    deps: [M2B-004, M1A-014, M2-009]
+    paths: [crates/runner/src/files/**, crates/runner/tests/files.rs]
+    context:
+      [
+        'docs/PLAN-v2-ade.md §4.10 (Local environment)',
+        'https://code.claude.com/docs/en/remote-control (attachments)',
+      ]
+    acceptance:
+      [
+        'Images passed as ACP image blocks; other files downloaded into .sm/attachments/ in the workspace and referenced as @paths; size cap; never outside the workspace',
+      ]
+    verify: ['cargo test -p runner --test files']
+
+  - id: M2B-013
+    title: 'Dispatch: start a task on a chosen machine (+ client Where picker, machines list)'
+    milestone: M2b
+    deps: [M2B-002, M2B-007, M3-004]
+    paths:
+      [crates/hub/src/dispatch/**, crates/client-gpui/src/machines/**, crates/hub/tests/dispatch.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Dispatch), §3 (surface 8)']
+    acceptance:
+      [
+        "Composer Where picker lists machines with presence + cloud workspaces; dispatch creates a session in the runner's server (same-dir or worktree, respecting capacity); machines screen with presence, rename, revoke; session list shows computer icon",
+      ]
+    verify: ['cargo test -p hub --test dispatch', 'cargo test -p client-gpui --test machines']
+
+  - id: M2B-014
+    title: 'Presence + reconnect notifications on the phone'
+    milestone: M2b
+    deps: [M2B-002, M2-011]
+    paths: [crates/hub/src/notify/presence*, crates/hub/tests/presence_notify.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Sleep and disconnects)']
+    acceptance:
+      [
+        "Task view shows 'waiting for <machine>' with queued items; push when a machine with queued work comes back or needs approval; no spam on flapping (debounce)",
+      ]
+    verify: ['cargo test -p hub --test presence_notify']
+
+  - id: M2B-015
+    title: 'Desktop app embeds the runner (Connect-to-phone toggle)'
+    milestone: M2b
+    deps: [M2B-007, M3-002]
+    paths: [crates/client-gpui/src/local/**]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Other front ends)']
+    acceptance:
+      [
+        'Local sessions run in-process via the runner library; toggle per session + global auto-connect; same sessions visible on phone',
+      ]
+    verify: ['cargo test -p client-gpui --test local_sessions']
+
+  - id: M2B-016
+    title: 'Handoff: Continue in cloud (local → Sprite workspace)'
+    milestone: M2b
+    size: M
+    risk: high
+    deps: [M2B-011, M4-005]
+    paths: [crates/runner/src/handoff/**, crates/hub/src/handoff/**, crates/hub/tests/handoff_up.rs]
+    context:
+      [
+        'docs/PLAN-v2-ade.md §4.10 (Handoff)',
+        'Claude Code session JSONL location (~/.claude/projects)',
+      ]
+    acceptance:
+      [
+        'Git bundle + uncommitted patch uploaded; hub creates/forks a workspace and applies them; portable harness sessions copied + session/load, otherwise transcript summary + plan injected; same AG-UI thread continues',
+      ]
+    verify: ['cargo test -p hub --test handoff_up']
+
+  - id: M2B-017
+    title: 'Handoff: Pull to my computer (cloud → local)'
+    milestone: M2b
+    deps: [M2B-016]
+    paths: [crates/runner/src/handoff/pull*, crates/hub/tests/handoff_down.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Handoff)']
+    acceptance:
+      [
+        'Fetches branch + patch into a new local worktree, resumes conversation locally, cloud workspace optionally slept',
+      ]
+    verify: ['cargo test -p hub --test handoff_down']
+
+  - id: M2B-018
+    title: 'Runner relays private BYO A2A agents through the tunnel'
+    milestone: M2b
+    deps: [M2B-002, M2B-004, M2-004]
+    paths: [crates/runner/src/relay/**, crates/runner/tests/relay.rs]
+    context: ['docs/PLAN-v2-ade.md §4.10 (Private agents), §4.7']
+    acceptance:
+      [
+        'User-approved list of LAN/VPN agent URLs exposed as fleet agents via the runner; SSRF rules relaxed only for that explicit list; audited',
+      ]
+    verify: ['cargo test -p runner --test relay']
+
+  - id: M2B-019
+    title: 'E2E: start on computer, continue from phone client, survive dropped tunnel'
+    milestone: M2b
+    risk: high
+    deps: [M2B-010, M2B-011, M2B-012, M2B-014, M3-017]
+    paths: [crates/cli/src/e2e/rc*, docs/remote-control-parity.md]
+    context: ['https://code.claude.com/docs/en/remote-control', 'docs/PLAN-v2-ade.md §5 M2b']
+    acceptance:
+      - "`sm rc` with acp-mock; headless client-core (the 'phone') finds the session, sends a message + image, answers an approval while the TUI also types; tunnel killed mid-turn and restored: no loss/dup"
+      - 'docs/remote-control-parity.md: feature-by-feature table vs Claude Code Remote Control with status'
+    verify: ['cargo run -p cli -- e2e rc']
+
+  - id: M2B-020
+    title: Real-device Remote Control check
+    milestone: M2b
+    owner: human
+    status: blocked
+    blocked_on: human
+    deps: [M2B-019, M3-016]
+    howto: 'Install `sm` on your laptop and the app on your phone; follow docs/remote-control-parity.md (start in terminal, scan QR, continue on phone, close the laptop lid, reopen); note any gaps.'
+    acceptance: ['Parity checklist passes on real hardware']
+    verify: []
+
+  - id: M2B-review
+    title: M2b exit review
+    milestone: M2b
+    owner: leader
+    deps: [M2B-005, M2B-008, M2B-009, M2B-013, M2B-015, M2B-018, M2B-019]
+    acceptance:
+      [
+        'Plan §5 M2b criteria quoted with evidence; parity doc complete. Cloud handoff (M2B-016/017) tracked separately since it needs Sprites',
+      ]
+    verify: ['cargo test --workspace', 'cargo run -p cli -- e2e rc']
 
   # ════════════════════════ M3 — client core ════════════════════════
   # Paths assume gpui-kit (desktop). Mobile items are rewritten after M1B-011.
