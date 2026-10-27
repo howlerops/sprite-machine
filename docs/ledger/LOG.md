@@ -28,3 +28,5 @@
 2026-10-27T23:13Z MVP-000 todo→assigned attempt 1 (opus, priority 0)
 2026-10-27T23:13Z M1A-001 todo→assigned attempt 1 (haiku; P1, no path overlap with MVP-000)
 2026-10-27T23:13Z leader: could not delete stale branch leader/GPUI-000-wip (push --delete → HTTP 403)
+2026-10-27T23:21Z M1A-001 assigned→done merged 48a29b6 (discovered: SM_GIT_SHA build script → release items; hub URL validation → M2B-004; no new items)
+2026-10-27T23:22Z M1A-003 todo→assigned attempt 1 (haiku; no overlap with MVP-000)

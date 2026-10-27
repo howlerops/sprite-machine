@@ -587,7 +587,8 @@ items:
     milestone: M1a
     phase: P1
     priority: 1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 48a29b6; verify: healthz 11 passed (11 listed), no main.rs, clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     deps: [M0-002]
@@ -628,6 +629,9 @@ items:
     title: 'sidecar (runner core): ACP client + session table (concurrency, pending tasks)'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     size: M
     deps: [M1A-001, M1A-002]
     paths:
