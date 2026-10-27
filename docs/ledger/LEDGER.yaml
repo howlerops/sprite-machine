@@ -38,6 +38,10 @@ items:
     milestone: M0
     phase: P0
     priority: 1
+    status: "done"
+    evidence: "merged 738d66e; verify: 7/7 commands pass, 17 tests passed, clippy clean, hub wasm32 build OK with no tokio"
+    assignee: "leader"
+    attempt: 1
     owner: leader
     deps: []
     paths:
@@ -505,8 +509,9 @@ items:
     phase: P2
     priority: 1
     owner: human
-    status: blocked
-    blocked_on: human
+    status: "done"
+    evidence: "2026-10-27 leader: CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID present; wrangler whoami OK (account Howlerops); wrangler containers list exit 0; secrets-store store list --remote authenticates but returns \"no stores\" (exit 1) — store gets created with M0-020"
+    blocked_on: null
     deps: []
     acceptance:
       - '`test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" && wrangler whoami` succeeds in a new session'
