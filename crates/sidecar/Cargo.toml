@@ -9,9 +9,13 @@ description = "Runner core library: ACP client, bridge, durable store, host mode
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+protocol = { path = "../protocol" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+acp-mock = { path = "../acp-mock" }
