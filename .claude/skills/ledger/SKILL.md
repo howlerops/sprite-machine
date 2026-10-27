@@ -48,7 +48,17 @@ slot as soon as one frees up.
 - every dep `done`;
 - `paths` (plus implicit paths, see the format doc) do not overlap any in-flight item.
 
-Order by milestone, then priority. Do `owner: leader` items yourself between assignments.
+Order by `phase` (header `phase_order`), then `milestone` (`milestone_order`), then
+`priority`. Work in the current phase comes first. Items from a later phase are
+picked only when nothing in the current phase is ready, and never when they would
+starve an earlier phase's lane.
+
+**Lanes**: each item has a `lane` (default `rust`). The header `lanes` caps how
+many items per lane are in flight. The `client` lane (GPUI) is capped at 1, so
+GPUI builds never compete.
+
+Do `owner: leader` items yourself between assignments. Leader-owned spec items
+(`SPEC-*`) come before any worker item that implements them.
 
 **2. Assign** each picked item:
 
@@ -110,6 +120,8 @@ it (TaskStop), record `timeout` in its review_notes, and count the attempt.
 - **Live-infra verifies** (Sprites, Fly) run **once per attempt**, and always clean up what they create (`SMOKE_KEEP=0`).
 - **Review items** (`*-review`): the leader's report quotes each plan exit criterion next to the command and output that demonstrate it. Review items never gate other items.
 - **Keep the working branch green.** If a merge breaks the workspace checks, fixing that becomes the next item, at priority 0.
+- **The tracer bullet is the integration test.** Once MVP-000 merges, `cargo run -p cli -- e2e tracer` runs after every merge. Each later item replaces a stub inside it, and the tracer must stay green.
+- **Phase reviews**: when a phase's items are done, tag `v2.0.0-alpha.N` (or beta/rc per plan §5) and tell the user what they can now try and how.
 - **Commits**: `ledger(<ID>): <title>` for work; `ledger: <change>` for ledger edits.
 
 ## Planning (turning a plan into a ledger)
