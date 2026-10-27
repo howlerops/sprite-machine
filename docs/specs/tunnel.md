@@ -170,7 +170,9 @@ one effect. The runner records processed keys in its store for **7 days** and ig
 command whose key it has already processed (it still acks the frame).
 
 **`prompt`**: start a task in an existing thread. The hub owns the pending-task queue and
-sends the next `prompt` only after the thread's running task has ended.
+sends the next `prompt` only after the thread's running task has ended. The hub has already
+appended the task's `UserMessage` (client-api.md §6), so the runner starts with `RunStarted{prompt}`
+and does not emit `UserMessage` for `prompt` or `dispatch` commands.
 
 ```json
 {

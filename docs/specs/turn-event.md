@@ -104,7 +104,9 @@ variant has a schema in `events/<Type>.schema.json` and an example in `examples/
 ### 4.1 Lifecycle
 
 **`UserMessage`** (scope: task). The prompt that opens a task. From ACP `session/prompt`
-input (and `user_message_chunk` on `session/load` replay); A2A user `Message`.
+input (and `user_message_chunk` on `session/load` replay); A2A user `Message`. **Emitted by the
+hub** when the task starts (docs/specs/client-api.md §6); the runner emits it only for prompts
+typed locally on a runner-opened thread.
 
 | Field        | Type          | Req | Notes                                                                                                |
 | ------------ | ------------- | --- | ---------------------------------------------------------------------------------------------------- |
