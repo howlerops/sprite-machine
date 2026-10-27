@@ -1,0 +1,12 @@
+{
+  "mode": "form",
+  "sessionId": "sess_7f3a",
+  "message": "Which branch should the fix target?",
+  "requestedSchema": {
+    "type": "object",
+    "properties": {
+      "branch": { "type": "string", "title": "Branch name" }
+    },
+    "required": ["branch"]
+  }
+}

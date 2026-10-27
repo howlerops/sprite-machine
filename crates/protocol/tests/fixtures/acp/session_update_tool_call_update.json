@@ -1,0 +1,11 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call_001",
+    "status": "completed",
+    "content": [
+      { "type": "content", "content": { "type": "text", "text": "fn parse(input: &str) -> Tree { ... }" } }
+    ]
+  }
+}

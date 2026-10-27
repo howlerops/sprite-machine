@@ -1,0 +1,9 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "usage_update",
+    "used": 53000,
+    "size": 200000,
+    "cost": { "amount": 0.045, "currency": "USD" }
+  }
+}

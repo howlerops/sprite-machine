@@ -1,0 +1,10 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "available_commands_update",
+    "availableCommands": [
+      { "name": "review", "description": "Review the current diff" },
+      { "name": "compact", "description": "Summarize the conversation", "input": { "hint": "optional focus area" } }
+    ]
+  }
+}

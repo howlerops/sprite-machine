@@ -9,3 +9,7 @@ description = "Shared wire types: the TurnEvent envelope, ACP, A2A, AG-UI, tunne
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# ACP v1 types. Pinned to the schema version the agent-client-protocol 3.5 SDK
+# resolves (=1.12.0), so the runner and protocol share one set of types. Depends on
+# the types-only schema crate, not the SDK, to keep uuid/getrandom out of wasm.
+agent-client-protocol-schema = { version = "=1.12.0", default-features = false }
