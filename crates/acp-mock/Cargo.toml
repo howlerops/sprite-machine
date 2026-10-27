@@ -5,3 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 description = "A scriptable mock ACP agent for tests."
+
+[dependencies]
+protocol = { path = "../protocol" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
