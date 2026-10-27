@@ -25,8 +25,7 @@ The current level already reaches everything P0–P2 needs. If you ever switch t
 - **Rust / crates:** `static.crates.io`, `index.crates.io`, `static.rust-lang.org`, `sh.rustup.rs`
 - **GitHub (git dependencies, releases):** `github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `codeload.github.com`
 - **Dev tools:** `get.nexte.st`, `registry.npmjs.org`
-- **Cloudflare:** `api.cloudflare.com`, `*.workers.dev`
-- **Sprites:** `api.sprites.dev`, `*.sprites.app`
+- **Cloudflare:** `api.cloudflare.com`, `*.workers.dev`, `*.cloudflarestorage.com` (R2), `registry.cloudflare.com` (container images)
 - **Ubuntu packages:** `archive.ubuntu.com`, `security.ubuntu.com`
 
 ## 3. Repo permission rules (stop prompts during the ledger run)
@@ -45,28 +44,42 @@ non-destructive git on `v2`. It denies force-pushes and `wrangler delete`.
 Also pick **Auto** (or **Accept edits**) in the mode dropdown next to the prompt
 box when you start the ledger run.
 
-## 4. Secrets: before P2 (Cloudflare) and P4 (Sprites)
+## 4. Secrets: before P2 (Cloudflare) and P4 (model key)
+
+Everything cloud-side (hub and workspaces) runs in one Cloudflare account. There is
+no Fly or Sprites token to set up for v2.
+
+### 4a. Cloudflare account + API token (before P2, M0-018)
 
 Add these under the environment's **Network secrets** (or as environment variables).
 A new session picks them up. Never paste them into chat.
 
-| Variable                     | Needed by     | How to get it                                                                                                                                                                                                                                                                                                     |
-| ---------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_ACCOUNT_ID`      | P2 (M0-018)   | Cloudflare dashboard → Workers & Pages → Account ID (right sidebar). Use a **Workers Paid** plan ($5/month).                                                                                                                                                                                                      |
-| `CLOUDFLARE_API_TOKEN`       | P2 (M0-018)   | Dashboard → My Profile → API Tokens → Create Token → Custom token, scoped to that one account. Permissions (all **Account**): Workers Scripts Edit, D1 Edit, Workers R2 Storage Edit, Queues Edit, Workers Tail Read, Account Settings Read. Add _Zone → Workers Routes Edit_ only if you'll use a custom domain. |
-| `SPRITES_API_TOKEN`          | P4 (M0-001)   | Run `sprite login` then `sprite org auth` locally, or use sprites.dev → account → tokens. **Restrict it to name prefix `sm-`** with a creation cap (e.g. 20).                                                                                                                                                     |
-| `TS_AUTHKEY`, `WG_TEST_PEER` | P6 (optional) | An ephemeral, pre-authorized Tailscale key, and a WireGuard peer config with a hostname endpoint.                                                                                                                                                                                                                 |
+| Variable                     | Needed by     | How to get it                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`      | P2 (M0-018)   | Cloudflare dashboard → Workers & Pages → Account ID (right sidebar). Use a **Workers Paid** plan ($5/month).                                                                                                                                                                                                                                                                                                                                                                          |
+| `CLOUDFLARE_API_TOKEN`       | P2 (M0-018)   | Dashboard → My Profile → API Tokens → Create Token → Custom token, scoped to that one account. Permissions (all **Account**): Workers Scripts Edit, Containers Edit (shown as "Cloudchamber" in some dashboards), D1 Edit, Workers R2 Storage Edit, Queues Edit, Secrets Store Edit, Workers Tail Read, Account Settings Read, Account Analytics Read. Add _Zone → Workers Routes Edit_ only if you'll use a custom domain (needed for workspace preview URLs on your own hostnames). |
+| `TS_AUTHKEY`, `WG_TEST_PEER` | P6 (optional) | An ephemeral, pre-authorized Tailscale key, and a WireGuard peer config with a hostname endpoint.                                                                                                                                                                                                                                                                                                                                                                                     |
 
-`FLY_TOKEN` (already set) is **no longer used for the hub**. Keep it only if you
-want "promote to Fly" in P7. Ideally replace it then with an app-scoped deploy
-token (`fly tokens create deploy -a <app>`).
+Then restart the session. `wrangler whoami` should show the account.
+
+### 4b. Model API key in Cloudflare Secrets Store (before P4, M0-020)
+
+Cloud workspaces never hold model keys. The Workspace DO's outbound handler injects
+the key into requests to the provider (e.g. `api.anthropic.com`).
+
+1. Cloudflare dashboard → **Secrets Store** (account level). Create a store if there is none.
+2. **Create secret**: a name such as `ANTHROPIC_API_KEY`, the value = your model API key, scope **Workers**.
+3. Tell the leader the **secret name** and the store id only. Never paste the key into chat or into environment secrets.
+
+Claude subscription logins (Pro/Max) can't be used in cloud workspaces; they work
+through `sm rc` on your own computer.
 
 ## 5. Later asks
 
 | When | What                                                                                                                 |
 | ---- | -------------------------------------------------------------------------------------------------------------------- |
 | P3   | GitHub Actions with `macos-latest` enabled for this repo, for unsigned macOS desktop builds you can run on your Mac. |
-| P4   | A model-provider connector in the Sprites org (see M0-012 in the ledger).                                            |
+| P4   | A model API key in Cloudflare Secrets Store (step 4b, M0-020 in the ledger).                                         |
 | P7   | An Apple Developer account, an iPhone and an Android phone, and signing material for store and desktop releases.     |
 
 ## 6. Start the run

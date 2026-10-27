@@ -5,3 +5,4 @@
 2026-10-27T14:36Z added M2b Remote Control (21 items)
 2026-10-27T16:51Z ledger rev 5: hub on Cloudflare, TurnEvent inside / A2A+AG-UI at edges, mobile web page, phases P0–P7 on every item, lanes; 174 → 186 items (+SPEC-001/002, MVP-000, GPUI-000, M0-017/018/019, M2-016, WEB-001..004)
 2026-10-27T17:09Z leader: scripts/cloud-setup.sh tested (3.5 min, lavapipe OK); docs/setup/SETUP.md added
+2026-10-27T20:19Z ledger rev 6: all Cloudflare (Sprites → Cloudflare Sandboxes via a TS Workspace DO); dropped M0-001/012/016, added M0-020 (model key in Secrets Store), retargeted M0-008a/b/c, sandbox spikes M0-009/010/011/013/015, M1A-010/011/012/016/017, M2B-003/016, M4-_, M5-_/M5C-008, M6-002/003; 186 → 187 items (184 open)

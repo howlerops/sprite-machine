@@ -1,4 +1,4 @@
-# Work ledger for docs/PLAN-v2-ade.md (rev 5) — run with the `ledger` skill.
+# Work ledger for docs/PLAN-v2-ade.md (rev 6) — run with the `ledger` skill.
 # Only the leader edits this file. Format: .claude/skills/ledger/reference/ledger-format.md
 # Work is ordered by `phase` (P0..P7, plan §5), then milestone, then priority.
 version: 1
@@ -17,15 +17,16 @@ env:
 phase_order: [P0, P1, P2, P3, P4, P5, P6, P7]
 milestone_order: [M0, M1a, M1b, M2, M2b, M3, M4, M5, M5c, M5b, M6]
 items:
-  # ════════════════════════ M0 — foundations, specs, tracer bullet; Sprites spikes ════════════════════════
+  # ════════════════════════ M0 — foundations, specs, tracer bullet; Workspace DO + sandbox spikes ════════════════════════
   - id: M0-001
     title: 'Provide a restricted Sprites org token'
     milestone: M0
     phase: P4
     priority: 1
     owner: human
-    status: blocked
-    blocked_on: human
+    status: done
+    blocked_on: null
+    evidence: 'dropped: rev 6 all-Cloudflare'
     deps: []
     acceptance:
       - '`curl -fsS -H "Authorization: Bearer $SPRITES_API_TOKEN" https://api.sprites.dev/v1/sprites` returns 200'
@@ -52,7 +53,7 @@ items:
     acceptance:
       - 'Root Cargo.toml: `[workspace] members = ["crates/*"]`, resolver 2, shared [workspace.dependencies] (serde, serde_json, thiserror, anyhow, tracing; tokio, axum, reqwest for native crates only); `[profile.dev] debug = "line-tables-only"` and `[profile.dev.package."*"] opt-level = 1`'
       - '.cargo/config.toml links x86_64-unknown-linux-gnu with lld (`-C link-arg=-fuse-ld=lld`); rust-toolchain.toml pins stable with rustfmt, clippy and targets x86_64-unknown-linux-musl, wasm32-unknown-unknown, wasm32-wasip2'
-      - 'Crates exist with one trivial test each: protocol (src/{turn_event,acp,a2a,agui,tunnel,mapping}/mod.rs stubs, schemas/), runner (bin `sm`), sidecar (library; src/{acp,bridge,store,host,keepalive,checkpoint,preview}/mod.rs stubs), hub (src/do/mod.rs stub), a2a-edge, agui-edge, sprites, loadout (src/render/mod.rs stub), netprofile, plugin-host, flow, fleet-mcp, acp-mock, agui-fixture, acp-bridge, client-core, cli, and client-gpui with src/{shell,compose,inbox,task,diff,approval,agents,notify,palette,workspace,settings,machines,local,flows,loadout,usage}/mod.rs stubs'
+      - 'Crates exist with one trivial test each: protocol (src/{turn_event,acp,a2a,agui,tunnel,mapping}/mod.rs stubs, schemas/), runner (bin `sm`), sidecar (library; src/{acp,bridge,store,host,keepalive,checkpoint,preview}/mod.rs stubs), hub (src/do/mod.rs stub), a2a-edge, agui-edge, loadout (src/render/mod.rs stub), netprofile, plugin-host, flow, fleet-mcp, acp-mock, agui-fixture, acp-bridge, client-core, cli, and client-gpui with src/{shell,compose,inbox,task,diff,approval,agents,notify,palette,workspace,settings,machines,local,flows,loadout,usage}/mod.rs stubs'
       - '`hub` builds for wasm32-unknown-unknown and has no tokio anywhere in its dependency tree'
       - 'web/ exists as a plain directory (README.md placeholder), not a crate'
       - 'rust.yml (push/PR to v2): ubuntu job runs fmt --check, clippy -D warnings, test, and the wasm32 hub build; a macos-latest job runs `cargo test --workspace`; no database service; legacy TS CI untouched'
@@ -253,141 +254,175 @@ items:
       - 'cargo test -p protocol --test agui_roundtrip --test agui_pairing'
 
   - id: M0-008a
-    title: 'sprites: vendor openapi.json + generated client compiles'
+    title: 'workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest'
     milestone: M0
-    phase: P4
+    phase: P1
     priority: 1
-    deps: [M0-002]
+    size: M
+    risk: high
+    deps: [M0-002, M0-003]
     paths:
-      - 'crates/sprites/openapi.json'
-      - 'crates/sprites/build.rs'
-      - 'crates/sprites/src/generated*'
-      - 'crates/sprites/src/lib.rs'
-      - 'crates/sprites/tests/list.rs'
+      - 'workers/workspace/**'
     context:
-      - 'https://api.sprites.dev/openapi.json (v0.1.12)'
-      - 'progenitor (build.rs)'
-      - 'docs/PLAN-v2-ade.md §2 (Sprites API 0.1.12)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace Durable Object), §4.2 (Workspace DO row), §6'
+      - 'https://developers.cloudflare.com/sandbox/ (@cloudflare/sandbox 1.0 API)'
+      - 'https://developers.cloudflare.com/workers/testing/vitest-integration/'
+      - 'Container: Linux, no docker daemon, so local `wrangler dev` runs with containers disabled'
     acceptance:
-      - 'Client generated at build time; wiremock test lists sprites incl. running_limit/warm_limit'
+      - 'workers/workspace is a standalone npm package (not a Cargo member): package.json + committed package-lock.json with `@cloudflare/sandbox` pinned to an exact 1.0.x, TypeScript strict, vitest; wrangler.jsonc declares the `WorkspaceDO` Durable Object class (SQLite migration tag), a `containers` entry (image = ../../images/workspace/Dockerfile, instance_type standard-2) and an R2 bucket binding for backups'
+      - 'src/types.ts defines request/response types for start(image, instance), stop(), status(), snapshot(), restore(id), backup(dir), restoreBackup(handle), exec(cmd, env), preview(port); src/index.ts exports `WorkspaceDO` implementing them as JS RPC methods and also via fetch at POST /rpc/<method> (JSON bodies) so the Rust hub can call it (M0-008b)'
+      - 'The DO drives the SDK through a small `SandboxPort` interface; a `FakeSandbox` implements it and is selected when the dev var DEV_FAKE_SANDBOX=1 is set'
+      - 'vitest covers every RPC method (argument validation, stopped → running → stopped transitions, errors surfaced as typed results) against FakeSandbox'
+      - 'scripts/dev-smoke.sh starts `wrangler dev --enable-containers=false` with DEV_FAKE_SANDBOX=1 on a free port, calls /rpc/start, /rpc/status and /rpc/stop with curl, and always stops wrangler. Real container start/stop and backup/restore are verified on the deployed preview env by M0-009/M0-010 (leader-run)'
     verify:
-      - 'cargo test -p sprites --test list'
+      - 'cd workers/workspace && npm ci && npx tsc --noEmit && npx vitest run'
+      - 'bash workers/workspace/scripts/dev-smoke.sh'
 
   - id: M0-008b
-    title: 'sprites: checkpoint NDJSON parser + undocumented fields (labels, exec WS)'
+    title: 'hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests'
     milestone: M0
-    phase: P4
-    deps: [M0-008a]
+    phase: P1
+    priority: 1
+    deps: [M0-008a, M2-001]
     paths:
-      - 'crates/sprites/src/checkpoint*'
-      - 'crates/sprites/src/extra*'
-      - 'crates/sprites/tests/checkpoint.rs'
+      - 'crates/hub/src/workspace_do*'
+      - 'crates/hub/tests/workspace_do.rs'
+      - 'crates/hub/wrangler.toml'
+      - 'scripts/workspace-dev-test.sh'
     context:
-      - 'packages/sprites-client/src/fly.ts:120-170 (v1 NDJSON parsing)'
-      - 'docs/PLAN-v2-ade.md §4.3'
+      - 'docs/PLAN-v2-ade.md §4.2 (Workspace DO row), §4.3 (Workspace Durable Object)'
+      - 'workers/workspace/src/types.ts (the RPC surface from M0-008a)'
+      - 'https://developers.cloudflare.com/durable-objects/best-practices/create-durable-object-stubs-and-send-requests/ (bindings to a DO class in another Worker via script_name)'
     acceptance:
-      - 'checkpoint() parses the NDJSON stream (info/error/complete) into an id; restore() likewise; errors surfaced'
-      - 'create_with_labels() sends an optional `labels` field (undocumented; verified live in M0-009)'
+      - 'crates/hub/src/workspace_do defines a `WorkspaceControl` trait mirroring the M0-008a surface with serde types that round-trip the JSON of workers/workspace/src/types.ts; the wasm32 impl calls the WORKSPACE Durable Object namespace binding (stub fetch to /rpc/<method>); a native in-memory fake implements the trait'
+      - 'crates/hub/wrangler.toml declares the WORKSPACE binding (class_name WorkspaceDO, script_name = the workspace Worker)'
+      - 'scripts/workspace-dev-test.sh runs both Workers in one `wrangler dev --enable-containers=false` (`-c crates/hub/wrangler.toml -c workers/workspace/wrangler.jsonc`, DEV_FAKE_SANDBOX=1, DEV_FIXTURES=1) on a free port, drives start → status → stop through a hub dev-fixture route, and always stops wrangler'
     verify:
-      - 'cargo test -p sprites --test checkpoint'
+      - 'cargo test -p hub --test workspace_do'
+      - 'cargo build -p hub --target wasm32-unknown-unknown'
+      - 'bash scripts/workspace-dev-test.sh'
 
   - id: M0-008c
-    title: 'sprites: exec WebSocket helper'
+    title: 'images/workspace: pinned workspace image (Dockerfile; toolchains, ACP adapters from a committed lockfile with integrity, `sm`), built in CI'
     milestone: M0
     phase: P4
-    deps: [M0-008a]
+    size: M
+    deps: [M0-008a, M2B-004]
     paths:
-      - 'crates/sprites/src/exec*'
-      - 'crates/sprites/tests/exec.rs'
+      - 'images/workspace/**'
+      - '.github/workflows/workspace-image.yml'
     context:
-      - 'packages/sprites-client/src/fly.ts:188-260 (v1 exec over WS)'
-      - 'https://docs.fly.io/sprites/api'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Image), §4.1 (Harness user separation), §4.8'
+      - 'https://developers.cloudflare.com/sandbox/ (custom images on the sandbox base image)'
+      - 'https://developers.cloudflare.com/containers/ (image registry, instance types)'
     acceptance:
-      - 'exec(cmd, env, stdin) over WS returns exit code + output; tested against a tokio-tungstenite fake server'
+      - 'images/workspace/Dockerfile starts FROM the @cloudflare/sandbox 1.0 base image pinned by digest; installs git and the Rust and Node toolchains at pinned versions; copies a musl `sm` built in CI (sha256 checked); installs ACP adapters with `npm ci --ignore-scripts` from images/workspace/adapters/package-lock.json (every package has an integrity hash) plus an allowlist (images/workspace/adapters/allow-scripts.txt) of packages whose install scripts may run'
+      - 'Separate unix users `runner` (owns ~/.sm, mode 0700) and `harness` (owns /workspace); the entrypoint runs `sm --host sandbox`'
+      - 'images/workspace/build.sh --dry-run needs no docker daemon: it checks that every digest, sha256 and lockfile is present and prints the build plan. The real build, an SPDX SBOM (syft) and the push to the Cloudflare registry run only in CI (workspace-image.yml)'
     verify:
-      - 'cargo test -p sprites --test exec'
+      - 'bash images/workspace/build.sh --dry-run'
+      - 'grep -q "sm --host sandbox" images/workspace/Dockerfile'
+      - 'python3 -I -c "import json; l=json.load(open(''images/workspace/adapters/package-lock.json'')); ps=[v for k,v in l[''packages''].items() if k]; assert ps and all(v.get(''integrity'') for v in ps)"'
 
   - id: M0-009
-    title: 'cli smoke: live Sprite lifecycle + labels + checkpoint-stops-service'
+    title: 'Sandbox spike: start/exec/stop on the deployed preview env; cold start + wake timings'
     milestone: M0
-    phase: P4
-    deps: [M0-001, M0-008b, M0-008c]
+    phase: P2
+    priority: 1
+    owner: leader
+    deps: [M0-018, M0-008a]
     paths:
-      - 'crates/cli/src/smoke*'
-      - 'docs/spikes/smoke.md'
+      - 'crates/cli/src/spikes/sandbox_smoke*'
+      - 'workers/workspace/wrangler.jsonc'
+      - 'docs/spikes/sandbox-smoke.md'
+      - 'docs/ops/preview-env.md'
     context:
-      - 'docs/PLAN-v2-ade.md §2, §4.1 (checkpoints)'
-      - 'https://docs.fly.io/sprites/concepts/checkpoints'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace Durable Object, Local dev), §7.5'
+      - 'https://developers.cloudflare.com/sandbox/'
+      - 'https://developers.cloudflare.com/containers/platform-details/ (instance types, limits)'
     acceptance:
-      - '`cli smoke` creates sm-smoke-<rand> (with labels attempt), execs uname, installs a trivial HTTP service, checkpoints, records whether the service was stopped during the checkpoint, writes a file, restores, confirms the file is gone, deletes the Sprite (always, even on failure)'
-      - 'docs/spikes/smoke.md records: labels settable via API (y/n), service behaviour during checkpoint/restore, timings'
+      - 'Leader-run on the deployed preview env (needs M0-018); never under `wrangler dev`'
+      - 'workers/workspace is deployed as the preview env with `wrangler deploy --env preview`, using a prebuilt image reference for the sandbox base image (no local docker build); docs/ops/preview-env.md records the Worker name, image reference, bindings and the command used'
+      - '`cargo run -p cli -- spike sandbox-smoke --env preview` starts sandbox sm-spike-<rand> through the Workspace DO, execs `uname -a`, writes then reads a file, stops it, and deletes it always (even on failure); prints JSON timings'
+      - 'docs/spikes/sandbox-smoke.md records cold start and wake-after-stop (p50/p95 over 5 runs), exec latency, the instance type, and any SDK gaps'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- smoke'
+      - 'cargo run -p cli -- spike sandbox-smoke --env preview'
+      - 'test -s docs/spikes/sandbox-smoke.md'
 
   - id: M0-010
-    title: 'Spike: cross-Sprite restore / fork cost'
+    title: 'Sandbox spike: DirectoryBackup + restore into a new sandbox, snapshots (beta), 1 GB timings, restore after an image bump'
     milestone: M0
     phase: P4
     risk: high
-    deps: [M0-009]
+    owner: leader
+    deps: [M0-018, M0-008a, M0-009]
     paths:
-      - 'crates/cli/src/spikes/fork*'
-      - 'docs/spikes/checkpoint-fork.md'
+      - 'crates/cli/src/spikes/sandbox_fork*'
+      - 'docs/spikes/sandbox-fork.md'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Fork = copy)'
-      - 'https://docs.fly.io/sprites/sprite-maintenance#storage-upgrades'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Persistence, Fork, Checkpoints)'
+      - 'https://developers.cloudflare.com/sandbox/ (DirectoryBackup, snapshots)'
     acceptance:
-      - "Raw responses for restoring A's checkpoint id on Sprite B; states whether cross-Sprite restore exists"
-      - 'Measured time/bytes for new Sprite + recipe + copy of a 1 GB tree from /.sprite/checkpoints/<id>/'
+      - 'Leader-run on the deployed preview env: backup/restore needs FUSE and does not work under `wrangler dev`'
+      - '`cargo run -p cli -- spike sandbox-fork --env preview` backs up /workspace of sandbox A to R2, restores it into a new sandbox B and checks a file hash; takes a snapshot (beta) of A and resumes from it; deletes every sandbox and backup it created'
+      - 'docs/spikes/sandbox-fork.md records backup and restore time and bytes for a 1 GB workspace, snapshot availability and timings, and whether a backup restores into a sandbox on a newer image tag'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- spike fork --report docs/spikes/checkpoint-fork.md'
+      - 'cargo run -p cli -- spike sandbox-fork --env preview'
+      - 'test -s docs/spikes/sandbox-fork.md'
 
   - id: M0-011
-    title: 'Spike: Sprite URL auth from outside + Tasks API keep-alive'
+    title: 'Sandbox spike: idle stop → backup → wake → restore; runner tunnel reconnect'
     milestone: M0
     phase: P4
-    deps: [M0-009]
+    owner: leader
+    deps: [M0-018, M0-008a, M0-009, M0-008c, M2B-004, M2-015]
     paths:
-      - 'crates/cli/src/spikes/urlauth*'
-      - 'docs/spikes/sprite-url-auth.md'
+      - 'crates/cli/src/spikes/sandbox_lifecycle*'
+      - 'docs/spikes/sandbox-lifecycle.md'
     context:
-      - 'https://docs.fly.io/sprites/concepts/networking'
-      - 'https://docs.fly.io/sprites/keeping-sprites-running'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Sleep / wake), §4.1 (Staying awake)'
+      - 'docs/specs/tunnel.md (resume token)'
     acceptance:
-      - 'Shows the header/token that authenticates a curl to an auth=sprite URL'
-      - 'Shows a Task (5m expiry, 60s heartbeat) keeps the Sprite running past the idle window, and that it sleeps after release'
+      - 'Leader-run on the deployed preview env (backup/restore needs FUSE; not under `wrangler dev`)'
+      - '`cargo run -p cli -- spike sandbox-lifecycle --env preview` starts the workspace image with `sm --host sandbox` against the deployed hub, lets it idle past a short timeout, and checks the order backup → stop; then wakes it, restores the backup and checks that the runner reconnects its tunnel with the resume token and its machine goes online again'
+      - 'docs/spikes/sandbox-lifecycle.md records idle-to-stopped time, wake-to-online time and how keep-alive during a turn is achieved'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- spike urlauth --report docs/spikes/sprite-url-auth.md'
+      - 'cargo run -p cli -- spike sandbox-lifecycle --env preview'
+      - 'test -s docs/spikes/sandbox-lifecycle.md'
 
   - id: M0-012
     title: 'Provide model credentials as a Sprites connector'
     milestone: M0
     phase: P4
     owner: human
-    status: blocked
-    blocked_on: human
-    deps: [M0-001]
+    status: done
+    blocked_on: null
+    evidence: 'dropped: rev 6 all-Cloudflare'
+    deps: []
     acceptance:
       - 'GET /v1/oauth/connections lists the connector'
     verify: []
     howto: 'Check https://fly.io/sprites/ecosystem/ for an Anthropic (or OpenAI-compatible) provider. If present, create it with access_policy.sprite_labels=["sm-dev"] (or name_prefix "sm-"). Otherwise create a custom_api connector with base_api_url=https://api.anthropic.com, header x-api-key. Tell the leader the connector id. Never paste keys into chat.'
 
   - id: M0-013
-    title: 'Spike: connector gateway from inside a Sprite + harness base-URL support'
+    title: 'Sandbox spike: outbound-handler credential injection (api.anthropic.com, api.github.com), enableInternet false allowlist, denied-host log'
     milestone: M0
     phase: P4
-    deps: [M0-009, M0-012]
+    owner: leader
+    deps: [M0-018, M0-008a, M0-009, M0-020]
     paths:
-      - 'crates/cli/src/spikes/gateway*'
-      - 'docs/spikes/connectors.md'
+      - 'crates/cli/src/spikes/sandbox_egress*'
+      - 'docs/spikes/sandbox-egress.md'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Credentials via the connector gateway)'
-      - 'https://docs.fly.io/sprites/concepts/connectors'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Credentials, Egress), §4.8'
+      - 'https://developers.cloudflare.com/sandbox/ (outbound handling, enableInternet)'
     acceptance:
-      - 'From inside a Sprite, a gateway call to the model provider returns 200; from outside returns 401'
-      - 'Table: which harnesses accept a base-URL override (claude-agent-acp, codex-acp, opencode, pi, gemini, goose) and the variable name'
+      - 'Leader-run on the deployed preview env (needs M0-018 and the model key from M0-020)'
+      - '`cargo run -p cli -- spike sandbox-egress --env preview`: from inside a sandbox with `enableInternet: false`, GET https://api.anthropic.com/v1/models returns 200 with the key injected by the outbound handler from Secrets Store, and the key appears nowhere in the sandbox env or files; api.github.com gets a token header only on allowlisted path prefixes; a non-allowlisted host is refused and shows up in the denied-host log'
+      - 'docs/spikes/sandbox-egress.md records the results plus a table of which harnesses (claude-agent-acp, codex-acp, opencode, pi, gemini, goose) run with a placeholder key env var while the real key is injected, and the variable name each needs'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- spike gateway --report docs/spikes/connectors.md'
+      - 'cargo run -p cli -- spike sandbox-egress --env preview'
+      - 'test -s docs/spikes/sandbox-egress.md'
 
   - id: M0-014
     title: 'Provide VPN test credentials'
@@ -403,23 +438,26 @@ items:
     howto: 'Add TS_AUTHKEY (ephemeral, pre-authorized Tailscale key) and WG_TEST_PEER (a WireGuard peer config with a public hostname endpoint) as environment secrets; restart the session.'
 
   - id: M0-015
-    title: 'Spike: Tailscale / WireGuard inside a policy-restricted Sprite'
+    title: 'Sandbox spike: Tailscale over DERP through the outbound handler; WireGuard via boringtun'
     milestone: M0
     phase: P6
     risk: high
-    deps: [M0-009, M0-014]
+    owner: leader
+    deps: [M0-013, M0-014]
     paths:
       - 'crates/cli/src/spikes/net*'
       - 'docs/spikes/networking.md'
     context:
       - 'docs/PLAN-v2-ade.md §4.7'
-      - 'https://community.fly.io/t/tailscale-on-sprites/27525'
+      - 'https://tailscale.com/kb/1232/derp-servers'
+      - 'https://github.com/cloudflare/boringtun'
     acceptance:
-      - 'With a network policy applied: tailscaled (userspace, DERP-only) join result; boringtun to WG_TEST_PEER result; *.internal / fdaa:: refused'
-      - 'Measured overhead of a CONNECT proxy through a public hostname'
-      - 'Recommendation per profile type'
+      - 'Leader-run on the deployed preview env (needs M0-018 and M0-014)'
+      - 'With `enableInternet: false` and only DERP hostnames allowlisted: userspace tailscaled (DERP-only, TS_AUTHKEY) join result; boringtun in the runner to WG_TEST_PEER result; a non-allowlisted host refused'
+      - 'Measured overhead of a CONNECT proxy through a public hostname; a recommendation per §4.7 profile in docs/spikes/networking.md'
     verify:
-      - "SMOKE_KEEP=0 cargo run -p cli -- spike net --json | jq -e '.tailnet.result and .wireguard.result'"
+      - "cargo run -p cli -- spike net --env preview --json | jq -e '.tailnet.result and .wireguard.result'"
+      - 'test -s docs/spikes/networking.md'
 
   - id: M0-016
     title: 'Audit existing Sprites; migrate pre-10/6 ones to SBD'
@@ -427,7 +465,9 @@ items:
     phase: P4
     lane: docs
     owner: leader
-    deps: [M0-001]
+    status: done
+    evidence: 'dropped: rev 6 all-Cloudflare'
+    deps: []
     context:
       - 'https://docs.fly.io/sprites/sprite-maintenance#storage-upgrades (in-place upgrade drops old checkpoints)'
     acceptance:
@@ -470,8 +510,9 @@ items:
     deps: []
     acceptance:
       - '`test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" && wrangler whoami` succeeds in a new session'
+      - '`wrangler containers list` and `wrangler secrets-store store list --remote` exit 0 (Containers and Secrets Store permissions present)'
     verify: []
-    howto: 'Create (or use) a Cloudflare account on the Workers Paid plan. Create an API token with Workers Scripts, Durable Objects, D1, R2, Queues, Workers Static Assets (Workers Scripts edit covers it) and Account Settings read permissions. Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as environment secrets for this cloud environment, then restart the Claude Code session (secrets only reach new sessions). Never paste the token into chat.'
+    howto: 'Create (or use) a Cloudflare account on the Workers Paid plan. Dashboard → My Profile → API Tokens → Create Token → Custom token, scoped to that one account, with these Account permissions: Workers Scripts Edit, Containers Edit (labelled "Cloudchamber" in some dashboards), D1 Edit, Workers R2 Storage Edit, Queues Edit, Secrets Store Edit, Workers Tail Read, Account Settings Read, Account Analytics Read. Add Zone → Workers Routes Edit only if you will use a custom domain. Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as environment secrets for this cloud environment (docs/setup/SETUP.md step 4), then restart the Claude Code session (secrets only reach new sessions). Never paste the token into chat.'
 
   - id: M0-019
     title: 'Enable macOS runners for GitHub Actions'
@@ -486,18 +527,32 @@ items:
     verify: []
     howto: 'Enable GitHub-hosted `macos-latest` runners for this repository (Settings → Actions; check the org allows them and the billing limit covers them), or register a self-hosted Mac runner labelled `macos-latest`. Then re-run the rust.yml workflow on v2.'
 
+  - id: M0-020
+    title: 'Add a model API key to Cloudflare Secrets Store'
+    milestone: M0
+    phase: P4
+    priority: 1
+    owner: human
+    status: blocked
+    blocked_on: human
+    deps: [M0-018]
+    acceptance:
+      - 'The leader has the secret name (never the value); `wrangler secrets-store secret list <store-id> --remote` lists it'
+    verify: []
+    howto: 'Cloudflare dashboard → Secrets Store (account level) → create a store if there is none → Create secret: a name such as ANTHROPIC_API_KEY, the value = your model API key (e.g. Anthropic), scope Workers. Tell the leader only the secret name and the store id. Never paste the key into chat. The Workspace DO outbound handler injects it for api.anthropic.com (plan §4.3); it never enters a sandbox.'
+
   - id: M0-review
     title: 'M0 exit review'
     milestone: M0
     phase: P6
     owner: leader
-    deps: [M0-003, M0-005, M0-006, M0-007, M0-010, M0-011, M0-013, M0-015, M0-016, M0-017]
+    deps: [M0-003, M0-005, M0-006, M0-007, M0-008b, M0-008c, M0-010, M0-011, M0-013, M0-015, M0-017]
     acceptance:
-      - 'Each M0 item quoted with evidence; plan §4.2/§4.3/§4.7 updated with spike outcomes (Cloudflare, Sprites, networking)'
+      - 'Each M0 item quoted with evidence (dropped items M0-001/012/016 listed as dropped); plan §4.2/§4.3/§4.7 updated with spike outcomes (Cloudflare hub, sandboxes, networking)'
     verify:
       - 'cargo test --workspace'
 
-  # ════════════════════════ M1a — runner core (sidecar lib), sprite mode, A2A edge out ════════════════════════
+  # ════════════════════════ M1a — runner core (sidecar lib), sandbox mode, A2A edge out ════════════════════════
   - id: M1A-001
     title: 'sidecar (runner-core lib): config, tracing, /healthz server fn'
     milestone: M1a
@@ -510,7 +565,7 @@ items:
       - 'crates/sidecar/tests/healthz.rs'
     context:
       - 'docs/PLAN-v2-ade.md §4.1, §6 (sidecar = runner core library)'
-      - 'packages/sprite-agent/src/config.ts (v1 config)'
+      - 'docs/specs/tunnel.md (hub URL + machine credential the runner is configured with)'
     acceptance:
       - '`sidecar::server::serve(addr)` (library fn; port 0 in tests) serves /healthz 200 with build info; env config with defaults documented in rustdoc; the sidecar crate has no main.rs (the binary is crates/runner)'
     verify:
@@ -740,52 +795,79 @@ items:
       - 'cargo test -p sidecar --test durability'
 
   - id: M1A-010
-    title: 'sprite mode: keep-alive (Sprites Task held during turns and pending approvals)'
+    title: 'Workspace DO lifecycle: keep running during turns and pending approvals, idle → backup → stop, wake → restore → runner reattach'
     milestone: M1a
     phase: P4
-    deps: [M1A-003, M0-011, M2B-003]
+    size: M
+    risk: high
+    deps: [M0-008a, M0-011, M2B-003, M1A-009]
     paths:
+      - 'workers/workspace/src/lifecycle*'
+      - 'workers/workspace/test/lifecycle*'
       - 'crates/sidecar/src/keepalive/**'
       - 'crates/sidecar/tests/keepalive.rs'
+      - 'crates/cli/src/e2e/lifecycle*'
     context:
-      - 'docs/spikes/sprite-url-auth.md (Tasks API findings)'
-      - 'docs/PLAN-v2-ade.md §4.1 (Staying awake)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Sleep / wake), §4.1 (Staying awake, Durability)'
+      - 'docs/spikes/sandbox-lifecycle.md (M0-011 findings)'
+      - 'workers/workspace/src/types.ts'
     acceptance:
-      - 'Task created at turn start, heartbeated every 60 s, deleted at end/cancel/crash; held while an Interrupt is pending until the approval TTL; Sprites API behind a trait with a fake; plugs into the HostMode keep-alive slot'
+      - 'The Workspace DO keeps the sandbox running while keep-alive pings say a turn is in flight or an Interrupt is pending (until the approval TTL, default 10 min); after the idle timeout (default 10 min, per-workspace setting) it runs backup("/workspace"), records the handle in DO storage, then stops; a failed backup aborts the stop and is reported'
+      - 'On the next message the DO starts the sandbox, runs restoreBackup(last handle), and the runner re-attaches the ACP session (session/resume, fallback session/load); vitest with FakeSandbox and a fake clock asserts the order turn → pending approval → idle → backup → stop → wake → restore'
+      - 'sidecar keepalive (sandbox host mode) pings at turn start, every 60 s, and while an Interrupt is pending until the approval TTL; native test with a fake hub'
+      - 'Leader-run on the deployed preview env (backup/restore needs FUSE; not under `wrangler dev`): `cargo run -p cli -- e2e lifecycle --env preview` idles a real sandbox to stopped and wakes it with the file tree intact'
     verify:
+      - 'cd workers/workspace && npm ci && npx vitest run test/lifecycle'
       - 'cargo test -p sidecar --test keepalive'
+      - 'cargo run -p cli -- e2e lifecycle --env preview'
 
   - id: M1A-011
-    title: 'sprite mode: /preview/<port>/ reverse proxy + /healthz'
+    title: 'Previews on our hostnames via the Workspace DO + hub-signed URLs'
     milestone: M1a
     phase: P4
-    deps: [M1A-001, M0-011, M2B-003]
+    deps: [M0-008b, M0-009, M2-003a]
     paths:
-      - 'crates/sidecar/src/preview/**'
-      - 'crates/sidecar/tests/preview.rs'
+      - 'workers/workspace/src/preview*'
+      - 'workers/workspace/test/preview*'
+      - 'crates/hub/src/previews/**'
+      - 'crates/hub/tests/previews.rs'
+      - 'crates/cli/src/e2e/preview*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.1 (Supervision row)'
-      - 'docs/spikes/sprite-url-auth.md'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Preview), §3 (surface 4: preview)'
+      - 'https://developers.cloudflare.com/sandbox/ (preview URLs on your own hostname)'
     acceptance:
-      - 'In sprite mode the runner owns the HTTP port only for /healthz and /preview/<port>/; preview proxies HTTP + WebSocket to localhost:<port>; any other path → 404; no A2A routes and no bearer file'
+      - 'POST /api/workspaces/{id}/previews/{port} (member or above) asks the Workspace DO to expose the port and returns a URL on our preview hostname carrying an HMAC token bound to workspace + port with a 10-min expiry'
+      - 'The workspace Worker forwards HTTP and WebSocket upgrades for that hostname to the sandbox port only with a valid, unexpired token; otherwise 401; vitest (FakeSandbox) and `bash scripts/hub-test.sh previews` cover valid, expired, wrong-port and missing tokens'
+      - 'Leader-run on the deployed preview env: `cargo run -p cli -- e2e preview --env preview` serves `python3 -m http.server` in a sandbox and fetches it through the signed URL. Preview hostnames need a custom domain with a wildcard route (the optional Zone permission of M0-018); without one the leader sets this item blocked_on human with that howto'
     verify:
-      - 'cargo test -p sidecar --test preview'
+      - 'cd workers/workspace && npm ci && npx vitest run test/preview'
+      - 'bash scripts/hub-test.sh previews'
+      - 'cargo run -p cli -- e2e preview --env preview'
 
   - id: M1A-012
-    title: 'sprite mode: Sprites checkpoint after the task settles + retention prune'
+    title: 'Sandbox checkpoints: DirectoryBackup per turn + shadow-git commit; keep last K = 20; restore into the running sandbox'
     milestone: M1a
     phase: P4
-    deps: [M1A-006b, M0-008b, M2B-003]
+    size: M
+    deps: [M1A-006b, M2B-003, M2B-011, M0-008b, M0-010]
     paths:
       - 'crates/sidecar/src/checkpoint/**'
       - 'crates/sidecar/tests/checkpoint.rs'
+      - 'crates/hub/src/checkpoints/backup*'
+      - 'crates/hub/tests/checkpoint_backup.rs'
+      - 'crates/cli/src/e2e/checkpoint*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.1 (Checkpoints)'
-      - 'docs/spikes/smoke.md (service behaviour during checkpoint)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Checkpoints), §4.1 (Checkpoints row)'
+      - 'docs/spikes/sandbox-fork.md (M0-010 timings)'
+      - 'crates/runner/src/checkpoint (shadow git, M2B-011)'
     acceptance:
-      - 'Checkpoint with comment task:<id> turn:<n> after the task settles (finished or waiting on an Interrupt); emits a Checkpoint TurnEvent; failure is non-fatal; keep last K = 20 turn checkpoints via sprite-env; Sprites API faked in tests'
+      - 'After the task settles (finished, or waiting on an Interrupt) the sandbox-mode runner makes a shadow-git commit (M2B-011) and asks the hub to back up /workspace through WorkspaceControl, labelled task:<id> turn:<n>; it emits a Checkpoint TurnEvent with the backup handle and commit; a failed backup is non-fatal and reported'
+      - 'Keep the last K = 20 turn backups plus named ones; older backups are deleted from R2; restore(handle) restores into the running sandbox and the runner re-syncs with the hub; tests use the WorkspaceControl fake'
+      - 'Leader-run on the deployed preview env (backup/restore needs FUSE): `cargo run -p cli -- e2e checkpoint --env preview` makes two turns, restores the first checkpoint and checks the file tree'
     verify:
       - 'cargo test -p sidecar --test checkpoint'
+      - 'cargo test -p hub --test checkpoint_backup'
+      - 'cargo run -p cli -- e2e checkpoint --env preview'
 
   - id: M1A-013
     title: 'Session config: commands, modes, config options, pending tasks (StateDelta{session})'
@@ -838,36 +920,51 @@ items:
       - 'bash scripts/tck.sh'
 
   - id: M1A-016
-    title: 'cli: deploy `sm --host sprite` as a Sprite service (dials the hub tunnel)'
+    title: 'Deploy `sm --host sandbox`: the Workspace DO starts the image with the runner as entrypoint and a short-lived machine credential (env); the runner dials the hub tunnel'
     milestone: M1a
     phase: P4
-    deps: [M1A-011, M0-009, M2B-004, M2-015]
+    size: M
+    risk: high
+    deps: [M0-008b, M0-008c, M0-009, M2B-004, M2-015]
     paths:
+      - 'crates/runner/src/host/sandbox*'
+      - 'crates/runner/tests/host_sandbox.rs'
+      - 'crates/hub/src/workspace_do/credential*'
+      - 'crates/hub/tests/workspace_credential.rs'
       - 'crates/cli/src/deploy/**'
     context:
-      - 'https://docs.fly.io/sprites/concepts/services'
-      - 'docs/PLAN-v2-ade.md §4.1 (sprite column)'
+      - 'docs/PLAN-v2-ade.md §4.1 (sandbox column: Transport, Supervision, Identity), §4.3 (Workspace Durable Object), §4.8 item 3'
+      - 'docs/specs/tunnel.md (hello frame, machine credential)'
     acceptance:
-      - 'musl build of `sm`; fs upload; separate unix users for runner and harness; per-Sprite machine credential written 0600 via the fs API; service PUT (http_port 8080, dir) running `sm --host sprite`; the runner dials the hub tunnel and its machine shows online; /healthz reachable via URL auth'
+      - 'Before each start the hub mints a short-lived, revocable machine credential (rotated per start) and calls WorkspaceControl.start(image, instance) with env SM_HUB_URL and SM_MACHINE_CREDENTIAL; nothing is written to disk by the hub or the DO'
+      - '`sm --host sandbox` reads the credential from env into memory only, removes it from the environment it passes to harnesses (which run as the `harness` user), and dials the hub tunnel; its machine shows online and is registered with kind managed'
+      - 'Native tests: runner sandbox host mode with a fake env and fake hub; credential mint, rotate and revoke in the hub'
+      - 'Leader-run on the deployed preview env: `cargo run -p cli -- runner deploy --env preview --ephemeral` starts a sandbox from the workspace image, waits until its machine is online, then stops and deletes it'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- runner deploy --ephemeral'
+      - 'cargo test -p runner --test host_sandbox'
+      - 'cargo test -p hub --test workspace_credential'
+      - 'cargo run -p cli -- runner deploy --env preview --ephemeral'
 
   - id: M1A-017
-    title: 'E2E: claude-agent-acp in a Sprite via the connector gateway, driven through the hub'
+    title: 'E2E on the deployed preview env: claude-agent-acp in a sandbox with outbound-handler key injection, driven through the hub'
     milestone: M1a
     phase: P4
     risk: high
-    deps: [M1A-016, M1A-009, M1A-010, M1A-012, M0-013]
+    owner: leader
+    deps: [M1A-016, M1A-009, M1A-010, M1A-012, M0-013, M0-020]
     paths:
       - 'crates/cli/src/e2e/claude*'
       - 'docs/spikes/m1a-e2e.md'
     context:
-      - 'docs/spikes/connectors.md'
-      - 'docs/PLAN-v2-ade.md §4.1, §5 (P4)'
+      - 'docs/spikes/sandbox-egress.md'
+      - 'docs/PLAN-v2-ade.md §4.1, §4.3, §5 (P4)'
     acceptance:
-      - 'A task edits a file: TextMessage, ToolCall, Activity{diff}, an approval Interrupt answered through the hub, Checkpoint, RunFinished{success}; the Sprite is allowed to go cold and the next turn resumes the ACP session'
+      - 'Leader-run on the deployed preview env (needs M0-018 and M0-020; backup/restore needs FUSE)'
+      - 'A task edits a file: TextMessage, ToolCall, Activity{diff}, an approval Interrupt answered through the hub, Checkpoint (backup), RunFinished{success}; then the sandbox idles (backup → stop) and the next turn wakes it, restores, and resumes the ACP session'
+      - 'The model key is injected by the outbound handler and found nowhere in the sandbox env or files; docs/spikes/m1a-e2e.md records the timings'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- e2e claude'
+      - 'cargo run -p cli -- e2e claude --env preview'
+      - 'test -s docs/spikes/m1a-e2e.md'
 
   - id: M1A-review
     title: 'M1a exit review'
@@ -876,7 +973,7 @@ items:
     owner: leader
     deps: [M1A-013, M1A-014, M1A-015, M1A-017]
     acceptance:
-      - 'Each M1a item quoted with evidence (runner core P1, sprite mode P4, A2A edge out P5)'
+      - 'Each M1a item quoted with evidence (runner core P1, sandbox mode P4, A2A edge out P5)'
     verify:
       - 'cargo test --workspace'
 
@@ -1197,10 +1294,10 @@ items:
       - 'crates/hub/tests/org_settings.rs'
       - 'docs/ops/secrets.md'
     context:
-      - 'docs/PLAN-v2-ade.md §4.2 (Secrets Store row), §4.3 (Tokens)'
+      - 'docs/PLAN-v2-ade.md §4.2 (Secrets Store row), §4.3 (Workspace lifecycle: Credentials), §3 (surface 6)'
       - 'https://developers.cloudflare.com/secrets-store/'
     acceptance:
-      - 'Master key from a Secrets Store binding (Worker secret in dev); per-org Sprites orchestration + billing tokens and Fly deploy tokens envelope-encrypted (AES-GCM, per-row data key) in D1'
+      - 'Master key from a Secrets Store binding (Worker secret in dev); per-org service credentials (GitHub tokens, BYO agent API keys, Access service tokens, Cloudflare deploy tokens for promotion) envelope-encrypted (AES-GCM, per-row data key) in D1; model keys stay in Secrets Store and are referenced by secret name only'
       - 'Org settings API set/rotate/test; a test dumps the local D1 (`wrangler d1 export --local`) and finds no plaintext token; rotation runbook in docs/ops/secrets.md'
     verify:
       - 'cargo test -p hub --test secrets'
@@ -1437,7 +1534,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.2 (Workers Logs/Traces, Analytics Engine)'
       - 'https://developers.cloudflare.com/analytics/analytics-engine/'
     acceptance:
-      - 'Structured JSON logs with request/thread ids; Analytics Engine data points for latency, subscribers, Sprites errors, push failures, running vs limit (binding faked in tests); per-user/token rate limits on /api and subscriptions return 429'
+      - 'Structured JSON logs with request/thread ids; Analytics Engine data points for latency, subscribers, Workspace DO / sandbox start errors, push failures, running sandboxes vs the account vCPU/memory limits (binding faked in tests); per-user/token rate limits on /api and subscriptions return 429'
     verify:
       - 'bash scripts/hub-test.sh telemetry'
 
@@ -1534,7 +1631,7 @@ items:
       - 'cargo run -p cli -- e2e tracer'
 
   - id: M2B-003
-    title: 'sidecar: HostMode trait (local | sprite); sidecar is the runner-core library'
+    title: 'sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library'
     milestone: M2b
     phase: P1
     priority: 1
@@ -1552,7 +1649,7 @@ items:
       - 'crates/sidecar/src/bridge'
     acceptance:
       - 'sidecar exposes a lib consumed by crates/runner'
-      - 'HostMode trait covers keep-alive (Sprites Task vs none), checkpoints (Sprites vs shadow git), identity (machine credential file vs keychain) and preview (sprite only); both modes use the same tunnel transport; stub impls in keepalive/, checkpoint/, preview/ for the sprite-mode items to fill'
+      - 'HostMode trait covers keep-alive (Workspace DO pings vs none), checkpoints (DirectoryBackup via the hub + shadow git vs shadow git only), identity (machine credential from env, held in memory, vs keychain) and preview (port exposed by the Workspace DO in sandbox mode; none locally); both modes use the same tunnel transport; stub impls in keepalive/, checkpoint/, preview/ for the sandbox-mode items (M1A-010, M1A-012, M1A-011) to fill'
       - 'local is the default mode; all existing sidecar tests pass'
     verify:
       - 'cargo test -p sidecar --test host_modes'
@@ -1694,7 +1791,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.10 (Local checkpoints)'
       - 'https://git-scm.com/docs/git-commit-tree (plumbing for shadow commits)'
     acceptance:
-      - 'Per-turn snapshot of tracked + untracked (non-ignored) files under refs/sm/checkpoints/<task> without touching index/HEAD/stash; restore and diff between checkpoints; ext/checkpoint emitted like Sprites'
+      - 'Per-turn snapshot of tracked + untracked (non-ignored) files under refs/sm/checkpoints/<task> without touching index/HEAD/stash; restore and diff between checkpoints; ext/checkpoint emitted like sandbox checkpoints (M1A-012)'
     verify:
       - 'cargo test -p runner --test shadow_git'
 
@@ -1979,8 +2076,8 @@ items:
       - 'crates/client-gpui/CONVENTIONS.md'
       - 'docs/vendor/gpui-component-<rev>/INDEX.md (app shell example)'
     acceptance:
-      - 'Path (c) works end to end: run `sm rc` and scan the QR (no Sprites token or cloud setup needed)'
-      - 'Paths (a) Sprites token + model connector and (b) BYO A2A URL are shown and disabled with a reason until their hub APIs exist (M2-002 in P4, M2-004 in P5); they are not deps of this item'
+      - 'Path (c) works end to end: run `sm rc` and scan the QR (no model key or cloud setup needed)'
+      - 'Paths (a) model API key in Cloudflare Secrets Store for cloud workspaces and (b) BYO A2A URL are shown and disabled with a reason until their hub APIs exist (M2-002 in P4, M2-004 in P5); they are not deps of this item'
       - 'Every list has an empty state with one primary action'
     verify:
       - 'cargo test -p client-gpui --test onboarding'
@@ -2150,7 +2247,7 @@ items:
       - 'crates/client-gpui/CONVENTIONS.md'
       - 'docs/vendor/gpui-component-<rev>/INDEX.md (table example)'
     acceptance:
-      - 'Agents list with card/skills/health/presence; add-BYO-by-URL disabled with a reason until the A2A edge exists (M2-004, P5); managed launch form disabled with a reason when no Sprites token, calling the M4 API when present'
+      - 'Agents list with card/skills/health/presence; add-BYO-by-URL disabled with a reason until the A2A edge exists (M2-004, P5); managed launch form disabled with a reason when no model key is configured, calling the M4 API when present'
     verify:
       - 'cargo test -p client-gpui --test agents'
 
@@ -2253,37 +2350,44 @@ items:
 
   # ════════════════════════ M4 — managed cloud workspaces (+ handoff) ════════════════════════
   - id: M4-001
-    title: 'Template recipe: pinned build script + artifact tarball + SBOM'
+    title: 'Workspace image release pipeline: versioned tags, SBOM per version in R2, image versions in the hub'
     milestone: M4
     phase: P4
     size: M
-    deps: [M1A-016, M0-010]
+    deps: [M0-008c, M2-016]
     paths:
-      - 'crates/cli/src/template/**'
-      - 'template/**'
-      - '.github/workflows/template.yml'
+      - 'crates/hub/src/images/**'
+      - 'crates/hub/migrations/*image_versions*'
+      - 'crates/hub/tests/images.rs'
+      - 'crates/cli/src/image/**'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Template = recipe)'
-      - 'docs/spikes/checkpoint-fork.md'
-      - 'manifest/ (v1 settings)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Image, Fork)'
+      - 'images/workspace/ and .github/workflows/workspace-image.yml (M0-008c builds the image; this item records and releases it)'
     acceptance:
-      - 'Adapters from committed lockfile with integrity (npm ci --ignore-scripts + allowlist); binaries sha256-pinned; SBOM; applies to a fresh Sprite and checkpoints a local baseline; CI uses sm-ci- token and deletes Sprites'
+      - 'A D1 migration adds an image_versions table (tag, digest, sbom_r2_key, created_at, is_default); the hub API lists versions and sets the default (admin only); new workspaces use the default, existing ones keep theirs until upgraded'
+      - '`cargo run -p cli -- image release --check <manifest.json>` validates a CI release manifest (tag, registry digest, SBOM path) without network and prints the hub calls it would make; in CI it uploads the SBOM to R2 and registers the version'
+      - 'Upgrading a workspace to a newer image version is a fork into a new sandbox on that image through M4-005 (not reimplemented here); this item only records which version each workspace runs'
     verify:
-      - 'cargo run -p cli -- template build --check'
+      - 'bash scripts/hub-test.sh images'
+      - 'cargo run -p cli -- image release --check crates/cli/tests/fixtures/image-release.json'
 
   - id: M4-002
-    title: 'hub: workspace create (recipe, label, hardening, admission)'
+    title: 'hub: workspace create = Workspace DO start + egress allowlist + instance size + admission against account limits'
     milestone: M4
     phase: P4
-    deps: [M4-001, M2-002]
+    size: M
+    deps: [M4-001, M2-002, M0-008b, M1A-016]
     paths:
       - 'crates/hub/src/workspaces/create*'
+      - 'crates/hub/src/workspaces/admission*'
       - 'crates/hub/tests/workspaces.rs'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Per-workspace hardening, Lifecycle), §4.8'
-      - 'https://docs.fly.io/sprites/api (policies, labels)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Instance size, Egress, Limits & cost), §4.8'
+      - 'https://developers.cloudflare.com/containers/platform-details/ (instance types, account limits)'
     acceptance:
-      - 'ws:<id> label (or name prefix); explicit allowlist (never defaults); privileges minimal + noNewPrivileges; memory limit_mb; runner deployed in sprite mode (M1A-016) and its machine registered as an agent of kind managed; refused/queued at running_limit'
+      - 'POST /api/workspaces stores the workspace in D1 with its image version (M4-001) and instance type (standard-2 default; lite to standard-4 allowed; anything else 400), then starts the sandbox through WorkspaceControl with the runner (M1A-016); the runner machine is registered as an agent of kind managed'
+      - 'Egress: an explicit per-workspace hostname allowlist is stored with the workspace and passed to the Workspace DO (`enableInternet: false`); an empty allowlist is allowed, defaults are never added'
+      - 'Admission: the summed vCPU/memory of running sandboxes is checked against configured account limits (defaults 1,500 vCPU / 6 TiB); over the limit the request is queued and returns 429 with the queue position; tests use the WorkspaceControl fake'
     verify:
       - 'cargo test -p hub --test workspaces'
 
@@ -2297,61 +2401,78 @@ items:
       - 'crates/sidecar/src/repo/**'
       - 'crates/hub/tests/workspace_repo.rs'
     context:
-      - 'docs/PLAN-v2-ade.md §3 (surface 1)'
-      - 'docs/spikes/connectors.md (GitHub connector)'
+      - 'docs/PLAN-v2-ade.md §3 (surface 1), §4.3 (Workspace lifecycle: Credentials)'
+      - 'docs/spikes/sandbox-egress.md (GitHub token injection)'
     acceptance:
-      - 'Clone via GitHub connector gateway; branch sm/<slug>; first prompt seeded from issue; no PAT on disk (test)'
+      - 'Clone through api.github.com / github.com with the token injected by the outbound handler (M4-004); branch sm/<slug>; first prompt seeded from the issue; no PAT on disk or in the sandbox env (test)'
     verify:
       - 'cargo test -p hub --test workspace_repo'
 
   - id: M4-004
-    title: 'Connectors: management API + gateway base-URL rendering'
-    milestone: M4
-    phase: P4
-    deps: [M4-002, M0-013]
-    paths:
-      - 'crates/hub/src/connectors/**'
-      - 'crates/hub/tests/connectors.rs'
-    context:
-      - 'docs/spikes/connectors.md'
-      - 'docs/PLAN-v2-ade.md §4.3 (Credentials)'
-    acceptance:
-      - 'Create/list API-key/OAuth/custom_api connectors scoped to ws label with endpoint allowlists; rendered harness env uses gateway URLs; test asserts no *_API_KEY-shaped value in env or files'
-    verify:
-      - 'cargo test -p hub --test connectors'
-
-  - id: M4-005
-    title: 'Checkpoint timeline: list, restore, fork-by-copy, compare'
+    title: 'Credential injection: per-workspace hostname + path scoped keys from Secrets Store via the outbound handler'
     milestone: M4
     phase: P4
     size: M
-    deps: [M4-002, M0-010]
+    risk: high
+    deps: [M4-002, M0-013]
+    paths:
+      - 'crates/hub/src/credentials/**'
+      - 'crates/hub/tests/credentials.rs'
+      - 'workers/workspace/src/outbound*'
+      - 'workers/workspace/test/outbound*'
+      - 'crates/cli/src/e2e/credentials*'
+    context:
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Credentials, Egress), §4.8 items 1–2'
+      - 'docs/spikes/sandbox-egress.md'
+    acceptance:
+      - 'Admin API binds a credential (a Secrets Store secret name, or an encrypted org credential from M2-002) to a workspace + hostname + path prefixes (e.g. api.github.com /repos/<org>/<repo>/*) with a header template; admin paths are blocked'
+      - 'The Workspace DO outbound handler injects the header only for matching hostname + path, strips any client-supplied auth header, and refuses and logs non-allowlisted hosts; vitest covers matching and non-matching hosts and paths'
+      - 'A test renders the sandbox start env and files and asserts no key-shaped value (sk-ant-…, ghp_…, or a non-placeholder *_API_KEY) reaches them'
+      - 'Leader-run on the deployed preview env: `cargo run -p cli -- e2e credentials --env preview` calls api.anthropic.com from a sandbox with the key injected'
+    verify:
+      - 'cargo test -p hub --test credentials'
+      - 'cd workers/workspace && npm ci && npx vitest run test/outbound'
+      - 'cargo run -p cli -- e2e credentials --env preview'
+
+  - id: M4-005
+    title: 'Checkpoint timeline: list backups, restore, fork into a new sandbox, compare'
+    milestone: M4
+    phase: P4
+    size: M
+    deps: [M4-002, M0-010, M1A-012]
     paths:
       - 'crates/hub/src/checkpoints/**'
       - 'crates/hub/tests/checkpoints.rs'
+      - 'crates/cli/src/e2e/timeline*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Fork = copy)'
-      - 'docs/spikes/checkpoint-fork.md'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Checkpoints, Fork)'
+      - 'docs/spikes/sandbox-fork.md'
     acceptance:
-      - 'List with task/turn labels; in-place restore then sidecar re-sync; fork = new workspace + copy from checkpoint; diff between two checkpoints'
+      - 'Lists checkpoints (backup handle + shadow-git commit, task/turn labels); restore into the running sandbox, then the runner re-syncs; fork = restoreBackup into a new sandbox as a new workspace (same or newer image); compare = diff between the shadow-git commits of two checkpoints; hub tests use the WorkspaceControl fake'
+      - 'Leader-run on the deployed preview env (backup/restore needs FUSE): `cargo run -p cli -- e2e timeline --env preview` restores and forks a real backup and diffs two checkpoints'
     verify:
       - 'cargo test -p hub --test checkpoints'
+      - 'cargo run -p cli -- e2e timeline --env preview'
 
   - id: M4-006
-    title: 'hub: exec + fs proxy and signed preview URLs through the hub Worker'
+    title: 'hub: exec/fs/terminal through the runner + Workspace DO terminals; previews'
     milestone: M4
     phase: P4
     deps: [M4-002, M1A-011]
     paths:
       - 'crates/hub/src/proxy/**'
       - 'crates/hub/tests/proxy.rs'
+      - 'workers/workspace/src/terminal*'
+      - 'workers/workspace/test/terminal*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.1 (preview), §4.2'
-      - 'https://docs.fly.io/sprites/api (exec WebSocket)'
+      - 'docs/PLAN-v2-ade.md §3 (surface 4), §4.3 (Workspace Durable Object), §4.10 (Security: remote terminal)'
+      - 'https://developers.cloudflare.com/sandbox/ (terminals)'
     acceptance:
-      - 'A client WebSocket terminal is proxied by the Worker to the Sprites exec WebSocket (a fake exec server in tests); fs list/read/write confined to the workspace; preview URLs HMAC-signed with a 10-min expiry, proxied to the runner /preview/<port>/'
+      - 'A client terminal WebSocket is proxied by the hub Worker to a Workspace DO terminal (FakeSandbox terminal in tests); fs list/read/write go to the runner over the tunnel, confined to /workspace; exec runs through the runner; preview links reuse the M1A-011 signed URLs'
+      - 'Only members can open terminals; the remote-terminal opt-in applies to local machines'
     verify:
       - 'bash scripts/hub-test.sh proxy'
+      - 'cd workers/workspace && npm ci && npx vitest run test/terminal'
 
   - id: M4-007
     title: 'Managed agent launch API'
@@ -2365,7 +2486,7 @@ items:
       - 'docs/PLAN-v2-ade.md §3 (surface 5), §1.2 (agent kind)'
       - 'crates/hub/src/a2a/registry* (M2-004)'
     acceptance:
-      - 'POST /api/agents/managed {harness, connector, policy, loadout} creates/attaches a workspace and registers the runner as an agent of kind managed'
+      - 'POST /api/agents/managed {harness, credentials, policy, loadout} creates/attaches a workspace and registers the runner as an agent of kind managed'
       - 'Depends on M2-004 (P5, agent registry): an intentional later-phase dependency, so this item lands once M2-004 is done'
     verify:
       - 'cargo test -p hub --test managed'
@@ -2388,37 +2509,44 @@ items:
       - 'cargo test -p sidecar --test permission_policy'
 
   - id: M4-009
-    title: 'Reaper: retention, TTL archive/restore, budgets'
+    title: 'Reaper: retention, TTL archive (latest backup kept in R2, sandbox deleted), restore, budgets'
     milestone: M4
     phase: P4
     deps: [M4-005, M2-012]
     paths:
       - 'crates/hub/src/reaper/**'
       - 'crates/hub/tests/reaper.rs'
+      - 'crates/cli/src/e2e/reaper*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Lifecycle), §4.2 (Cron Triggers, R2)'
-      - 'docs/spikes/checkpoint-fork.md'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Limits & cost), §4.2 (Cron Triggers, R2)'
+      - 'docs/spikes/sandbox-fork.md'
     acceptance:
-      - 'A Cron Trigger archives workspaces idle > TTL to a tarball in R2, then deletes the Sprite; restore from archive; per-org budget alerts from usage'
+      - 'A Cron Trigger archives workspaces idle longer than the TTL (default 14 days): it makes sure a final backup exists in R2, deletes the sandbox and prunes all other backups; restoring an archive = restoreBackup into a new sandbox; per-org budget alerts from usage; tests fire the scheduled handler with the WorkspaceControl fake'
+      - 'Leader-run on the deployed preview env (backup/restore needs FUSE): `cargo run -p cli -- e2e reaper --env preview` archives a workspace with a 1-minute TTL and restores it'
     verify:
       - 'cargo test -p hub --test reaper'
+      - 'cargo run -p cli -- e2e reaper --env preview'
 
   - id: M4-010
-    title: 'Exfiltration E2E + threat model doc'
+    title: 'Exfiltration E2E against the outbound handler + threat model doc'
     milestone: M4
     phase: P4
     risk: high
+    owner: leader
     deps: [M4-002, M4-004]
     paths:
       - 'crates/cli/src/e2e/exfil*'
       - 'docs/security/threat-model.md'
     context:
       - 'docs/PLAN-v2-ade.md §4.8'
-      - 'docs/spikes/connectors.md'
+      - 'docs/spikes/sandbox-egress.md'
     acceptance:
-      - "Harness user sees only its workspace's connectors; other workspace connector → 403; non-allowlisted DNS refused; raw IP fails; sidecar files unreadable by harness user"
+      - 'Leader-run on the deployed preview env (needs M0-018 and M0-020)'
+      - 'As the harness user inside a sandbox: non-allowlisted hosts are refused by the outbound handler and logged; raw-IP requests fail; another workspace credential is never injected (its path prefix → 403); write channels not on the allowlist (gist create, package publish) are blocked; the injected key is not readable from env, files or /proc; the runner state directory is unreadable by the harness user'
+      - 'docs/security/threat-model.md covers prompt injection, plugins, hub↔runner tunnel auth, credential injection scope and BYO-agent SSRF (§4.8 item 6)'
     verify:
-      - 'SMOKE_KEEP=0 cargo run -p cli -- e2e exfil'
+      - 'cargo run -p cli -- e2e exfil --env preview'
+      - 'test -s docs/security/threat-model.md'
 
   - id: M4-011a
     title: 'client: checkpoint timeline UI'
@@ -2476,7 +2604,7 @@ items:
       - 'cargo test -p client-gpui --test files'
 
   - id: M4-011d
-    title: 'client: preview + Sprite lifecycle panel'
+    title: 'client: preview + sandbox lifecycle panel'
     milestone: M4
     phase: P4
     lane: client
@@ -2485,35 +2613,34 @@ items:
       - 'crates/client-gpui/src/workspace/preview*'
       - 'crates/client-gpui/src/workspace/lifecycle*'
     context:
-      - 'apps/mobile/app/sprites.tsx (v1 lifecycle)'
       - 'crates/client-gpui/CONVENTIONS.md'
       - 'docs/vendor/gpui-component-<rev>/INDEX.md (tabs example)'
-      - 'docs/PLAN-v2-ade.md §3 (surface 4: preview, lifecycle)'
+      - 'docs/PLAN-v2-ade.md §3 (surface 4: preview, lifecycle), §4.3 (Workspace lifecycle: Instance size, Limits & cost)'
     acceptance:
-      - 'Signed preview opened in system browser + QR; sleep/wake/delete, storage, memory, cost'
+      - 'Signed preview opened in the system browser + QR; sleep/wake/delete; instance size (lite … standard-4) and disk; cost from container usage'
     verify:
       - 'cargo test -p client-gpui --test preview_lifecycle'
 
   - id: M4-011e
-    title: 'client: connectors, policies and egress screens'
+    title: 'client: credentials, egress allowlist and denied-domain screens'
     milestone: M4
     phase: P4
     lane: client
     deps: [M4-004, M3-002]
     paths:
-      - 'crates/client-gpui/src/settings/connectors*'
+      - 'crates/client-gpui/src/settings/credentials*'
       - 'crates/client-gpui/src/workspace/policy*'
     context:
       - 'docs/PLAN-v2-ade.md §3 (surface 6), §4.7'
       - 'crates/client-gpui/CONVENTIONS.md'
       - 'docs/vendor/gpui-component-<rev>/INDEX.md (table example)'
     acceptance:
-      - 'Add/remove connectors (OAuth via system browser); allowlist editor as diff; effective egress + denied-domain log'
+      - 'Set/rotate/test model keys and service credentials with their hostname + path scope (M4-004); allowlist editor shown as a diff; effective egress + denied-domain log'
     verify:
       - 'cargo test -p client-gpui --test settings'
 
   - id: M2B-016
-    title: 'Handoff: Continue in cloud (local → Sprite workspace)'
+    title: 'Handoff: Continue in cloud (local → sandbox workspace)'
     milestone: M4
     phase: P4
     size: M
@@ -2523,13 +2650,16 @@ items:
       - 'crates/runner/src/handoff/**'
       - 'crates/hub/src/handoff/**'
       - 'crates/hub/tests/handoff_up.rs'
+      - 'crates/cli/src/e2e/handoff*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.10 (Handoff)'
+      - 'docs/PLAN-v2-ade.md §4.10 (Handoff), §4.3 (Workspace lifecycle: Fork)'
       - 'Claude Code session JSONL location (~/.claude/projects)'
     acceptance:
-      - 'Git bundle + uncommitted patch uploaded to R2; the hub creates/forks a workspace and applies them; portable harness sessions copied + session/load, otherwise transcript summary + plan injected; the same thread continues'
+      - 'Git bundle + uncommitted patch uploaded to R2; the hub creates a sandbox workspace (M4-002), or restores a backup into a new sandbox (M4-005), and applies them; portable harness sessions copied + session/load, otherwise transcript summary + plan injected; the same thread continues; hub tests use the WorkspaceControl fake'
+      - 'Leader-run on the deployed preview env (backup restore needs FUSE): `cargo run -p cli -- e2e handoff --env preview` continues a local acp-mock session in a sandbox'
     verify:
       - 'cargo test -p hub --test handoff_up'
+      - 'cargo run -p cli -- e2e handoff --env preview'
 
   - id: M2B-017
     title: 'Handoff: Pull to my computer (cloud → local)'
@@ -2545,7 +2675,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.10 (Handoff)'
       - 'crates/runner/src/handoff (M2B-016)'
     acceptance:
-      - 'Fetches branch + patch into a new local worktree, resumes conversation locally, cloud workspace optionally slept'
+      - 'Fetches branch + patch into a new local worktree, resumes the conversation locally; the cloud sandbox is optionally stopped'
     verify:
       - 'cargo test -p hub --test handoff_down'
       - 'cargo test -p runner --test handoff_pull'
@@ -2605,7 +2735,7 @@ items:
       - 'manifest/claude-settings (v1 layout)'
       - 'docs/PLAN-v2-ade.md §4.6'
     acceptance:
-      - 'Snapshot of rendered tree (skills, commands, agents, hooks, MCP, plugins passthrough, gateway base URL)'
+      - 'Snapshot of rendered tree (skills, commands, agents, hooks, MCP, plugins passthrough; the model key is a placeholder env var because the outbound handler injects the real one)'
       - 'The v1 manifest is reproduced as the default Loadout, which includes the fleet MCP server (M5C-011) for managed agents'
     verify:
       - 'cargo test -p loadout --test render_claude'
@@ -2678,7 +2808,7 @@ items:
       - 'cargo test -p loadout --test render_gemini_goose'
 
   - id: M5-007
-    title: 'MCP injection via session/new + connector auth + native fallback'
+    title: 'MCP injection via session/new + outbound-handler auth + native fallback'
     milestone: M5
     phase: P5
     deps: [M5-001, M4-004]
@@ -2689,7 +2819,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.6 (MCP)'
       - 'https://agentclientprotocol.com/protocol/session-setup (mcpServers)'
     acceptance:
-      - 'mcpServers passed; remote MCP via custom_api connector; OAuth/DCR servers flagged unsupported'
+      - 'mcpServers passed; remote MCP bearer auth injected by the outbound handler (an M4-004 credential bound to the MCP hostname), never written into the harness config; OAuth/DCR servers flagged unsupported'
     verify:
       - 'cargo test -p sidecar --test mcp'
 
@@ -2735,10 +2865,10 @@ items:
       - 'crates/netprofile/src/public*'
       - 'crates/netprofile/tests/public.rs'
     context:
-      - 'docs/PLAN-v2-ade.md §4.7'
-      - 'https://docs.fly.io/sprites/api (network policy)'
+      - 'docs/PLAN-v2-ade.md §4.7, §4.3 (Workspace lifecycle: Egress)'
+      - 'workers/workspace/src/outbound* (M4-004 allowlist format)'
     acceptance:
-      - 'Profile → Sprites network policy rules (explicit allowlist); denied-domain log parsing'
+      - 'Profile → Workspace DO egress config (`enableInternet: false` + explicit hostname allowlist for the outbound handler); the denied-host log is parsed into the egress view model'
     verify:
       - 'cargo test -p netprofile --test public'
 
@@ -2792,9 +2922,9 @@ items:
       - 'docs/PLAN-v2-ade.md §4.7 (cloudflare-tunnel and gateway rows)'
       - 'https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/'
     acceptance:
-      - 'docs/networking/cloudflare-tunnel.md: run cloudflared on the private network, protect the hostnames with Access service tokens, allowlist them in the Sprite network policy'
-      - 'netprofile `cloudflare-tunnel` profile renders the allowlist plus a custom_api connector that injects the CF-Access-Client-Id/Secret headers (the token never enters the Sprite); snapshot test'
-      - 'Fallback gateway image for non-HTTP protocols (mTLS CONNECT proxy, tailnet/WireGuard hop) built in CI by gateway.yml; `gateway/build.sh --dry-run` validates the config and prints the build plan without a docker daemon'
+      - 'docs/networking/cloudflare-tunnel.md: run cloudflared on the private network, protect the hostnames with Access service tokens, add them to the workspace egress allowlist'
+      - 'netprofile `cloudflare-tunnel` profile renders the allowlist plus an outbound-handler credential rule (M4-004) that attaches the CF-Access-Client-Id/Secret headers, so the service token never enters the sandbox; snapshot test'
+      - 'The fallback gateway for non-HTTP protocols (mTLS CONNECT proxy, tailnet/WireGuard hop) is a Cloudflare Container: gateway/Dockerfile + gateway/wrangler.jsonc, built and deployed in CI by gateway.yml; `gateway/build.sh --dry-run` validates the config and prints the build plan without a docker daemon'
     verify:
       - 'cargo test -p netprofile --test cloudflare'
       - 'test -s docs/networking/cloudflare-tunnel.md'
@@ -2835,7 +2965,7 @@ items:
       - 'cargo test -p hub --test delegation'
 
   - id: M5-015
-    title: 'Usage/cost dashboard (billing token)'
+    title: 'Usage/cost dashboard (Cloudflare container usage + model spend)'
     milestone: M5
     phase: P5
     lane: client
@@ -2845,11 +2975,13 @@ items:
       - 'crates/client-gpui/src/usage/**'
       - 'crates/hub/tests/usage.rs'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Tokens: billing)'
-      - 'Sprites /v1/usage (reserved_memory_byte_sec)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Workspace lifecycle: Limits & cost), §4.2 (D1 usage rollups)'
+      - 'https://developers.cloudflare.com/analytics/graphql-api/ (Containers datasets)'
       - 'crates/client-gpui/CONVENTIONS.md'
+      - 'docs/vendor/gpui-component-<rev>/INDEX.md (table example)'
     acceptance:
-      - 'Daily rollups per workspace/agent/model from usage + connector usage; chart'
+      - 'Daily rollups per workspace/agent/model in D1 usage_rollups from Cloudflare container usage (GraphQL Analytics API behind a trait, faked in tests) plus model spend from StateDelta{usage}; chart in the client'
+      - 'The GraphQL Analytics API needs Account Analytics Read on the API token; if the token lacks it the leader sets this item blocked_on human with that howto'
     verify:
       - 'cargo test -p hub --test usage'
 
@@ -3004,7 +3136,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.9 (run, judge)'
       - 'crates/flow/src/engine'
     acceptance:
-      - 'run executes through a WorkspaceExec trait (Sprites exec in production, a local-process fake in tests) and returns exit_code/stdout/stderr (truncated, redacted)'
+      - 'run executes through a WorkspaceExec trait (runner exec over the tunnel in production, for local and sandbox workspaces alike; a local-process fake in tests) and returns exit_code/stdout/stderr (truncated, redacted)'
       - 'judge enforces the {verdict, notes} schema and drives a loop in a test'
     verify:
       - 'cargo test -p flow --test step_run_judge'
@@ -3028,23 +3160,27 @@ items:
       - 'cargo test -p flow --test step_human'
 
   - id: M5C-008
-    title: 'Workspace strategies: shared, worktree-per-branch, sprite-per-branch + merge step'
+    title: 'Workspace strategies: shared, worktree-per-branch, sandbox-per-branch + merge step'
     milestone: M5c
     phase: P6
     size: M
     risk: high
-    deps: [M5C-004, M4-005]
+    deps: [M5C-004, M4-005, M4-002]
     paths:
       - 'crates/flow/src/workspace/**'
       - 'crates/sidecar/src/worktree/**'
       - 'crates/flow/tests/workspace.rs'
+      - 'crates/cli/src/e2e/flow_branches*'
     context:
-      - 'docs/PLAN-v2-ade.md §4.9 (Workspace strategies), §4.3 (Fork = copy)'
-      - 'docs/spikes/checkpoint-fork.md'
+      - 'docs/PLAN-v2-ade.md §4.9 (Workspace strategies), §4.3 (Workspace lifecycle: Fork)'
+      - 'docs/spikes/sandbox-fork.md'
     acceptance:
-      - "worktree-per-branch creates git worktrees inside one Sprite and routes each branch's agent cwd there; merge step merges branches, conflicts become an agent or human step; sprite-per-branch respects admission control"
+      - "worktree-per-branch creates git worktrees inside one sandbox (or local folder) and routes each branch's agent cwd there; the merge step merges branches, and conflicts become an agent or human step"
+      - "sandbox-per-branch restores the parent's latest backup into a new sandbox per branch (WorkspaceControl fake in tests), counts against the account vCPU/memory admission (M4-002), and merges back through git bundles"
+      - 'Leader-run on the deployed preview env (backup/restore needs FUSE): `cargo run -p cli -- e2e flow-branches --env preview` forks two branches from one backup and merges them'
     verify:
       - 'cargo test -p flow --test workspace'
+      - 'cargo run -p cli -- e2e flow-branches --env preview'
 
   - id: M5C-009
     title: 'Budgets and guardrails across a flow run'
@@ -3058,7 +3194,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.9 (Guardrails)'
       - 'crates/hub/migrations (usage_rollups)'
     acceptance:
-      - 'USD (from a UsageSource trait: D1 usage_rollups + connector spend in production, a fake in tests), wall clock, task count and iterations checked before each step; exceeding stops the run with a clear reason; subflows draw from the parent budget'
+      - 'USD (from a UsageSource trait: D1 usage_rollups (container usage + model spend) in production, a fake in tests), wall clock, task count and iterations checked before each step; exceeding stops the run with a clear reason; subflows draw from the parent budget'
     verify:
       - 'cargo test -p flow --test budget'
 
@@ -3260,13 +3396,13 @@ items:
       - 'docs/PLAN-v2-ade.md §4.6 (Catalog), §4.8 item 5'
       - 'https://agentclientprotocol.com (ACP Registry)'
     acceptance:
-      - 'ACP registry, MCP registry, git sources; pinned versions; harness-native plugins only on read-only-connector workspaces'
+      - 'ACP registry, MCP registry, git sources; pinned versions; harness-native plugins only on workspaces whose injected credentials are all read-only'
     verify:
       - 'cargo test -p hub --test catalog'
 
   # ════════════════════════ M6 — ship ════════════════════════
   - id: M6-001
-    title: 'GitHub PR flow via connector'
+    title: 'GitHub PR flow via the outbound-handler GitHub credential'
     milestone: M6
     phase: P7
     deps: [M4-003]
@@ -3275,14 +3411,14 @@ items:
       - 'crates/hub/tests/github.rs'
     context:
       - 'docs/PLAN-v2-ade.md §3 (surface 9)'
-      - 'crates/hub/src/connectors (GitHub connector)'
+      - 'crates/hub/src/credentials (GitHub credential, M4-004)'
     acceptance:
       - 'Branch, push, open PR from a workspace; PR artifact; pr_opened notification'
     verify:
       - 'cargo test -p hub --test github'
 
   - id: M6-002
-    title: 'Provide a Fly app-scoped deploy token for promotion'
+    title: 'Provide a Cloudflare account-scoped deploy token for promotion'
     milestone: M6
     phase: P7
     owner: human
@@ -3290,12 +3426,12 @@ items:
     blocked_on: human
     deps: []
     acceptance:
-      - 'Hub can list Machines of the target app'
+      - "The hub's promote check reports the token valid for the target account (Cloudflare token verify endpoint) with Workers Scripts and Containers edit"
     verify: []
-    howto: "Create a Fly deploy token scoped to the promotion target app (`fly tokens create deploy -a <app>`); enter it in the app's org settings (stored encrypted). Record scopes (no secret) in docs/ops/fly-tokens.md."
+    howto: 'Create a Cloudflare API token scoped to the promotion target account (it may be a different account from the hub''s): Account → Workers Scripts Edit, Containers Edit (or "Cloudchamber"), Workers R2 Storage Edit and D1 Edit if the promoted service uses them; Zone → Workers Routes Edit only for a custom domain. Enter it in the app''s org settings (stored encrypted, M2-002). Record its scopes (no secret) in docs/ops/deploy-tokens.md. Never paste it into chat.'
 
   - id: M6-003
-    title: 'Promote workspace to a Fly app via Machines API'
+    title: 'Promote a workspace service to Cloudflare Workers/Containers via wrangler'
     milestone: M6
     phase: P7
     risk: high
@@ -3304,11 +3440,12 @@ items:
       - 'crates/hub/src/promote/**'
       - 'crates/hub/tests/promote.rs'
     context:
-      - 'docs/PLAN-v2-ade.md §4.3 (Promote)'
-      - 'https://fly.io/docs/machines/api/'
-      - 'docs/ops/secrets.md (Fly deploy token storage)'
+      - 'docs/PLAN-v2-ade.md §4.3 (Promote to production), §3 (surface 9)'
+      - 'https://developers.cloudflare.com/workers/wrangler/commands/#deploy'
+      - 'docs/ops/secrets.md (deploy token storage)'
     acceptance:
-      - 'Creates Machine, volume, secrets from the workspace service definition; dry-run diff shown first'
+      - "From the workspace's service definition, renders a wrangler config from a template (a Worker, plus a Container when the service needs one), shows the `wrangler deploy --dry-run` output as a diff first, then deploys with the org's deploy token (M6-002) from a promote job (CI or a promote container; the hub Worker itself never runs docker)"
+      - 'Tests use a fake wrangler runner and assert the token is passed only through the environment of that one deploy'
     verify:
       - 'cargo test -p hub --test promote'
 
