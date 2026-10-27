@@ -58,7 +58,7 @@ items:
       - 'Root Cargo.toml: `[workspace] members = ["crates/*"]`, resolver 2, shared [workspace.dependencies] (serde, serde_json, thiserror, anyhow, tracing; tokio, axum, reqwest for native crates only); `[profile.dev] debug = "line-tables-only"` and `[profile.dev.package."*"] opt-level = 1`'
       - '.cargo/config.toml links x86_64-unknown-linux-gnu with lld (`-C link-arg=-fuse-ld=lld`); rust-toolchain.toml pins stable with rustfmt, clippy and targets x86_64-unknown-linux-musl, wasm32-unknown-unknown, wasm32-wasip2'
       - 'Crates exist with one trivial test each: protocol (src/{turn_event,acp,a2a,agui,tunnel,mapping}/mod.rs stubs, schemas/), runner (bin `sm`), sidecar (library; src/{acp,bridge,store,host,keepalive,checkpoint,preview}/mod.rs stubs), hub (src/do/mod.rs stub), a2a-edge, agui-edge, loadout (src/render/mod.rs stub), netprofile, plugin-host, flow, fleet-mcp, acp-mock, agui-fixture, acp-bridge, client-core, cli, and client-gpui with src/{shell,compose,inbox,task,diff,approval,agents,notify,palette,workspace,settings,machines,local,flows,loadout,usage}/mod.rs stubs'
-      - '`hub` builds for wasm32-unknown-unknown and has no tokio anywhere in its dependency tree'
+      - '`hub` builds for wasm32-unknown-unknown and has no tokio runtime (tokio only via `worker`, no features; scripts/check-no-tokio-runtime.sh)'
       - 'web/ exists as a plain directory (README.md placeholder), not a crate'
       - 'rust.yml (push/PR to v2): ubuntu job runs fmt --check, clippy -D warnings, test, and the wasm32 hub build; a macos-latest job runs `cargo test --workspace`; no database service; legacy TS CI untouched'
     verify:
@@ -66,7 +66,7 @@ items:
       - 'cargo clippy --workspace --all-targets -- -D warnings'
       - 'cargo test --workspace'
       - 'cargo build -p hub --target wasm32-unknown-unknown'
-      - '! cargo tree -p hub --target wasm32-unknown-unknown -e normal | grep -q tokio'
+      - bash scripts/check-no-tokio-runtime.sh hub
       - 'test -d web && test -f crates/client-gpui/src/usage/mod.rs'
       - 'grep -q macos-latest .github/workflows/rust.yml'
 
@@ -500,7 +500,8 @@ items:
     milestone: M0
     phase: P0
     priority: 1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 7e1a66a; verify: spikes/cf/test.sh ALL PASSED on leader re-run (no leftover wrangler), doc present; bundle gzip 147,705 B; criterion 1 reworded to no tokio runtime (worker 0.8.7 requires feature-less tokio)"
     assignee: "worker:opus"
     attempt: 1
     risk: high
@@ -513,7 +514,7 @@ items:
       - 'https://github.com/cloudflare/workers-rs (http feature, axum example, Durable Objects)'
       - 'https://developers.cloudflare.com/durable-objects/best-practices/websockets/'
     acceptance:
-      - 'spikes/cf is a standalone Cargo project (not a workspace member): workers-rs with the `http` feature + axum router builds for wasm32-unknown-unknown via worker-build; no tokio'
+      - 'spikes/cf is a standalone Cargo project (not a workspace member): workers-rs with the `http` feature + axum router builds for wasm32-unknown-unknown via worker-build; no tokio runtime (tokio only via `worker`, no features)'
       - 'A Durable Object with SQLite storage persists a counter across requests and accepts a hibernatable WebSocket (echo); D1 query and R2 put/get work through bindings'
       - 'spikes/cf/test.sh starts `wrangler dev --local` on a free port, exercises every route (HTTP + WebSocket via a small node script), and always stops wrangler'
       - 'docs/spikes/cloudflare.md records: gzip bundle size of the Worker, build time, and the limits that matter (bundle size, DO storage, WebSocket message size, D1 database size, CPU time) with sources, plus any workers-rs gaps (e.g. D1 binding maturity)'
@@ -1285,7 +1286,7 @@ items:
       - 'docs/spikes/cloudflare.md'
       - 'https://github.com/cloudflare/workers-rs (http feature + axum example)'
     acceptance:
-      - '`cargo build -p hub --target wasm32-unknown-unknown` and `worker-build --release` succeed; no tokio in the hub dependency tree; Worker/DO glue is behind cfg(target_arch = "wasm32") so `cargo test -p hub` builds and runs natively'
+      - '`cargo build -p hub --target wasm32-unknown-unknown` and `worker-build --release` succeed; no tokio runtime in the hub (`bash scripts/check-no-tokio-runtime.sh hub`); Worker/DO glue is behind cfg(target_arch = "wasm32") so `cargo test -p hub` builds and runs natively'
       - 'wrangler.toml declares THREAD, MACHINE and FLOW Durable Object bindings (SQLite-backed, with a migrations tag), D1 `DB` (migrations_dir = migrations), R2 `BLOBS`, Queue producers/consumers, Static Assets bound to the repo web/ directory, and dev vars'
       - 'axum router: GET /healthz (build info), JSON 404 for unknown routes, request id + structured logs; replaces the MVP-000 hub stub router and `cargo run -p cli -- e2e tracer` stays green'
       - 'scripts/hub-test.sh <name> builds the Worker, applies local D1 migrations, starts `wrangler dev --local --test-scheduled` on a free port, waits for /healthz, runs `cargo test -p hub --test <name>` with HUB_URL set, and always stops wrangler'
@@ -3103,7 +3104,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.9 (Guardrails), §4.2 (Flow DO row), §1.2 (Flow run row)'
       - 'https://developers.cloudflare.com/durable-objects/api/alarms/'
     acceptance:
-      - 'crates/flow is runtime-agnostic (no tokio): a pure state machine over flow_runs / flow_steps(run_id, step_id, iteration, status, output, idempotency_key) kept in the Flow DO SQLite storage'
+      - 'crates/flow is runtime-agnostic (no tokio runtime): a pure state machine over flow_runs / flow_steps(run_id, step_id, iteration, status, output, idempotency_key) kept in the Flow DO SQLite storage'
       - 'Sequential + branch steps execute through a StepRunner trait; timers, timeouts and retries use DO alarms; restarting `wrangler dev` mid-step resumes without re-running completed steps'
       - 'Cancel cascades to running steps; pause/resume'
     verify:

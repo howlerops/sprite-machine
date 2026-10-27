@@ -224,7 +224,8 @@ each Cloudflare Sandbox (`sandbox`). A `HostMode` trait swaps only what differs 
 ### 4.2 Hub on Cloudflare
 
 The hub is a **Rust Worker** (`workers-rs`, axum through the `http` feature,
-compiled to wasm32). There is **no tokio** on Workers, so the `hub` crate and
+compiled to wasm32). There is **no tokio runtime** on Workers (workers-rs links tokio only for
+its I/O traits, with no features; `scripts/check-no-tokio-runtime.sh` enforces this), so the `hub` crate and
 everything it uses (`protocol`, shared logic) are **runtime-agnostic**. Anything
 that needs a full Linux runtime runs in **Cloudflare Containers**. Cloud workspaces are Sandboxes driven by the TypeScript **Workspace DO** (§4.3), bound into the Rust Worker.
 
@@ -637,7 +638,7 @@ crates/
   protocol/      turn_event/, acp/, a2a/, agui/, tunnel/, mapping/ (golden tests), schemas/
   runner/        `sm` binary: host modes (local, sandbox), tunnel client, TUI, pairing, server mode
   sidecar/       runner core library: acp/, bridge/, store/, keepalive/, checkpoint/, preview/
-  hub/           Cloudflare Worker (wasm32, no tokio): routes, DOs (thread, machine, flow), D1, R2, queues
+  hub/           Cloudflare Worker (wasm32, no tokio runtime): routes, DOs (thread, machine, flow), D1, R2, queues
   a2a-edge/      A2A 1.0 client (BYO in) + server (our agents/flows out)
   agui-edge/     AG-UI 1.0 adapter for third-party UIs
 workers/workspace/  TypeScript Workspace DO (@cloudflare/sandbox): lifecycle, backups, outbound handler
@@ -657,7 +658,7 @@ gateway/  spikes/  scripts/  manifest/ (→ default Loadout)
 ## 7. Open questions / risks
 
 1. **One account**: Cloudflare (needed from P2 to deploy; P4 for sandboxes; a model API key in Secrets Store for P4). P0–P1 need nothing.
-2. **Workers constraints**: no tokio, wasm bundle size, DO/D1 limits; the `workers-rs` D1 binding is marked alpha. Spike M0-017 confirms these early. Fallback: put the D1 work behind a "directory" DO, or move heavy routes to a Container.
+2. **Workers constraints**: no tokio runtime, wasm bundle size, DO/D1 limits; the `workers-rs` D1 binding is marked alpha. Spike M0-017 confirms these early. Fallback: put the D1 work behind a "directory" DO, or move heavy routes to a Container.
 3. **gpui-kit mobile** is experimental. The interim mobile web page de-risks the phone. Native mobile is decided on devices in P7 by the gates (default: hybrid with Flutter if a hard gate fails).
 4. **GPUI for Haiku workers**: the API is pre-1.0 and fast-moving (gpui-component 0.8.1 was published 2026-10-26). Mitigations:
    - vendored examples + `CONVENTIONS.md`;

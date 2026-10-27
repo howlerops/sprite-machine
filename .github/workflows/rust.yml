@@ -25,8 +25,8 @@ jobs:
       - run: cargo test --workspace
       - name: Hub builds for wasm32
         run: cargo build -p hub --target wasm32-unknown-unknown
-      - name: No tokio in the hub
-        run: '! cargo tree -p hub --target wasm32-unknown-unknown -e normal | grep -q tokio'
+      - name: No tokio runtime in the hub
+        run: bash scripts/check-no-tokio-runtime.sh hub
 
   macos:
     runs-on: macos-latest
