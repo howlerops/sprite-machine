@@ -1,0 +1,86 @@
+# Client-stack gates (M1B-003). Written BEFORE any prototype; prototypes are judged against
+# this file, never the other way round. Plan: docs/PLAN-v2-ade.md §4.4 (Decision process).
+# ADR: docs/adr/0001-client-stack-gates.md. Benchmarks: M1B-008. Decisions: M1B-009 (desktop),
+# M1B-011 (mobile). Changing a threshold after a prototype exists needs a new ADR.
+version: 1
+
+candidates:
+  - id: gpui-kit
+    desc: gpui-component (Longbridge) on GPUI, desktop + experimental mobile
+  - id: flutter
+    desc: Flutter AOT on all five platforms; Rust client-core via flutter_rust_bridge
+  - id: hybrid
+    desc: gpui-kit desktop + Flutter mobile over the shared Rust client-core
+
+# Common workload for every numeric gate unless a gate says otherwise:
+# the agui-fixture (M1B-002) task screen: 10k-event transcript streaming at 200 events/s,
+# a 5k-line diff open, a terminal receiving output, and one pending approval card.
+workload:
+  fixture: crates/agui-fixture
+  events_per_second: 200
+  transcript_events: 10000
+  diff_lines: 5000
+  runs: 5 # report the median of 5 runs; p95 is computed within each run
+
+numeric:
+  - id: frame_time_p95
+    desc: p95 frame time while streaming at 200 ev/s and scrolling the transcript
+    unit: ms
+    max: { iphone: 16.7, android: 20.0, desktop_linux: 16.7, desktop_macos: 16.7 }
+    devices: [iphone, android, desktop_linux, desktop_macos]
+  - id: key_to_glyph_p95
+    desc: p95 latency from a hardware key event to the glyph painted in the composer
+    unit: ms
+    max: { all: 60 }
+    devices: [iphone, android, desktop_linux, desktop_macos]
+  - id: cold_start
+    desc: process start to first interactive frame of the inbox (cached data, no network)
+    unit: s
+    max: { iphone: 1.5, android: 2.5, desktop_linux: 1.5, desktop_macos: 1.5 }
+    devices: [iphone, android, desktop_linux, desktop_macos]
+  - id: rss_peak
+    desc: peak resident memory during the common workload
+    unit: MB
+    max: { all: 300 }
+    devices: [iphone, android, desktop_linux, desktop_macos]
+  - id: binary_size
+    desc: release artifact size (IPA thinned for one device / universal APK split per ABI / desktop binary stripped)
+    unit: MB
+    max: { ipa: 50, apk: 50, desktop: 80 }
+    devices: [iphone, android, desktop_linux, desktop_macos]
+
+# Hard gates: pass/fail, each checked by a human on a physical device (M1B-010) unless
+# `desktop_only` or `ci` says otherwise. Any failure on gpui-kit mobile => hybrid (rule below).
+hard:
+  - { id: ime_japanese, desc: 'Japanese IME composition (romaji -> kana -> kanji) with marked text, candidate window, commit', platforms: [ios, android, macos, windows, linux] }
+  - { id: ime_chinese, desc: 'Chinese Pinyin IME composition with candidate selection', platforms: [ios, android, macos, windows, linux] }
+  - { id: autocorrect, desc: 'System autocorrect and suggestion bar work in the composer and can be undone', platforms: [ios, android] }
+  - { id: dictation, desc: 'System dictation inserts text into the composer', platforms: [ios, android, macos] }
+  - { id: image_paste, desc: 'Paste an image from the clipboard into the composer as an attachment', platforms: [ios, android, macos, windows, linux] }
+  - { id: hardware_keyboard, desc: 'Hardware keyboard: Cmd/Ctrl+Enter sends, arrow keys and Tab move focus, shortcuts listed', platforms: [ios, android, macos, windows, linux] }
+  - { id: screen_reader_approval, desc: 'VoiceOver (iOS/macOS) and TalkBack (Android) read an approval card (title, diff summary, time left) and activate Allow/Deny', platforms: [ios, android, macos] }
+  - { id: dynamic_type_200, desc: 'Dynamic Type / font scale 200%: task view and approval card reflow without clipping or overlap', platforms: [ios, android] }
+  - { id: background_resume, desc: '10 min in background, then foreground: catch-up from ?after=seq with no duplicate or missing events', platforms: [ios, android] }
+  - { id: push_tap_killed, desc: 'Push notification tap from a killed app opens the right task with the approval visible', platforms: [ios, android] }
+  - { id: stacked_screens, desc: 'Native stacked navigation: inbox -> task -> diff -> back gesture, state preserved', platforms: [ios, android] }
+  - { id: testflight_upload, desc: 'A release build uploaded to TestFlight is accepted (processing completes, installable)', platforms: [ios] }
+
+rules:
+  desktop_and_mobile_separately: >-
+    The desktop stack (M1B-009, Linux + macOS, no phones needed) and the mobile stack
+    (M1B-011, physical devices) are decided separately.
+  default_to_hybrid: >-
+    Any hard-gate failure of gpui-kit on iOS or Android => mobile is Flutter (hybrid), with no
+    further debate. Flutter is rejected only if it fails the same gate. A numeric miss of more
+    than 25% counts as a hard-gate failure; a smaller miss is recorded and weighed in the ADR.
+  desktop_default: >-
+    gpui-kit is the desktop default; it is replaced only if it fails a desktop hard gate or a
+    desktop numeric gate by more than 25% that cannot be fixed within the P1 spike items.
+  version_pin: >-
+    Measurements are only valid for the pinned versions recorded with them: gpui and
+    gpui-component git revs (GPUI-000, root Cargo.toml), Flutter SDK version (M1B-006), and
+    flutter_rust_bridge version. A version bump invalidates earlier numbers for that candidate;
+    re-run M1B-008 before deciding.
+  evidence: >-
+    Every result is stored as spikes/bench/results/<candidate>/<device>/<gate>.json with the
+    pinned versions, device model, OS version, date and raw samples.
