@@ -76,6 +76,10 @@ items:
     phase: P0
     lane: docs
     priority: 1
+    status: "done"
+    evidence: "merged ba99e20; verify: 3/3 pass (61 JSON files); validate.py: 32 examples valid, 3 negative cases rejected"
+    assignee: "leader"
+    attempt: 1
     owner: leader
     deps: [M0-002]
     paths:
@@ -100,6 +104,10 @@ items:
     phase: P0
     lane: docs
     priority: 1
+    status: "done"
+    evidence: "merged 24908dd; verify: 2/2 pass; 14 JSON frame examples parse"
+    assignee: "leader"
+    attempt: 1
     owner: leader
     deps: [SPEC-001]
     paths:
@@ -153,6 +161,9 @@ items:
     phase: P0
     lane: client
     priority: 1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     deps: [M0-002]
     paths:
       - 'scripts/setup-dev.sh'
@@ -221,6 +232,9 @@ items:
     milestone: M0
     phase: P0
     priority: 1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     deps: [M0-002]
     paths:
       - 'crates/protocol/src/acp/**'

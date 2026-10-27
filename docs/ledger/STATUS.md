@@ -2,15 +2,15 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 5/187 (3 dropped) · in-flight — · blocked 9 (human: M0-014, M0-019, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 1/120
+done 7/187 (3 dropped) · in-flight M0-003,M0-006 · blocked 9 (human: M0-014, M0-019, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 5/120
 
-Run 1 (leader session 2026-10-27). Next: SPEC-001, SPEC-002 (leader), then P0 fan-out.
+Batch 1: M0-003 + M0-006 assigned. Leader does M1B-003 meanwhile.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
-| P0 | 12 | 1 | 0 |
+| P0 | 12 | 3 | 2 |
 | P1 | 25 | 0 | 0 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 0 | 0 |
@@ -24,11 +24,11 @@ Run 1 (leader session 2026-10-27). Next: SPEC-001, SPEC-002 (leader), then P0 fa
 | Item | Owner | Lane | Status | Title |
 | ---- | ----- | ---- | ------ | ----- |
 | M0-002 | leader | rust | done | Cargo workspace skeleton (all crates incl. client-gpui, runner, edges; web/) + Rust CI incl. macos-latest |
-| SPEC-001 | leader | docs | todo | Spec: TurnEvent envelope (docs/specs/turn-event.md + JSON Schemas) |
-| SPEC-002 | leader | docs | todo | Spec: runner ↔ hub tunnel (docs/specs/tunnel.md) |
+| SPEC-001 | leader | docs | done | Spec: TurnEvent envelope (docs/specs/turn-event.md + JSON Schemas) |
+| SPEC-002 | leader | docs | done | Spec: runner ↔ hub tunnel (docs/specs/tunnel.md) |
 | MVP-000 | worker | rust | todo | Tracer bullet: acp-mock → runner core → tunnel → hub on wrangler dev → headless client |
-| M0-003 | worker | client | todo | Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build) |
-| M0-006 | worker | rust | todo | protocol::acp — re-export ACP v1 schema from the official Rust SDK (agent-client-protocol 3.x) |
+| M0-003 | worker | client | assigned | Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build) |
+| M0-006 | worker | rust | assigned | protocol::acp — re-export ACP v1 schema from the official Rust SDK (agent-client-protocol 3.x) |
 | M0-017 | worker | rust | todo | Spike: Cloudflare Workers (workers-rs + axum, SQLite DO + hibernatable WebSocket, D1, R2) under wrangler dev |
 | M1A-002 | worker | rust | todo | acp-mock: scriptable ACP v1 agent |
 | GPUI-000 | leader | client | todo | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |

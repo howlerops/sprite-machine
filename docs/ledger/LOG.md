@@ -8,3 +8,7 @@
 2026-10-27T20:19Z ledger rev 6: all Cloudflare (Sprites → Cloudflare Sandboxes via a TS Workspace DO); dropped M0-001/012/016, added M0-020 (model key in Secrets Store), retargeted M0-008a/b/c, sandbox spikes M0-009/010/011/013/015, M1A-010/011/012/016/017, M2B-003/016, M4-_, M5-_/M5C-008, M6-002/003; 186 → 187 items (184 open)
 2026-10-27T22:11Z leader: reconcile — no orphaned items; M0-018 blocked→done (Cloudflare secrets present, wrangler whoami + containers list OK)
 2026-10-27T22:11Z M0-002 todo→done merged 738d66e (17 crates, rust.yml with macos-latest)
+2026-10-27T22:18Z SPEC-001 todo→done merged ba99e20 (27 variants, 32 examples)
+2026-10-27T22:18Z SPEC-002 todo→done merged 24908dd
+2026-10-27T22:18Z M0-003 todo→assigned attempt 1 (haiku, client lane)
+2026-10-27T22:18Z M0-006 todo→assigned attempt 1 (haiku, rust lane)
