@@ -232,7 +232,8 @@ items:
     milestone: M0
     phase: P0
     priority: 1
-    status: "assigned"
+    status: "done"
+    evidence: "merged cb36372; verify: acp_roundtrip 10 passed (10 listed), clippy clean, hub wasm32 OK, no tokio; schema pinned =1.12.0 to match SDK 3.5"
     assignee: "worker:haiku"
     attempt: 1
     deps: [M0-002]
@@ -596,6 +597,9 @@ items:
     milestone: M1a
     phase: P0
     priority: 1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     deps: [M0-006]
     paths:
       - 'crates/acp-mock/**'

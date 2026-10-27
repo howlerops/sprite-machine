@@ -14,3 +14,5 @@
 2026-10-27T22:18Z M0-006 todo→assigned attempt 1 (haiku, rust lane)
 2026-10-27T22:20Z M1B-003 todo→done merged 84a8c7e
 2026-10-27T22:20Z M0-019 blocked→done (macos-latest job green on v2, run 40593841232)
+2026-10-27T22:32Z M0-006 assigned→done merged cb36372 (discovered work: SDK dep for the runner folds into M1A-003; schema-bump note kept in report; tokio/wasm guard already in rust.yml; no new items)
+2026-10-27T22:32Z M1A-002 todo→assigned attempt 1 (haiku, rust lane)
