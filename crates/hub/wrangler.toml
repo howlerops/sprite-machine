@@ -1,0 +1,21 @@
+# Hub Worker. MVP-000 tracer bullet: local only, run by `cargo run -p cli -- e2e tracer`
+# under `wrangler dev --local`. Never deployed from here.
+name = "sm-hub"
+main = "build/index.js"
+compatibility_date = "2026-10-01"
+
+[build]
+# The cli builds first with RUSTFLAGS unset and CARGO_PROFILE_RELEASE_STRIP=false
+# (`strip` breaks worker-build 0.8.7, see docs/spikes/cloudflare.md); wrangler dev reruns this
+# command with the same environment.
+command = "worker-build --release"
+
+# TRACER STUB: replaced by M2-008 / M2B-002 (Thread DO, Machine DO). One in-memory object
+# holds the whole tracer hub. SQLite class, as the real DOs need (a class cannot switch later).
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "TracerHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TracerHub"]

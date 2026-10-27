@@ -7,6 +7,8 @@ pub mod host;
 pub mod keepalive;
 pub mod preview;
 pub mod store;
+pub mod tracer;
+pub mod tracer_mapping;
 
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");

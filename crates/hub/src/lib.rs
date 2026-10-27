@@ -2,6 +2,7 @@
 
 #[path = "do/mod.rs"]
 pub mod durable_objects;
+pub mod tracer;
 
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
