@@ -1,0 +1,11 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "plan",
+    "entries": [
+      { "content": "Read the failing test", "priority": "high", "status": "completed" },
+      { "content": "Fix the trailing newline handling", "priority": "high", "status": "in_progress" },
+      { "content": "Run the parser test suite", "priority": "medium", "status": "pending" }
+    ]
+  }
+}

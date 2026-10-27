@@ -1,0 +1,7 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": { "type": "text", "text": "The parser probably drops the trailing newline." }
+  }
+}

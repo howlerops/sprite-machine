@@ -1,0 +1,11 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "call_001",
+    "title": "Read src/parser.rs",
+    "kind": "read",
+    "status": "in_progress",
+    "locations": [{ "path": "/workspace/src/parser.rs", "line": 42 }]
+  }
+}

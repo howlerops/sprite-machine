@@ -1,0 +1,7 @@
+{
+  "sessionId": "sess_7f3a",
+  "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": { "type": "text", "text": "I'll start by reading the failing test." }
+  }
+}

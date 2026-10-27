@@ -1,0 +1,13 @@
+{
+  "sessionId": "sess_7f3a",
+  "toolCall": {
+    "toolCallId": "call_002",
+    "title": "Run cargo test -p parser",
+    "kind": "execute",
+    "status": "in_progress"
+  },
+  "options": [
+    { "optionId": "allow_once", "name": "Allow once", "kind": "allow_once" },
+    { "optionId": "reject_once", "name": "Reject", "kind": "reject_once" }
+  ]
+}
