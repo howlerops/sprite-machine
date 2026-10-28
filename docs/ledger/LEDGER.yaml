@@ -2809,13 +2809,17 @@ items:
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     priority: 2
     deps: [M2-008]
     paths:
-      - crates/hub/src/threads/**
-      - crates/hub/.dev.vars
-      - scripts/hub-test.sh
-      - crates/hub/tests/thread_hardening.rs
+      - "crates/hub/src/threads/**"
+      - "crates/hub/.dev.vars"
+      - "scripts/hub-test.sh"
+      - "crates/cli/src/e2e/**"
+      - "crates/hub/tests/thread_hardening.rs"
     context:
       - 'docs/ledger/reports/M2-008.md (discovered work)'
       - 'docs/specs/turn-event.md §2 (redaction, size), §6 (catch-up)'
@@ -3236,6 +3240,9 @@ items:
     title: 'runner: workspace trust prompt + remote-terminal opt-in'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [M2B-007]
     paths:
       - 'crates/runner/src/trust/**'
@@ -3338,7 +3345,7 @@ items:
       - 'docs/PLAN-v2-ade.md §4.10 (Local environment)'
       - 'https://code.claude.com/docs/en/remote-control (attachments)'
     acceptance:
-      - 'Images passed as ACP image blocks; other files downloaded into .sm/attachments/ in the workspace and referenced as @paths; size cap; never outside the workspace'
+      - "Leader re-scope: the runner side exists (M1A-014: image blocks, .sm/attachments, size cap, SSRF guard) and the hub side (M2-009 signed R2 URLs). This item proves the path end to end: a phone-style client creates an attachment on the hub (POST /v1/attachments + PUT), sends a prompt with the FilePart, and the runner (sm rc against wrangler dev, with the test-only loopback FilePolicy) puts the file under .sm/attachments/ and the agent (acp-mock recorder) receives the @path / image block; a URL for another org is refused"
     verify:
       - 'cargo test -p runner --test files'
 

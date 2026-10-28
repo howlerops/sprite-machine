@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 84/242 (3 dropped) · in-flight M1A-006g,M2B-007b,WEB-001 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 80/120
+done 84/242 (3 dropped) · in-flight M1A-006g,M2B-007b,M2-008a,M2B-008,WEB-001 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 82/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 84/242 (3 dropped) · in-flight M1A-006g,M2B-007b,WEB-001 · blocked 12 (hu
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 59 | 31 | 3 |
+| P2 | 59 | 31 | 5 |
 | P3 | 20 | 1 | 0 |
 | P4 | 37 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -57,7 +57,7 @@ done 84/242 (3 dropped) · in-flight M1A-006g,M2B-007b,WEB-001 · blocked 12 (hu
 | M2B-005c | worker | rust | todo | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
 | M2-011a | worker | rust | todo | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
 | M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
-| M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
+| M2-008a | worker | rust | assigned | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | done | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
 | M2-011 | worker | rust | done | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
@@ -68,7 +68,7 @@ done 84/242 (3 dropped) · in-flight M1A-006g,M2B-007b,WEB-001 · blocked 12 (hu
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | done | runner: local harness discovery + local logins/MCP passthrough |
 | M2B-007 | worker | rust | done | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
-| M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |
+| M2B-008 | worker | rust | assigned | runner: workspace trust prompt + remote-terminal opt-in |
 | M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |
 | M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |
 | M2B-011a | worker | rust | done | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
