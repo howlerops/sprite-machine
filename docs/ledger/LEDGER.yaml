@@ -5400,7 +5400,8 @@ items:
     title: 'hub: regression tests that the access log never records the query string and that the Thread DO never sees ticket='
     milestone: M2
     phase: P4
-    status: "assigned"
+    status: "done"
+    evidence: "merged; wasm clippy clean, cargo test -p hub 326/0, live subscribe_ticket PASS on merged tree"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -6233,3 +6234,59 @@ items:
       - 'Any pair whose decoded key is ticket is dropped before forwarding; the pinned test flips to stripped'
     verify:
       - 'cargo test -p hub'
+
+  - id: M3-001m
+    title: 'client-core: step and subagent view models (StepStarted/Finished, SubagentStarted/Finished/Error) and a Raw item, so clients can render them'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-001b]
+    paths:
+      - 'crates/client-core/src/view/**'
+      - 'crates/client-core/tests/view_models.rs'
+    context:
+      - 'docs/ledger/reports/M3-008.md (blocked_on, Discovered work)'
+      - 'docs/specs/turn-event.md'
+    acceptance:
+      - 'Transcript/ThreadView keep steps and subagents (name, status, parent/child ids, error) and Raw events; tests apply every example and assert none is dropped'
+    verify:
+      - 'cargo test -p client-core'
+
+  - id: M3-008a
+    title: 'desktop task view: render steps, subagents and Raw (after M3-001m); flip known_gaps_are_still_gaps; expandable capped bodies'
+    milestone: M3
+    phase: P3
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-008, M3-001m]
+    paths:
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/tests/transcript.rs'
+      - 'crates/client-gpui/locales/**'
+    context:
+      - 'docs/ledger/reports/M3-008.md'
+    acceptance:
+      - 'All 32 TurnEvent examples render; capped tool/terminal/diff bodies expand on click; tests'
+    verify:
+      - 'cargo test -p client-gpui --test transcript'
+
+  - id: M3-008b
+    title: 'desktop task view: incremental row updates (no full rebuild per event), so the 200 events/s workload stays within the frame budget'
+    milestone: M3
+    phase: P3
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-008]
+    paths:
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/tests/transcript.rs'
+    context:
+      - 'docs/ledger/reports/M3-008.md (Limits)'
+    acceptance:
+      - 'Applying one event updates only the affected rows (test counts rebuilt rows); streaming the 10k fixture at 200 ev/s keeps per-frame layout under budget headlessly'
+    verify:
+      - 'cargo test -p client-gpui --test transcript'

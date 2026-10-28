@@ -271,3 +271,4 @@
 2026-10-28T22:36Z M2-003f attempt 2 back (sonnet): the hub was right; the live test signed in again with a different GitHub id (correctly refused). Test fixed + a refusal step added; worker oauth 11/11 → merged; leader re-run going
 2026-10-28T22:49Z M2-003f oauth 11/11 on merged tree → done
 2026-10-28T22:49Z M2-008i back (haiku): access_log path-only + ticket strip as pure fns with tests; percent-encoded key gap pinned → merged; added M2-008l (P4); verify running
+2026-10-28T22:55Z M2-008i verify green → done. M3-008 back (sonnet): virtualized transcript pane, 26/32 examples render (steps/subagents/Raw dropped by client-core), 10k fixture layout p95 1 ms headless → merged; verify running. Added M3-001m (client-core steps/subagents), M3-008a (render them, expandable bodies), M3-008b (incremental rows)
