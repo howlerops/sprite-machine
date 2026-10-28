@@ -376,7 +376,8 @@ items:
     title: 'workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest'
     milestone: M0
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 9e300d4; verify: npm ci + tsc strict + vitest 60 passed; dev-smoke OK (workerd exits ~2 s after the script, trap does not wait — nit for M0-008b)"
     assignee: "worker:sonnet"
     attempt: 1
     lane: ts
@@ -1237,6 +1238,9 @@ items:
     title: 'gpui spike: diff pane (gpui-kit editor)'
     milestone: M1b
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     lane: client
     deps: [M1B-004a]
     paths:

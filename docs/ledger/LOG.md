@@ -56,3 +56,5 @@
 2026-10-28T01:30Z leader: P0 phase review complete (docs/ledger/reviews/P0.md): clean rebuild, 129 tests, tracer, hub smoke, gpui spike, schemas all green; CI run 40612758905 green; no tag (plan §5 tags alpha.1 at P2)
 2026-10-28T02:03Z user: go-ahead to drive the ledger through all phases; worker models = haiku + sonnet only (no opus workers). SKILL.md, worker-brief.md and the ledger header updated; new lane ts:1 (M0-008a)
 2026-10-28T02:03Z P1 batch 1: M1A-006a (sonnet), M3-001 (haiku), M0-008a (sonnet, ts lane) assigned
+2026-10-28T02:11Z M0-008a assigned→done merged 9e300d4 (sonnet; SDK 1.0.3 has no getSandbox/exposePort — uses ctx.container + DirectoryBackup; wrangler.dev.jsonc workaround until M0-008c image exists)
+2026-10-28T02:11Z M1B-004b todo→assigned attempt 1 (haiku, client lane)

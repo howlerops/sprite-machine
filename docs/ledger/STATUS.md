@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 24/192 (3 dropped) · in-flight M0-008a,M1A-006a,M3-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 22/120
+done 25/192 (3 dropped) · in-flight M1A-006a,M1B-004b,M3-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 23/120
 
-P1 (Engine) running. Worker models: haiku + sonnet only.
+P1 running.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 30 | 7 | 3 |
+| P1 | 30 | 8 | 3 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -27,7 +27,7 @@ P1 (Engine) running. Worker models: haiku + sonnet only.
 | MVP-000c | worker | rust | todo | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
 | MVP-000b | worker | rust | done | CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2 |
 | SPEC-003 | leader | docs | done | Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage |
-| M0-008a | worker | ts | assigned | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
+| M0-008a | worker | ts | done | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
 | M0-008b | worker | rust | todo | hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests |
 | M1A-001 | worker | rust | done | sidecar (runner-core lib): config, tracing, /healthz server fn |
 | M1A-003 | worker | rust | done | sidecar (runner core): ACP client + session table (concurrency, pending tasks) |
@@ -38,7 +38,7 @@ P1 (Engine) running. Worker models: haiku + sonnet only.
 | M1A-009 | worker | rust | todo | Durable store (SQLite) + ACP session re-attach after restart |
 | M1A-013 | worker | rust | todo | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
 | M1A-014 | worker | rust | todo | Attachments: user FilePart → ACP image/resource blocks |
-| M1B-004b | worker | client | todo | gpui spike: diff pane (gpui-kit editor) |
+| M1B-004b | worker | client | assigned | gpui spike: diff pane (gpui-kit editor) |
 | M1B-004c | worker | client | todo | gpui spike: terminal pane (alacritty_terminal) |
 | M1B-004d | worker | client | todo | gpui spike: approval card + build release |
 | M1B-008 | worker | rust | todo | Benchmark scripts per gates.yaml |
