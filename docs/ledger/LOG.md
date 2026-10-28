@@ -101,3 +101,9 @@
 2026-10-28T04:47Z M1A-013 assigned→done merged 6f3f33b (haiku; hub sqlite.rs match arm accepted); added M2-008b (hub session route + acp-mock set_mode)
 2026-10-28T04:48Z M1A-014 paths += bridge/runtime.rs; assigned (haiku)
 2026-10-28T04:48Z M1B-008 lane → docs (scripts only, dry-run verify); assigned (haiku)
+2026-10-28T05:18Z M1A-004a assigned→done merged 9b8ca6f (sonnet; cap-std confinement, killpg escalation; worker's client-core clippy failure was shared-target staleness, not real)
+2026-10-28T05:18Z leader: shared target clobbered by concurrent worktree builds (hub wasm saw an older libprotocol); leader now verifies in a private target /home/user/.cargo-target-leader
+2026-10-28T05:18Z M1A-014 assigned→done merged 59a16f7 (haiku); added M1A-014a (bridge-level no-submit test, image sniffing)
+2026-10-28T05:18Z M1B-008 assigned→done merged 13a70f1 (haiku); added M1B-008a/b/c/d (spike instrumentation, workload, real run, xdotool); M1B-009 deps += M1B-008c
+2026-10-28T05:18Z M2B-002 merged (sonnet; out-of-path edits accepted: sidecar runtime.rs match arm — superseded by v2's permission.rs on merge — and d1_schema test); leader fixed semantic merge conflict c8d9b4d (SessionConfig arms in machines/core.rs). Added M2-008c, MVP-000d, M2B-002a
+2026-10-28T05:18Z M2B-004 paths += runner tracer.rs/lib/main + protocol Sender::from_parts; assigned (sonnet). M2B-011 assigned (haiku). M1B-008a assigned (haiku)

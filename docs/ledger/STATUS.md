@@ -2,19 +2,17 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 45/202 (3 dropped) · in-flight M1A-004a,M1A-014,M1B-004d,M1B-008,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 45/120
-
-P1 running.
+done 48/210 (3 dropped) · in-flight M1B-004d,M1B-008a,M2B-002,M2B-004,M2B-011 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 48/120
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 34 | 28 | 4 |
-| P2 | 27 | 1 | 1 |
+| P1 | 38 | 30 | 5 |
+| P2 | 30 | 2 | 0 |
 | P3 | 20 | 1 | 0 |
-| P4 | 32 | 0 | 0 |
+| P4 | 33 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
@@ -40,21 +38,25 @@ P1 running.
 | SPEC-002a | leader | docs | done | Spec: tunnel approval command carries every interrupt outcome (selected, submitted+data, declined, cancelled) |
 | M1A-009 | worker | rust | done | Durable store (SQLite) + ACP session re-attach after restart |
 | M1A-013 | worker | rust | done | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
-| M1A-014 | worker | rust | assigned | Attachments: user FilePart → ACP image/resource blocks |
+| M1A-014 | worker | rust | done | Attachments: user FilePart → ACP image/resource blocks |
+| M1A-014a | worker | rust | todo | Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME |
 | M1B-004b | worker | client | done | gpui spike: diff pane (gpui-kit editor) |
 | M1B-004c | worker | client | done | gpui spike: terminal pane (alacritty_terminal) |
 | M1B-004d | worker | client | review | gpui spike: approval card + build release |
-| M1B-008 | worker | docs | assigned | Benchmark scripts per gates.yaml |
+| M1B-008 | worker | docs | done | Benchmark scripts per gates.yaml |
+| M1B-008a | worker | client | assigned | gpui spike: bench hooks (fixture feed, BENCH_MARKER, frame and key-to-glyph JSONL) |
+| M1B-008b | worker | client | todo | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
+| M1B-008d | worker | docs | todo | scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver) |
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
 | M2-016 | worker | rust | done | hub: D1 schema + migrations (org-wide metadata) |
 | M2-003a | worker | rust | done | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
 | M2-008 | worker | rust | done | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
 | M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
 | M2B-001a | worker | rust | done | protocol: strict tunnel frame parsing + unknown command kind helper |
-| M2B-002 | worker | rust | assigned | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
+| M2B-002 | worker | rust | review | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
 | M2B-003 | worker | rust | done | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
-| M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
-| M2B-011 | worker | rust | todo | runner: local checkpoints as shadow git commits |
+| M2B-004 | worker | rust | assigned | runner: tunnel client with reconnect/backoff/resume |
+| M2B-011 | worker | rust | assigned | runner: local checkpoints as shadow git commits |
 | M3-001 | worker | rust | done | client-core: TurnEvent subscription client, view models, cache, outbound queue |
 | M3-001a | worker | rust | done | client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner |
 

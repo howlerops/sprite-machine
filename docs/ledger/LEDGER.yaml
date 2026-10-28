@@ -993,7 +993,8 @@ items:
     title: 'sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn'
     milestone: M1a
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 9b8ca6f; acp_fs_hardening 8 passed (worker 3 runs), sidecar all ok, clippy -p sidecar clean, tracer PASS; leader read fs.rs cap-std confinement + killpg escalation"
     assignee: "worker:sonnet"
     attempt: 1
     priority: 2
@@ -1216,7 +1217,8 @@ items:
     title: 'Attachments: user FilePart → ACP image/resource blocks'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 59a16f7; tests/files 14 passed, sidecar all ok, clippy clean, tracer PASS; SSRF: https only, public-IP check incl v4-mapped/NAT64/CGNAT, pinned resolve, no redirects, no proxy"
     assignee: "worker:haiku"
     attempt: 1
     deps: [M1A-006b]
@@ -1232,6 +1234,26 @@ items:
       - 'A user FilePart (signed https URL) is fetched with a size cap; images become ACP image blocks, other files land in .sm/attachments/ and are passed as @path resources; non-https rejected'
     verify:
       - 'cargo test -p sidecar --test files'
+
+  - id: M1A-014a
+    title: 'Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME'
+    milestone: M1a
+    phase: P1
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M1A-014]
+    paths:
+      - 'crates/sidecar/src/bridge/files.rs'
+      - 'crates/sidecar/tests/files.rs'
+      - 'crates/sidecar/tests/bridge_attachments.rs'
+    context:
+      - 'docs/ledger/reports/M1A-014.md'
+    acceptance:
+      - 'A bridge test (acp-mock) with a failing attachment URL sees RunError{code:"attachment"} and acp-mock records no session/prompt'
+      - 'An image part whose bytes do not match the declared png/jpeg/gif/webp magic fails with code attachment'
+    verify:
+      - 'cargo test -p sidecar --test files --test bridge_attachments'
 
   - id: M1A-015
     title: 'A2A TCK against the hub A2A edge under wrangler dev (pinned commit)'
@@ -1541,7 +1563,8 @@ items:
     title: 'Benchmark scripts per gates.yaml'
     milestone: M1b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 13a70f1; run-desktop.sh --dry-run exit 0, validate_results.py example OK, bash -n OK; real mode not run (needs instrumentation M1B-008a/b + xdotool M1B-008d)"
     assignee: "worker:haiku"
     attempt: 1
     lane: docs
@@ -1556,13 +1579,86 @@ items:
     verify:
       - 'bash spikes/bench/run-desktop.sh --dry-run'
 
+  - id: M1B-008a
+    title: 'gpui spike: bench hooks (fixture feed, BENCH_MARKER, frame and key-to-glyph JSONL)'
+    milestone: M1b
+    phase: P1
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
+    lane: client
+    size: M
+    risk: low
+    deps: [M1B-004a, M1B-002, M1B-008]
+    paths:
+      - 'spikes/gpui/**'
+    context:
+      - 'spikes/bench/run-desktop.sh (header: instrumentation contract)'
+      - 'crates/client-gpui/CONVENTIONS.md'
+    acceptance:
+      - 'With GPUI_SPIKE_FIXTURE_ADDR set, the transcript is rendered from ws://<addr>/threads/th_fixture/subscribe?after=0; without it, the in-memory fixture rows are used as today'
+      - 'Stdout contains exactly one line `BENCH_MARKER first_interactive_frame unix_us=<n>` (CLOCK_REALTIME, microseconds), printed when the shell is first interactive (transcript visible, composer focused)'
+      - 'With GPUI_SPIKE_BENCH_LOG set, one {"kind":"frame","t_us","dt_us"} line per presented frame and one {"kind":"key_to_glyph","id","key_us","glyph_us"} line per key delivered to the composer, microseconds since the Unix epoch'
+      - 'The window title is `gpui-spike` and the composer has keyboard focus at startup'
+      - 'Existing headless tests in spikes/gpui/tests still pass'
+    verify:
+      - 'cargo test --manifest-path spikes/gpui/Cargo.toml --tests'
+      - 'bash spikes/bench/run-desktop.sh --dry-run'
+
+  - id: M1B-008b
+    title: 'gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript'
+    milestone: M1b
+    phase: P1
+    lane: client
+    size: M
+    risk: low
+    deps: [M1B-008a, M1B-004b, M1B-004c, M1B-004d]
+    paths:
+      - 'spikes/gpui/**'
+    context:
+      - 'spikes/bench/gates.yaml (workload)'
+    acceptance:
+      - 'With the transcript streaming at 200 ev/s, the diff pane shows a 5000-line diff, the terminal pane receives output, and one approval card is pending, all in one window'
+      - 'The workload is reproducible from the fixture (no manual setup) and the approval card can be answered from the window'
+    verify:
+      - 'cargo test --manifest-path spikes/gpui/Cargo.toml --tests'
+
+  - id: M1B-008c
+    title: 'Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux'
+    milestone: M1b
+    phase: P2
+    lane: docs
+    owner: leader
+    deps: [M1B-008a, M1B-008b, M1B-008d]
+    paths:
+      - 'spikes/bench/results/gpui-kit/desktop_linux/**'
+    acceptance:
+      - 'Five JSON files (frame_time_p95, key_to_glyph_p95, cold_start, rss_peak, binary_size) with five runs each, pinned versions and spike commit in notes; each validates'
+    verify:
+      - 'python3 -I spikes/bench/validate_results.py spikes/bench/results/gpui-kit/desktop_linux/*.json'
+
+  - id: M1B-008d
+    title: 'scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver)'
+    milestone: M1b
+    phase: P1
+    lane: docs
+    size: S
+    risk: low
+    deps: [M0-003]
+    paths:
+      - 'scripts/setup-dev.sh'
+    acceptance:
+      - 'setup-dev.sh installs the xdotool apt package idempotently and reports `present` when it is already installed'
+    verify:
+      - 'bash scripts/setup-dev.sh && command -v xdotool'
+
   - id: M1B-009
     title: 'ADR 0001a: desktop client stack (no devices needed)'
     milestone: M1b
     phase: P2
     lane: docs
     owner: leader
-    deps: [M1B-004d, M1B-008]
+    deps: [M1B-004d, M1B-008, M1B-008c]
     acceptance:
       - 'docs/adr/0001a-desktop.md decides the desktop stack from Linux desktop measurements against gates.yaml; mobile is decided separately in M1B-011 (P7)'
     verify:
@@ -1856,6 +1952,76 @@ items:
       - bash scripts/hub-test.sh thread_session
       - cargo test -p acp-mock --test scripts
 
+  - id: M2-008c
+    title: 'hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO'
+    milestone: M2
+    phase: P2
+    lane: rust
+    size: M
+    risk: medium
+    deps: [M2B-002, M2-008]
+    paths:
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/do/thread.rs'
+      - 'crates/hub/tests/thread_do.rs'
+      - 'crates/hub/tests/thread_create.rs'
+    context:
+      - 'docs/specs/tunnel.md §4.2 (last paragraph), §3.5 dispatch'
+      - 'docs/specs/client-api.md §5.2'
+      - 'docs/ledger/reports/M2B-002.md (Spec issues 4, Discovered work)'
+    acceptance:
+      - 'POST /internal/threads/{id}/events takes the frame event_id; a repeat within 24 h is acked without a second append (native + live test)'
+      - 'POST /v1/threads creates the thread, records its host machine via the init hook, and (with a prompt) appends UserMessage and queues a dispatch command that reaches the Machine DO queue; live test sees the command arrive at a fake runner after welcome'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh thread_do'
+      - 'bash scripts/hub-test.sh thread_create'
+      - 'cargo run -p cli -- e2e tracer'
+
+  - id: MVP-000d
+    title: 'Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer'
+    milestone: M2
+    phase: P2
+    lane: rust
+    size: L
+    risk: high
+    deps: [M2B-004, M2-008c]
+    paths:
+      - 'crates/hub/src/tracer/**'
+      - 'crates/hub/src/worker.rs'
+      - 'crates/client-core/src/tracer*'
+      - 'crates/cli/src/e2e/**'
+      - 'crates/runner/src/tracer.rs'
+      - 'crates/sidecar/src/bridge/**'
+    context:
+      - 'docs/specs/client-api.md §6 (hub emits UserMessage)'
+      - 'docs/ledger/reports/M2B-002.md, M2B-004.md'
+    acceptance:
+      - 'cargo run -p cli -- e2e tracer passes with the client on /v1/threads/{id}/subscribe + /prompts + /interrupts (dev token), the runner on the Machine DO tunnel, and no TracerHub DO or unprefixed tracer routes left'
+      - 'The bridge no longer emits UserMessage for prompt/dispatch commands (emit_user_message stub removed); locally-typed prompts still emit it'
+    verify:
+      - 'cargo run -p cli -- e2e tracer'
+      - 'cargo test -p sidecar && cargo test -p hub'
+      - 'test ! -d crates/hub/src/tracer'
+
+  - id: M2B-002a
+    title: 'hub: scheduled sweep of expired queued commands and event_id/forwarded records (Cron Trigger -> Machine DO alarm)'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-002]
+    paths:
+      - 'crates/hub/src/machines/**'
+      - 'crates/hub/src/do/machine.rs'
+    context:
+      - 'docs/ledger/reports/M2B-002.md (Spec issues 5, Discovered work)'
+    acceptance:
+      - 'A machine that never reconnects still has its 7-day-expired commands failed (RunError{expired}) and old dedupe records pruned, driven by a DO alarm; native test with an injected clock'
+    verify:
+      - 'cargo test -p hub machines::'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -2073,7 +2239,7 @@ items:
     title: 'hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration'
     milestone: M2b
     phase: P1
-    status: "assigned"
+    status: "review"
     assignee: "worker:sonnet"
     attempt: 1
     size: M
@@ -2143,10 +2309,17 @@ items:
     title: 'runner: tunnel client with reconnect/backoff/resume'
     milestone: M2b
     phase: P1
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     deps: [M2B-001, M2B-003]
     paths:
-      - 'crates/runner/src/tunnel/**'
-      - 'crates/runner/tests/tunnel_client.rs'
+      - "crates/runner/src/tunnel/**"
+      - "crates/runner/src/tracer.rs"
+      - "crates/runner/src/lib.rs"
+      - "crates/runner/src/main.rs"
+      - "crates/runner/tests/tunnel_client.rs"
+      - "crates/protocol/src/tunnel/seq.rs (Sender::from_parts only)"
     context:
       - "docs/specs/tunnel.md"
       - "docs/PLAN-v2-ade.md §4.10 (Connection)"
@@ -2268,6 +2441,9 @@ items:
     title: 'runner: local checkpoints as shadow git commits'
     milestone: M2b
     phase: P1
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [M2B-003]
     paths:
       - 'crates/runner/src/checkpoint/**'
