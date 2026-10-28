@@ -69,11 +69,17 @@ echo "== d1 migrations (local)"
   >"$STATE/d1.log" 2>&1 \
   || { cat "$STATE/d1.log" >&2; fail "d1 migrations apply"; }
 
+# M2-003a: a random per-run bootstrap secret (never a real one). The hub gets it as a --var and the
+# test process as an env var, so tests/authz.rs can call POST /v1/auth/bootstrap.
+BOOTSTRAP_OWNER_TOKEN=$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')
+export BOOTSTRAP_OWNER_TOKEN
+
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
 (cd "$HUB_DIR" && exec setsid wrangler dev --local --test-scheduled --ip 127.0.0.1 --port "$PORT" \
-  --persist-to "$STATE/persist" --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
+  --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
+  --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 
 # wrangler dev reruns the [build] command (warm, a few seconds). Ready = /healthz answers 200.

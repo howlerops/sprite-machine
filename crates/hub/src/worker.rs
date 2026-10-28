@@ -44,6 +44,7 @@ const NOTIFY_QUEUE: &str = "sm-notify";
 pub fn router(env: Env) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .merge(crate::auth::routes::auth_routes())
         .merge(crate::threads::routes::thread_routes())
         .merge(tracer_routes())
         .merge(crate::workspace_do::dev::routes())

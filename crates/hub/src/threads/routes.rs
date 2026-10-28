@@ -3,7 +3,7 @@
 //!
 //! | Route                                                | Auth                      |
 //! | ---------------------------------------------------- | ------------------------- |
-//! | `GET  /v1/threads/{id}`                              | `Bearer dev` + `DEV_FIXTURES=1` (placeholder, client-api.md §2) |
+//! | `GET  /v1/threads/{id}`                              | session token (viewer+), or `Bearer dev` + `DEV_FIXTURES=1` |
 //! | `GET  /v1/threads/{id}/subscribe?after=<seq>` (WebSocket) | same                 |
 //! | `POST /v1/threads/{id}/prompts`                      | same                      |
 //! | `GET  /v1/threads/{id}/pending`                      | same                      |
@@ -11,6 +11,9 @@
 //! | `POST /v1/threads/{id}/interrupts/{interrupt_id}`    | same                      |
 //! | `POST /v1/threads/{id}/cancel`                       | same                      |
 //! | `POST /v1/dev/threads/{id}/events`                   | same, and 404 unless `DEV_FIXTURES=1` |
+//!
+//! Roles and audit (M2-003a, `auth/policy.rs`): reads need viewer; prompts, approvals and cancel
+//! need member; deleting a pending task needs admin. Every mutation writes an audit row first.
 //!
 //! The authenticated actor travels to the DO in the `x-sm-actor` header; a client-supplied one
 //! is overwritten. The DO's `/internal/...` routes are not registered here, so only another
@@ -21,15 +24,16 @@ use std::collections::HashMap;
 use axum::{
     Json, Router,
     extract::{Path, Request, State},
-    http::{HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION},
+    http::{HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use protocol::turn_event::is_valid_id;
 use worker::Env;
 
-use super::auth::{authenticate, dev_fixtures_enabled};
+use super::auth::dev_fixtures_enabled;
 use super::error::ApiError;
+use crate::auth::routes::authorize_thread_request;
 use crate::worker::AppState;
 
 /// The Durable Object binding of the Thread DO (wrangler.toml).
@@ -88,12 +92,10 @@ async fn forward_inner(
             req.uri().path()
         )));
     }
-    let authorization = req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let actor = authenticate(authorization.as_deref(), dev_fixtures)?;
+    let (principal, _policy) =
+        authorize_thread_request(env, req.headers(), req.method().as_str(), req.uri().path())
+            .await?;
+    let actor = principal.actor();
     let thread_id = params
         .get("thread_id")
         .filter(|id| is_valid_id(id))
