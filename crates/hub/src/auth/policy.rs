@@ -48,6 +48,9 @@ pub fn thread_policy(method: &str, path: &str) -> Option<Policy> {
         (false, "GET", []) | (false, "GET", ["subscribe"]) | (false, "GET", ["pending"]) => {
             make(Role::Viewer, None, None)
         }
+        // Minting a ticket is a read-class action (it only opens a subscribe); the ticket is
+        // never recorded, so there is no audit action.
+        (false, "POST", ["subscribe-ticket"]) => make(Role::Viewer, None, None),
         (false, "PATCH", []) => make(Role::Member, Some("thread.update"), None),
         (false, "DELETE", []) => make(Role::Admin, Some("thread.delete"), None),
         (false, "POST", ["prompts"]) => make(Role::Member, Some("thread.prompt"), None),
@@ -77,6 +80,8 @@ mod tests {
         let p = thread_policy("POST", "/v1/threads/t1/prompts").expect("policy");
         assert_eq!((p.role, p.action), (Role::Member, Some("thread.prompt")));
         let p = thread_policy("GET", "/v1/threads/t1/subscribe").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Viewer, None));
+        let p = thread_policy("POST", "/v1/threads/t1/subscribe-ticket").expect("policy");
         assert_eq!((p.role, p.action), (Role::Viewer, None));
         let p = thread_policy("DELETE", "/v1/threads/t1/pending/k1").expect("policy");
         assert_eq!(p.role, Role::Admin);

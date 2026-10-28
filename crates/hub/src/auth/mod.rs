@@ -30,6 +30,7 @@ pub mod policy;
 pub mod routes;
 pub mod service;
 mod store;
+pub mod ticket;
 pub mod token;
 
 #[cfg(test)]
@@ -99,6 +100,18 @@ fn db_failure(error: crate::db::DbError) -> ApiError {
     ApiError::internal(format!("auth: {error}"))
 }
 
+/// The principal behind `Bearer dev` (the rows are created by `store::ensure_dev_principal`).
+fn dev_principal() -> Principal {
+    Principal {
+        user_id: DEV_USER_ID.to_owned(),
+        device_id: DEV_DEVICE_ID.to_owned(),
+        org_id: DEV_ORG_ID.to_owned(),
+        role: Role::Owner,
+        display_name: String::new(),
+        session_id: None,
+    }
+}
+
 /// Derives the caller from an `Authorization` header value. A missing, unknown, expired or
 /// revoked token is `401 unauthorized`; `dev` works only with `dev_fixtures`.
 pub async fn authenticate(
@@ -112,14 +125,7 @@ pub async fn authenticate(
             return Err(unauthorized());
         }
         store::ensure_dev_principal(db).await.map_err(db_failure)?;
-        return Ok(Principal {
-            user_id: DEV_USER_ID.to_owned(),
-            device_id: DEV_DEVICE_ID.to_owned(),
-            org_id: DEV_ORG_ID.to_owned(),
-            role: Role::Owner,
-            display_name: String::new(),
-            session_id: None,
-        });
+        return Ok(dev_principal());
     }
     if !token.starts_with(token::TOKEN_PREFIX) {
         return Err(unauthorized());
