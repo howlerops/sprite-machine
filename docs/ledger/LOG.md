@@ -179,3 +179,4 @@
 2026-10-28T10:56Z M2B-005a merged d99e1af (sonnet; out-of-path main.rs --yes plumbing accepted, auto-merged with M2B-007a). Full verify running. Added M2B-005c (close live untrusted tunnels on policy flip; token per-IP limit)
 2026-10-28T11:12Z M2-011 back (sonnet). Leader: client-api §5.8 written 9e19440 (push routes; Idempotency-Key not required on push subscription routes); added M2-011a (random VAPID key in hub-test, retry only failed subscriptions). Merge after the M2B-005a verify
 2026-10-28T11:13Z M2-010 back (haiku; do/thread.rs sync hook out of path, accepted). Added M2-010a (deleted thread = 404 everywhere [leader decision], index reconcile, done status, live app-link check)
+2026-10-28T11:15Z M2B-005a → done (verify9). M2-011 and M2-010 merged (leader resolved union conflicts: MIGRATIONS 0007/0008/0010, [[test]] entries, do/thread.rs hooks, router merges). Full verify running (11 live suites)

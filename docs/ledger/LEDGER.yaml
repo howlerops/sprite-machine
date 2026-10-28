@@ -2451,7 +2451,8 @@ items:
     title: 'hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged d99e1af; full verify: workspace 696 passed 0 failed, clippy native/live/wasm clean, no tokio runtime, hub-test devices 9 (429 + Retry-After live, untrusted tunnel 401) / machine_do / thread_do / authz PASS, tracer PASS"
     attempt: 1
     assignee: "worker:sonnet"
     priority: 1

@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 80/238 (3 dropped) · in-flight M2B-005a,M2-010,M2-011 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 76/120
+done 81/241 (3 dropped) · in-flight M2-010,M2-011 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 76/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 80/238 (3 dropped) · in-flight M2B-005a,M2-010,M2-011 · blocked 12 (human
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 56 | 27 | 3 |
+| P2 | 59 | 28 | 2 |
 | P3 | 20 | 1 | 0 |
 | P4 | 36 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -45,7 +45,7 @@ done 80/238 (3 dropped) · in-flight M2B-005a,M2-010,M2-011 · blocked 12 (human
 | M2B-004e | worker | rust | done | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
 | M2-008e | worker | rust | done | hub authz (security): every thread route checks the thread belongs to the caller's org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404 |
 | M1A-006g | worker | rust | todo | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
-| M2B-005a | worker | rust | assigned | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
+| M2B-005a | worker | rust | done | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
 | M2B-005b | worker | rust | todo | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
 | M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
 | M2B-006c | worker | rust | done | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
@@ -54,6 +54,9 @@ done 80/238 (3 dropped) · in-flight M2B-005a,M2-010,M2-011 · blocked 12 (human
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
 | M2-003c | worker | rust | todo | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
 | M2B-007b | worker | rust | todo | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
+| M2B-005c | worker | rust | todo | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
+| M2-011a | worker | rust | todo | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
+| M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | assigned | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
