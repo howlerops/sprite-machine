@@ -392,6 +392,7 @@ golden_cases!(
     stop_reason_end_turn_open_tool,
     harness_error,
     new_task_while_active,
+    harness_exit_two_open_interrupts,
 );
 
 #[test]

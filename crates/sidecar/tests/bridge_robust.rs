@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use acp_mock::Recorder;
 use protocol::tunnel::{Actor, ActorKind, Command, CommandErrorCode, ContentPart, Outcome};
-use protocol::turn_event::{Envelope, Event, ResolvedOutcome, RunErrorReason, StateScope};
+use protocol::turn_event::{
+    Envelope, Event, ResolvedOutcome, RunErrorReason, RunReason, StateScope,
+};
 use serde_json::{Value, json};
 use sidecar::acp::client::{ClientError, Transport};
 use sidecar::bridge::{
@@ -152,6 +154,87 @@ fn mock_connector(scripts: Vec<Value>) -> (Connector, Arc<Mutex<Vec<MockAgent>>>
         Ok(transport)
     });
     (connector, agents)
+}
+
+/// A hand-played agent that asks for one approval per id in `tool_calls` as soon as a prompt
+/// arrives, without waiting for any answer, so the requests are open together. It ends when the
+/// returned task is aborted (the bridge then reads the end of its stream).
+fn concurrent_approvals(tool_calls: &[&str]) -> (Transport, JoinHandle<()>) {
+    let tool_calls: Vec<String> = tool_calls.iter().map(|id| (*id).to_owned()).collect();
+    let (client_io, agent_io) = tokio::io::duplex(1 << 16);
+    let (agent_r, mut agent_w) = tokio::io::split(agent_io);
+    let task = tokio::spawn(async move {
+        let mut lines = BufReader::new(agent_r).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let message: Value = serde_json::from_str(&line).expect("client sends JSON");
+            let (Some(method), Some(id)) = (message["method"].as_str(), message.get("id")) else {
+                continue;
+            };
+            let result = match method {
+                "initialize" => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                "session/new" => json!({ "sessionId": "s1" }),
+                "session/prompt" => {
+                    for (index, tool_call) in tool_calls.iter().enumerate() {
+                        let request = json!({
+                            "jsonrpc": "2.0",
+                            "id": 1000 + index,
+                            "method": "session/request_permission",
+                            "params": {
+                                "sessionId": message["params"]["sessionId"],
+                                "toolCall": { "toolCallId": tool_call, "title": "Run tests", "kind": "execute" },
+                                "options": [{ "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }]
+                            }
+                        });
+                        agent_w
+                            .write_all(format!("{request}\n").as_bytes())
+                            .await
+                            .expect("write request");
+                    }
+                    continue;
+                }
+                _ => json!({}),
+            };
+            let response = json!({ "jsonrpc": "2.0", "id": id, "result": result });
+            agent_w
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .expect("write response");
+        }
+    });
+    let (client_r, client_w) = tokio::io::split(client_io);
+    (Transport::new(client_r, client_w), task)
+}
+
+/// Waits until the store holds `count` open interrupts (the bridge has registered them).
+async fn wait_for_open_interrupts(store: &Store, count: usize) {
+    let open = async {
+        while store.open_interrupts().expect("read").len() != count {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    timeout(STEP, open)
+        .await
+        .unwrap_or_else(|_| panic!("{count} open interrupts in the store"));
+}
+
+/// The ids of the `InterruptResolved` events with `outcome`, sorted.
+fn resolved_ids(log: &[Envelope], outcome: ResolvedOutcome) -> Vec<String> {
+    let mut ids: Vec<String> = log
+        .iter()
+        .filter_map(|e| match &e.event {
+            Event::InterruptResolved(r) if r.outcome == outcome => Some(r.interrupt_id.clone()),
+            _ => None,
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// The runs that start with `RunStarted{resume}`.
+fn resumes(log: &[Envelope]) -> usize {
+    log.iter()
+        .filter(|e| matches!(&e.event, Event::RunStarted(s) if s.reason == RunReason::Resume))
+        .count()
 }
 
 // ---- rig ----------------------------------------------------------------------------------------
@@ -763,5 +846,90 @@ async fn an_approval_for_a_thread_no_process_has_stored_answers_unknown_thread()
     });
     let failure = rig.failure().await;
     assert_eq!(failure.code, CommandErrorCode::UnknownThread);
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn a_harness_exit_ends_every_open_interrupt_of_the_task_before_the_task_errors() {
+    let state = TempDir::new().expect("state dir");
+    let work = TempDir::new().expect("work dir");
+    let store = Rig::open_store(state.path());
+    let (transport, agent) = concurrent_approvals(&["call_1", "call_2"]);
+    let mut rig = Rig::start(Arc::clone(&store), work.path(), once(transport), |_| {});
+
+    rig.prompt("th_1", "tk_1");
+    rig.until(is_paused).await;
+    // The second request arrives while the run is paused: the bridge holds it open too.
+    wait_for_open_interrupts(&store, 2).await;
+    let mut stored: Vec<String> = store
+        .open_interrupts()
+        .expect("read")
+        .into_iter()
+        .map(|interrupt| interrupt.interrupt_id)
+        .collect();
+    stored.sort();
+    agent.abort();
+
+    let rest = rig.until(is_run_error).await;
+    assert_eq!(
+        resolved_ids(&rest, ResolvedOutcome::Cancelled),
+        stored,
+        "{rest:#?}"
+    );
+    assert!(
+        resolved_ids(&rest, ResolvedOutcome::Expired).is_empty(),
+        "{rest:#?}"
+    );
+    // Each open interrupt is resolved, then its run resumes (turn-event.md §5 rule 6).
+    assert_eq!(resumes(&rest), 2, "{rest:#?}");
+    assert_eq!(
+        run_error_code(rest.last().expect("RunError")).as_deref(),
+        Some("harness_exited")
+    );
+    wait_for_detached(&store).await;
+    assert!(store.open_interrupts().expect("read").is_empty());
+    assert_eq!(
+        store.task("tk_1").expect("read").expect("task").state,
+        "failed"
+    );
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn every_interrupt_an_earlier_process_left_open_is_cancelled_at_startup() {
+    let state = TempDir::new().expect("state dir");
+    let work = TempDir::new().expect("work dir");
+    let store = Rig::open_store(state.path());
+    earlier_process_paused(&store, work.path());
+    store
+        .save_interrupt(&PendingInterrupt {
+            interrupt_id: "int_old_2".to_owned(),
+            thread_id: "th_1".to_owned(),
+            task_id: "tk_1".to_owned(),
+            kind: InterruptKind::Approval,
+            request: json!({
+                "sessionId": "s1",
+                "toolCall": { "toolCallId": "call_2", "title": "Run lint", "kind": "execute" },
+                "options": [{ "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }]
+            }),
+            expires_at_ms: T0 + 600_000,
+        })
+        .expect("interrupt");
+
+    let (connector, _agents) = mock_connector(vec![json!({ "turns": [] })]);
+    let mut rig = Rig::start(Arc::clone(&store), work.path(), connector, |_| {});
+    let ended = rig.until(is_run_error).await;
+    assert_eq!(
+        resolved_ids(&ended, ResolvedOutcome::Cancelled),
+        ["int_old", "int_old_2"],
+        "{ended:#?}"
+    );
+    assert_eq!(resumes(&ended), 2, "{ended:#?}");
+    assert_eq!(
+        run_error_code(ended.last().expect("RunError")).as_deref(),
+        Some("harness_exited")
+    );
+    assert!(ended.iter().all(|e| e.task_id.as_deref() == Some("tk_1")));
+    assert!(store.open_interrupts().expect("read").is_empty());
     rig.finish().await;
 }

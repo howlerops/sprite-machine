@@ -267,24 +267,6 @@ pub fn expire_overdue_interrupts(
         .collect()
 }
 
-/// Ends every interrupt still open, whatever its deadline, the way [`expire_overdue_interrupts`]
-/// does (`InterruptResolved{expired}` + `RunError{error, code:"expired"}`).
-///
-/// Call once at startup, before any command is applied: an interrupt stored by an earlier
-/// process waits on an ACP request that died with the old agent, so no approval can ever reach
-/// it. Ending its task now beats waiting for the TTL. The interrupts are removed from the store.
-pub fn fail_stale_interrupts(
-    store: &Store,
-    mut mapper_for: impl FnMut(&PendingInterrupt) -> AcpTurnMapper,
-) -> Result<Vec<ExpiredRun>, ReattachError> {
-    let mut runs = Vec::new();
-    for interrupt in store.open_interrupts()? {
-        store.resolve_interrupt(&interrupt.interrupt_id)?;
-        runs.push(end_interrupt(store, interrupt, &mut mapper_for)?);
-    }
-    Ok(runs)
-}
-
 fn end_interrupt(
     store: &Store,
     interrupt: PendingInterrupt,
