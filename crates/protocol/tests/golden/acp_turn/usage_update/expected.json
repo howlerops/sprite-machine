@@ -1,0 +1,160 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "How much context is left?"
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "StateSnapshot",
+      "scope": "usage",
+      "snapshot": {
+        "context_used": 53000,
+        "context_size": 200000,
+        "cost": {
+          "amount": 0.045,
+          "currency": "USD"
+        }
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "usage_update",
+        "used": 53000,
+        "size": 200000,
+        "cost": {
+          "amount": 0.045,
+          "currency": "USD"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "StateDelta",
+      "scope": "usage",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/context_used",
+          "value": 60000
+        },
+        {
+          "op": "replace",
+          "path": "/cost",
+          "value": {
+            "amount": 0.05,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "usage_update",
+        "used": 60000,
+        "size": 200000,
+        "cost": {
+          "amount": 0.05,
+          "currency": "USD"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "StateDelta",
+      "scope": "usage",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/context_used",
+          "value": 61000
+        },
+        {
+          "op": "replace",
+          "path": "/cost",
+          "value": null
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "usage_update",
+        "used": 61000,
+        "size": 200000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

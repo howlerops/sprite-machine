@@ -1,0 +1,218 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "StateSnapshot",
+      "scope": "session",
+      "snapshot": {
+        "available_commands": [],
+        "current_mode_id": "code",
+        "modes": [
+          {
+            "id": "code",
+            "name": "Code"
+          },
+          {
+            "id": "plan",
+            "name": "Plan",
+            "description": "Plan only, no edits"
+          }
+        ],
+        "config_options": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "fast",
+            "options": [
+              {
+                "value": "fast",
+                "name": "Fast"
+              },
+              {
+                "value": "smart",
+                "name": "Smart",
+                "description": "Slower"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionId": "sess_7f3a",
+        "modes": {
+          "currentModeId": "code",
+          "availableModes": [
+            {
+              "id": "code",
+              "name": "Code"
+            },
+            {
+              "id": "plan",
+              "name": "Plan",
+              "description": "Plan only, no edits"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "fast",
+            "options": [
+              {
+                "value": "fast",
+                "name": "Fast"
+              },
+              {
+                "value": "smart",
+                "name": "Smart",
+                "description": "Slower"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Hi."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "StateDelta",
+      "scope": "session",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/current_mode_id",
+          "value": "plan"
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "plan"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "StateDelta",
+      "scope": "session",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/available_commands",
+          "value": [
+            {
+              "name": "review",
+              "description": "Review the current diff"
+            },
+            {
+              "name": "compact",
+              "description": "Summarize the conversation",
+              "input_hint": "optional focus area"
+            }
+          ]
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "review",
+            "description": "Review the current diff"
+          },
+          {
+            "name": "compact",
+            "description": "Summarize the conversation",
+            "input": {
+              "hint": "optional focus area"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

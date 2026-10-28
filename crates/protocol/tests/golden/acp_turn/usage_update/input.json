@@ -1,0 +1,57 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "How much context is left?"
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 53000,
+          "size": 200000,
+          "cost": {
+            "amount": 0.045,
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 60000,
+          "size": 200000,
+          "cost": {
+            "amount": 0.05,
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 61000,
+          "size": 200000
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "hub_event",
+      "task_id": "tk_1",
+      "event": {
+        "type": "UserMessage",
+        "message_id": "msg_hub_1",
+        "parts": [
+          {
+            "type": "text",
+            "text": "Add a /healthz route."
+          }
+        ],
+        "author": {
+          "kind": "user",
+          "id": "usr_1",
+          "name": "Jacob",
+          "device_id": "dev_1"
+        }
+      }
+    },
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "agent_id": "agt_1",
+      "machine_id": "mch_1"
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Adding the route now."
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

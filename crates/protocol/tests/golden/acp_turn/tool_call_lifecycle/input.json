@@ -1,0 +1,72 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Read the parser."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_001",
+          "title": "Read src/parser.rs",
+          "kind": "read",
+          "status": "pending",
+          "rawInput": {
+            "path": "/workspace/src/parser.rs"
+          },
+          "locations": [
+            {
+              "path": "/workspace/src/parser.rs",
+              "line": 42
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_001",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_001",
+          "status": "completed",
+          "content": [
+            {
+              "type": "content",
+              "content": {
+                "type": "text",
+                "text": "fn parse(input: &str) -> Tree { ... }"
+              }
+            }
+          ],
+          "rawOutput": {
+            "lines": 120
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

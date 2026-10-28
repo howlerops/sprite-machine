@@ -1,0 +1,105 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Fix the parser."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_d1",
+          "title": "Edit src/parser.rs",
+          "kind": "edit",
+          "status": "pending",
+          "locations": [
+            {
+              "path": "src/parser.rs"
+            }
+          ],
+          "content": [
+            {
+              "type": "diff",
+              "path": "src/parser.rs",
+              "newText": "fn parse() -> Tree {}\n",
+              "oldText": "fn parse() {}\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_d1",
+          "status": "in_progress",
+          "content": [
+            {
+              "type": "diff",
+              "path": "src/parser.rs",
+              "newText": "fn parse() -> Tree {}\n",
+              "oldText": "fn parse() {}\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_d1",
+          "status": "completed",
+          "content": [
+            {
+              "type": "diff",
+              "path": "src/parser.rs",
+              "newText": "fn parse() -> Tree {}\n",
+              "oldText": "fn parse() {}\n"
+            },
+            {
+              "type": "diff",
+              "path": "src/lib.rs",
+              "newText": "pub mod parser;\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_d2",
+          "title": "Create src/new.rs",
+          "kind": "edit",
+          "status": "completed",
+          "content": [
+            {
+              "type": "diff",
+              "path": "src/new.rs",
+              "newText": "// new file\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

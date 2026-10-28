@@ -1,0 +1,90 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "What can you do?"
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "review",
+              "description": "Review the current diff"
+            },
+            {
+              "name": "compact",
+              "description": "Summarize the conversation",
+              "input": {
+                "hint": "optional focus area"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "review",
+              "description": "Review the current diff"
+            },
+            {
+              "name": "compact",
+              "description": "Summarize the conversation",
+              "input": {
+                "hint": "optional focus area"
+              }
+            },
+            {
+              "name": "test",
+              "description": "Run the tests"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "review",
+              "description": "Review the current diff"
+            },
+            {
+              "name": "compact",
+              "description": "Summarize the conversation",
+              "input": {
+                "hint": "optional focus area"
+              }
+            },
+            {
+              "name": "test",
+              "description": "Run the tests"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

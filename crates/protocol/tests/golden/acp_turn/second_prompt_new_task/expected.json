@@ -1,0 +1,354 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "First prompt."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "StateSnapshot",
+      "scope": "usage",
+      "snapshot": {
+        "context_used": 1000,
+        "context_size": 200000,
+        "cost": null
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "usage_update",
+        "used": 1000,
+        "size": 200000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_001",
+      "title": "Read a.rs",
+      "kind": "read"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_001",
+        "title": "Read a.rs",
+        "kind": "read",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_001",
+      "status": "completed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_001",
+        "title": "Read a.rs",
+        "kind": "read",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_2",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_2",
+      "delta": "First answer."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "First answer."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_2"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 10,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_3",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Second prompt."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 11,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 12,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:07.000Z",
+    "event": {
+      "type": "StateDelta",
+      "scope": "usage",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/context_used",
+          "value": 2000
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "usage_update",
+        "used": 2000,
+        "size": 200000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 13,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:08.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_001",
+      "title": "Read b.rs",
+      "kind": "read"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_001",
+        "title": "Read b.rs",
+        "kind": "read",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 14,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:08.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_001",
+      "status": "completed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_001",
+        "title": "Read b.rs",
+        "kind": "read",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 15,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:09.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_4",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 16,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:09.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_4",
+      "delta": "Second answer."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Second answer."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 17,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:10.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_4"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 18,
+    "thread_id": "th_1",
+    "task_id": "tk_2",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:10.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

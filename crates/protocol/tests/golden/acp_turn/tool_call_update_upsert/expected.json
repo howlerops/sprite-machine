@@ -1,0 +1,314 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Find the TODOs."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_2",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_2",
+      "delta": "Checking."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Checking."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_2"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_u1",
+      "title": "Search for TODO",
+      "kind": "search",
+      "status": "in_progress"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "title": "Search for TODO",
+        "kind": "search",
+        "status": "in_progress"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_u1",
+      "title": "Search for TODO in src"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "title": "Search for TODO in src"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_u1",
+      "locations": [
+        {
+          "path": "/workspace/src/a.rs"
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "locations": [
+          {
+            "path": "/workspace/src/a.rs"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:07.000Z",
+    "event": {
+      "type": "ToolCallArgs",
+      "tool_call_id": "call_u1",
+      "raw_input": {
+        "query": "TODO"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "rawInput": {
+          "query": "TODO"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 10,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:09.000Z",
+    "event": {
+      "type": "ToolCallResult",
+      "tool_call_id": "call_u1",
+      "content": [],
+      "raw_output": {
+        "matches": 3
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "rawOutput": {
+          "matches": 3
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 11,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:10.000Z",
+    "event": {
+      "type": "ToolCallResult",
+      "tool_call_id": "call_u1",
+      "content": [
+        {
+          "type": "text",
+          "text": "3 matches"
+        }
+      ],
+      "raw_output": {
+        "matches": 3
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "3 matches"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 12,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:11.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_u1",
+      "status": "completed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 13,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:12.000Z",
+    "event": {
+      "type": "Raw",
+      "source": "acp",
+      "event": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "title": "Late update after the end"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_u1",
+        "title": "Late update after the end"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 14,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:13.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

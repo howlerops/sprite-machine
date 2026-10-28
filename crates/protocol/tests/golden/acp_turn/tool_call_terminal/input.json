@@ -1,0 +1,126 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Run the tests."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_t1",
+          "title": "Run cargo test",
+          "kind": "execute",
+          "status": "in_progress",
+          "rawInput": {
+            "command": "cargo test -p parser"
+          }
+        }
+      }
+    },
+    {
+      "op": "terminal_started",
+      "terminal_id": "term_1",
+      "command": "cargo test -p parser",
+      "cwd": "/workspace"
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_t1",
+          "content": [
+            {
+              "type": "terminal",
+              "terminalId": "term_1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "terminal_output",
+      "terminal_id": "term_1",
+      "output": "running 3 tests\n"
+    },
+    {
+      "op": "terminal_output",
+      "terminal_id": "term_1",
+      "output": "test result: ok. 3 passed\n"
+    },
+    {
+      "op": "terminal_exit",
+      "terminal_id": "term_1",
+      "exit_code": 0
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_t1",
+          "status": "completed",
+          "content": [
+            {
+              "type": "terminal",
+              "terminalId": "term_1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_t2",
+          "title": "Run a slow command",
+          "kind": "execute",
+          "status": "in_progress",
+          "content": [
+            {
+              "type": "terminal",
+              "terminalId": "term_2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "terminal_output",
+      "terminal_id": "term_2",
+      "output": "working..."
+    },
+    {
+      "op": "terminal_exit",
+      "terminal_id": "term_2",
+      "signal": "SIGKILL"
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_t2",
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

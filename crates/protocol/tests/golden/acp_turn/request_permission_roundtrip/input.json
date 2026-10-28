@@ -1,0 +1,164 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Edit the parser."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "I'll edit the parser."
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_e1",
+          "title": "Edit src/parser.rs",
+          "kind": "edit",
+          "status": "pending",
+          "content": [
+            {
+              "type": "diff",
+              "path": "src/parser.rs",
+              "newText": "fn parse() -> Tree {}\n",
+              "oldText": "fn parse() {}\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "request_permission",
+      "interrupt_id": "int_1",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "request": {
+        "sessionId": "sess_7f3a",
+        "toolCall": {
+          "toolCallId": "call_e1",
+          "title": "Edit src/parser.rs",
+          "kind": "edit",
+          "status": "pending"
+        },
+        "options": [
+          {
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "allow_always",
+            "name": "Always allow",
+            "kind": "allow_always"
+          },
+          {
+            "optionId": "reject_once",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Waiting for approval."
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_e1",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 1200,
+          "size": 200000
+        }
+      }
+    },
+    {
+      "op": "hub_event",
+      "task_id": "tk_1",
+      "event": {
+        "type": "InterruptResolved",
+        "interrupt_id": "int_1",
+        "outcome": {
+          "type": "selected",
+          "option_id": "allow_once"
+        },
+        "resolved_by": {
+          "kind": "user",
+          "id": "usr_1",
+          "device_id": "dev_1"
+        }
+      }
+    },
+    {
+      "op": "note_interrupt_resolved",
+      "interrupt_id": "int_1"
+    },
+    {
+      "op": "resume"
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_e1",
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Done."
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

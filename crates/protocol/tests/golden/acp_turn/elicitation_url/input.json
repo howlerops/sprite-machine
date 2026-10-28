@@ -1,0 +1,64 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Open the PR."
+      }
+    },
+    {
+      "op": "elicitation",
+      "interrupt_id": "int_1",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "request": {
+        "mode": "url",
+        "sessionId": "sess_7f3a",
+        "elicitationId": "el_1",
+        "url": "https://example.com/oauth/start?state=abc",
+        "message": "Sign in to GitHub to continue."
+      }
+    },
+    {
+      "op": "hub_event",
+      "task_id": "tk_1",
+      "event": {
+        "type": "InterruptResolved",
+        "interrupt_id": "int_1",
+        "outcome": {
+          "type": "declined"
+        },
+        "resolved_by": {
+          "kind": "user",
+          "id": "usr_1",
+          "device_id": "dev_1"
+        }
+      }
+    },
+    {
+      "op": "note_interrupt_resolved",
+      "interrupt_id": "int_1"
+    },
+    {
+      "op": "resume"
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Skipping the PR."
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

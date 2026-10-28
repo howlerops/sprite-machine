@@ -1,0 +1,42 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Write a long essay."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "It was a dark and "
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_w1",
+          "title": "Write essay.md",
+          "kind": "edit",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "max_tokens"
+    }
+  ]
+}
