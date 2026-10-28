@@ -262,3 +262,4 @@
 2026-10-28T21:46Z MVP-000h back (haiku): [build] calls a prebuilt strip binary (HUB_STRIP_BIN); smoke + tracer pass; held-lock check not run by worker → merged; leader running oauth live + playwright pairing while a client-gpui build holds the lock
 2026-10-28T21:51Z M2B-019a back (haiku): TUI queue for lines typed during a task; e2e rc + rc.spec.js pass without the retype step. Its own M2B-019d (local_prompts map leak) sent back to fix on the same attempt, plus a test of the Session refusal path. Added M2B-019c (P3, local vs hub-queued prompt race)
 2026-10-28T21:58Z M3-002 verify green → done
+2026-10-28T21:59Z assign M3-002a (haiku, client lane), M2-008j (haiku, P4 rust: the P3 rust queue is empty until M2B-019a lands)

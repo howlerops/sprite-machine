@@ -5417,6 +5417,9 @@ items:
     title: 'hub: scheduled purge of expired subscribe_tickets (and of other short-lived rows in one place)'
     milestone: M2
     phase: P4
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
@@ -6120,6 +6123,9 @@ items:
     title: 'client (desktop): a runnable app — bin target calling shell::run, editable hub address in settings, AppShell connectivity fed from client_core::Connection'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: client
     size: S
     risk: low
