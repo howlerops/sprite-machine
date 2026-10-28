@@ -209,6 +209,20 @@ response) and emits the resume `RunStarted`.
 }
 ```
 
+`outcome` is exactly the union of `InterruptResolved.outcome` (turn-event.md §4.5), minus
+`expired` (expiry is decided by the runner, never sent down):
+
+| Interrupt kind | `outcome`                                  | Runner answers ACP with                                       |
+| -------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| `approval`     | `{"type":"selected","option_id":"allow"}`  | `RequestPermissionOutcome::Selected{optionId}`                |
+| `form`         | `{"type":"submitted","data":{"name":"x"}}` | elicitation response `{"action":"accept","content":data}`     |
+| `form`, `auth` | `{"type":"declined"}`                      | elicitation response `{"action":"decline"}`                   |
+| any            | `{"type":"cancelled"}`                     | `RequestPermissionOutcome::Cancelled` / `{"action":"cancel"}` |
+
+A runner that receives an outcome that does not fit the interrupt's kind (for example
+`submitted` for an approval) answers ACP `cancelled` and replies `command_result{ok:false,
+code:"invalid"}`.
+
 **`dispatch`**: start a new thread on this machine (`sm rc` server mode, plan §4.10).
 
 ```json
