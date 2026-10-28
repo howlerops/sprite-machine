@@ -28,6 +28,7 @@ use crate::wasm;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use protocol::turn_event::{Envelope, Event, InterruptKind, RunOutcome, RunReason};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 
 const AGENT_ID: &str = "agt_acp_mock";
@@ -141,13 +142,18 @@ async fn tracer(work: &TempDir) -> Result<()> {
 /// Builds the hub bundle with worker-build (`WASM_PROFILE`) and strips its names. Shared with
 /// the other hub-backed e2e checks.
 pub(super) async fn build_hub(hub_dir: &Path, work: &TempDir) -> Result<()> {
+    let wasm_dir = wasm_target_dir(hub_dir)?;
     println!(
-        "== worker-build --profile {WASM_PROFILE} ({})",
-        hub_dir.display()
+        "== worker-build --profile {WASM_PROFILE} ({}, wasm target {})",
+        hub_dir.display(),
+        wasm_dir.display()
     );
     let build_log = work.path.join("worker-build.log");
     let build_started = Instant::now();
     let status = wasm_command("worker-build", hub_dir)
+        .env("CARGO_TARGET_DIR", &wasm_dir)
+        // Cargo names the hub package path for fresh builds too ("Fresh hub v0.1.0 (path)").
+        .env("CARGO_TERM_VERBOSE", "true")
         .args(["--profile", WASM_PROFILE])
         .stdout(log_file(&build_log)?)
         .stderr(log_file_append(&build_log)?)
@@ -160,6 +166,14 @@ pub(super) async fn build_hub(hub_dir: &Path, work: &TempDir) -> Result<()> {
         bail!("worker-build failed: {status}");
     }
     println!("built in {:.1}s", build_started.elapsed().as_secs_f64());
+    // CI-002: the bundle must come from this tree, so the log has to name this checkout's crates/hub.
+    let log =
+        fs::read_to_string(&build_log).with_context(|| format!("read {}", build_log.display()))?;
+    let package = format!("({})", hub_dir.display());
+    if !log.contains(&package) {
+        print_tail(&build_log, 20);
+        bail!("worker-build log does not name {package}: the bundle was not built from this tree");
+    }
     // The same step as the second command of the wrangler [build] command (MVP-000f).
     let (before, after) = wasm::strip_file(&hub_dir.join("build/index_bg.wasm"))?;
     println!("strip-names: index_bg.wasm {before} -> {after} bytes");
@@ -436,6 +450,26 @@ pub(super) fn hub_dir() -> Result<PathBuf> {
         .with_context(|| format!("hub crate at {}", dir.display()))
 }
 
+/// CI-002: the wasm32 target dir of the hub built from this checkout: `wasm-<hash>` under the
+/// shared `CARGO_TARGET_DIR` (default `<root>/target`), keyed by the checkout root so two worktrees
+/// never share hub wasm artifacts. Native builds keep the shared dir. Matches scripts/hub-test.sh.
+pub(super) fn wasm_target_dir(hub_dir: &Path) -> Result<PathBuf> {
+    let root = hub_dir
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| anyhow!("hub crate {} is not under crates/", hub_dir.display()))?;
+    let shared = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("target"));
+    let digest = Sha256::digest(root.to_string_lossy().as_bytes());
+    let key: String = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(shared.join(format!("wasm-{key}")))
+}
+
 /// Walks up from `start` to the first directory that holds the workspace `Cargo.toml` and
 /// `crates/hub/wrangler.toml`, and returns `crates/hub` under it.
 fn find_hub_dir(start: &Path) -> Option<PathBuf> {
@@ -527,6 +561,8 @@ impl Wrangler {
     ) -> Result<Self> {
         let log = work.path.join("wrangler.log");
         let persist = work.path.join("persist");
+        // wrangler dev reruns the [build] command: it must use this worktree's wasm target dir.
+        let wasm_dir = wasm_target_dir(hub_dir)?;
         let mut command = Command::new("wrangler");
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         command
@@ -542,6 +578,7 @@ impl Wrangler {
             .env_remove("RUSTFLAGS")
             .env_remove("RUSTC_WRAPPER")
             .env("WRANGLER_SEND_METRICS", "false")
+            .env("HUB_WASM_TARGET_DIR", &wasm_dir)
             .stdin(Stdio::null())
             .stdout(std::process::Stdio::from(
                 File::create(&log).context("wrangler log")?,
@@ -727,6 +764,28 @@ mod tests {
         let root = fake_checkout("root");
         assert_eq!(find_hub_dir(&root), Some(root.join("crates/hub")));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn wasm_target_dir_is_keyed_by_the_checkout_root() {
+        let a = fake_checkout("wasm-a");
+        let b = fake_checkout("wasm-b");
+        let dir_a = wasm_target_dir(&a.join("crates/hub")).unwrap();
+        let dir_b = wasm_target_dir(&b.join("crates/hub")).unwrap();
+        assert_ne!(
+            dir_a, dir_b,
+            "two checkouts must not share a wasm target dir"
+        );
+        assert_eq!(wasm_target_dir(&a.join("crates/hub")).unwrap(), dir_a);
+        assert!(
+            dir_a
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("wasm-")
+        );
+        fs::remove_dir_all(&a).unwrap();
+        fs::remove_dir_all(&b).unwrap();
     }
 
     #[test]
