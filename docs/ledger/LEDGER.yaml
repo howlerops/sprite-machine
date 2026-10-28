@@ -5529,7 +5529,8 @@ items:
     title: 'client-core: one owner holds the Subscription and the Outbox and publishes the combined connectivity (Connectivity::combine) for the app banner'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; client-core clippy clean, 43 passed on merged tree (banner sequence test)"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -5986,3 +5987,23 @@ items:
       - 'run-desktop.sh launches the spike with GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its output until exit (test); terminal/approval repaints logged as frames'
     verify:
       - 'bash spikes/bench/run-desktop.sh --dry-run'
+
+  - id: M3-001k
+    title: 'client-core: a Subscription that starts Offline when the hub is unreachable (Connection can be built offline; reconnect() retries)'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-001h]
+    paths:
+      - 'crates/client-core/src/sync*'
+      - 'crates/client-core/src/connectivity*'
+      - 'crates/client-core/tests/banner.rs'
+      - 'crates/client-core/tests/sync.rs'
+    context:
+      - 'docs/ledger/reports/M3-001h.md (Discovered work)'
+    acceptance:
+      - 'Connection::new with an unreachable hub publishes Offline, and a later reconnect to a live hub publishes Connecting then Online; test'
+    verify:
+      - 'cargo test -p client-core'
