@@ -12,8 +12,7 @@ use anyhow::{Result, bail};
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str =
-    "usage: cli e2e tracer | cli e2e attachments | cli e2e app | cli wasm strip-names <file.wasm>";
+const USAGE: &str = "usage: cli e2e tracer | cli e2e attachments | cli e2e app | cli e2e rc | cli wasm strip-names <file.wasm>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
