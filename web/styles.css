@@ -173,6 +173,7 @@ a:focus-visible {
 
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
@@ -574,4 +575,69 @@ a:focus-visible {
 .composer button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* Members screen (WEB-006) */
+.bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.people {
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+}
+
+.people li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.person {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.login,
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.role {
+  font-weight: 600;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.invite-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.invite-form input,
+.people select,
+.invite-form select {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
 }

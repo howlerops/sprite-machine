@@ -36,13 +36,22 @@ process.stdout.write(`${d} ${point.toString("base64url")}`);
 VAPID_PRIVATE_KEY=${VAPID_KEYS% *}
 VAPID_PUBLIC_KEY=${VAPID_KEYS#* }
 
+# WEB-006: a mock GitHub on a free local port (never github.com), a fake client id and a random
+# per-run client secret (never a real one). The hub gets them as --var; GITHUB_API_BASE points at
+# the mock. Only the GitHub sign-in and members specs use it.
+GITHUB_CLIENT_ID=test-client-id
+GITHUB_CLIENT_SECRET=$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')
+MOCK_GITHUB_PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close()})')
+
 STATE=$(mktemp -d)
 WRANGLER_PID=""
+MOCK_PID=""
 scratch_created=0
 [[ -e $HUB_DIR/.wrangler ]] || scratch_created=1
 
 cleanup() {
   trap - EXIT INT TERM
+  if [[ -n $MOCK_PID ]]; then kill -TERM "$MOCK_PID" 2>/dev/null || true; fi
   if [[ -n $WRANGLER_PID ]]; then
     kill -TERM -- "-$WRANGLER_PID" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -61,12 +70,17 @@ trap cleanup EXIT
 (cd "$HUB_DIR" && wrangler d1 migrations apply DB --local --persist-to "$STATE/persist") \
   >"$STATE/d1.log" 2>&1 || { cat "$STATE/d1.log" >&2; echo "FAIL: d1 migrations apply" >&2; exit 1; }
 
+node "$REPO/web/tests/helpers-ghmock.mjs" "$MOCK_GITHUB_PORT" "$GITHUB_CLIENT_ID" "$GITHUB_CLIENT_SECRET" &
+MOCK_PID=$!
+
 (cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --ip 127.0.0.1 --port "$SM_PORT" \
   --persist-to "$STATE/persist" \
   --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" \
   --var "DEV_FIXTURES:1" \
   --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
+  --var "GITHUB_CLIENT_ID:$GITHUB_CLIENT_ID" --var "GITHUB_CLIENT_SECRET:$GITHUB_CLIENT_SECRET" \
+  --var "GITHUB_API_BASE:http://127.0.0.1:$MOCK_GITHUB_PORT" \
   --show-interactive-dev-session=false) &
 WRANGLER_PID=$!
 wait "$WRANGLER_PID"
