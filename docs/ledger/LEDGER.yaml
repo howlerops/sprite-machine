@@ -1239,6 +1239,9 @@ items:
     title: 'Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: medium
@@ -2442,7 +2445,8 @@ items:
     title: 'runner: local checkpoints as shadow git commits'
     milestone: M2b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 8c932b6; shadow_git 6 passed x2 on merged tree, clippy clean, tracer PASS; leader read restore (only non-ignored added paths removed, -z parsing)"
     attempt: 1
     assignee: "worker:haiku"
     deps: [M2B-003]
@@ -2454,6 +2458,25 @@ items:
       - 'https://git-scm.com/docs/git-commit-tree (plumbing for shadow commits)'
     acceptance:
       - 'Per-turn snapshot of tracked + untracked (non-ignored) files under refs/sm/checkpoints/<task> without touching index/HEAD/stash; restore and diff between checkpoints; ext/checkpoint emitted like sandbox checkpoints (M1A-012)'
+    verify:
+      - 'cargo test -p runner --test shadow_git'
+
+  - id: M2B-011a
+    title: 'runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":")'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-011]
+    paths:
+      - 'crates/runner/src/checkpoint/**'
+      - 'crates/runner/tests/shadow_git.rs'
+    context:
+      - 'docs/ledger/reports/M2B-011.md (Discovered work)'
+      - 'crates/protocol (is_valid_id)'
+    acceptance:
+      - 'Any valid protocol thread id (including ":") maps to a valid, reversible ref component; update-ref uses the expected old value so two concurrent take() calls cannot claim the same n (test)'
     verify:
       - 'cargo test -p runner --test shadow_git'
 
