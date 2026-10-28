@@ -76,8 +76,8 @@ pub struct NotifyJob {
     /// The id of the interrupt's first reject option.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny_option_id: Option<String>,
-    /// The machine that came back (`machine_back` only). An id, like the thread: the name is
-    /// looked up when the job is sent, and only for the title.
+    /// The machine that came back (`machine_back` only). An id, like the thread; the title stays
+    /// generic and the phone looks up the name itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine_id: Option<String>,
     /// The subscriptions still to send, when this job re-queues the failed part of an earlier
@@ -200,30 +200,11 @@ pub const TTL_SECS: u32 = 24 * 60 * 60;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
     pub job: NotifyJob,
-    /// The name of the machine that came back, for the `machine_back` title. `None` when the
-    /// machine is unknown (a dev machine has no row), and then the generic title is sent.
-    pub machine_name: Option<String>,
 }
 
 impl Notification {
     pub fn new(job: NotifyJob) -> Self {
-        Self {
-            job,
-            machine_name: None,
-        }
-    }
-
-    pub fn with_machine_name(mut self, name: Option<String>) -> Self {
-        self.machine_name = name;
-        self
-    }
-
-    /// The title: "<machine name> is back online" for a named machine, else the generic title.
-    pub fn title(&self) -> String {
-        match (self.job.kind, &self.machine_name) {
-            (Kind::MachineBack, Some(name)) => format!("{name} is back online"),
-            (kind, _) => kind.title().to_owned(),
-        }
+        Self { job }
     }
 
     pub fn urgency(&self) -> Urgency {
@@ -263,7 +244,7 @@ impl Notification {
         let job = &self.job;
         let mut body = json!({
             "kind": job.kind.as_str(),
-            "title": self.title(),
+            "title": job.kind.title(),
             "thread_id": job.thread_id,
         });
         body["task_id"] = json!(job.task_id);

@@ -110,22 +110,6 @@ pub async fn org_of_thread(db: &impl Db, thread_id: &str) -> Result<Option<Strin
     rows.first().map(|row| text(row, "org_id")).transpose()
 }
 
-/// The name of a machine of the org (`machines`, 0004), or `None` for an unknown one (a dev
-/// machine has no row).
-pub async fn machine_name(
-    db: &impl Db,
-    org_id: &str,
-    machine_id: &str,
-) -> Result<Option<String>, DbError> {
-    let rows = db
-        .query(
-            "SELECT name FROM machines WHERE id = ? AND org_id = ?",
-            &[machine_id.into(), org_id.into()],
-        )
-        .await?;
-    rows.first().map(|row| text(row, "name")).transpose()
-}
-
 /// A subscription and the role its user has in the org now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {

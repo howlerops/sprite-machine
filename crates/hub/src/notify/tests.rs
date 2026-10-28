@@ -763,9 +763,9 @@ fn a_partly_failed_job_is_followed_up_for_its_failed_subscriptions_only() {
 }
 
 #[test]
-fn a_machine_back_goes_to_every_subscription_and_names_the_machine() {
+fn a_machine_back_goes_to_every_subscription_with_the_generic_title_and_machine_id() {
     let db = subscribed_world();
-    // Ada has a second device (a second endpoint); the machine is one of the org's.
+    // Ada has a second device (a second endpoint).
     let ada = principal("ada", "org_a", Role::Owner);
     let (status, _) = subscribe_as(
         &db,
@@ -775,11 +775,6 @@ fn a_machine_back_goes_to_every_subscription_and_names_the_machine() {
     )
     .expect("subscribe");
     assert_eq!(status, 201);
-    let hash = "a".repeat(64);
-    db.exec(&format!(
-        "INSERT INTO machines (id, org_id, name, kind, credential_hash) \
-         VALUES ('m_1', 'org_a', 'Garage Mac', 'local', '{hash}')"
-    ));
     let job = NotifyJob {
         task_id: None,
         machine_id: Some("m_1".into()),
@@ -791,28 +786,15 @@ fn a_machine_back_goes_to_every_subscription_and_names_the_machine() {
     // Both of Ada's subscriptions, Bob and Vic (this class has no role check); not Eve.
     assert_eq!(users(&web), ["u_ada", "u_ada", "u_bob", "u_vic"]);
     assert_eq!(report.delivered, 4);
+    // The generic title and the machine id only: no machine name, no prompt text.
     for (_, payload) in web.sent.borrow().iter() {
         assert_eq!(
             *payload,
             json!({
-                "kind": "machine_back", "title": "Garage Mac is back online",
+                "kind": "machine_back", "title": "Machine back online",
                 "thread_id": "th_1", "task_id": null, "machine_id": "m_1",
             })
         );
-    }
-
-    // An unknown machine (a dev machine has no row) keeps the generic title.
-    let web = Recording::new(Delivery::Delivered);
-    let unknown = NotifyJob {
-        machine_id: Some("m_gone".into()),
-        ..job
-    };
-    run(&db, &web, &unknown, NOON);
-    let sent = web.sent.borrow();
-    assert!(!sent.is_empty());
-    for (_, payload) in sent.iter() {
-        assert_eq!(payload["title"], "Machine back online");
-        assert_eq!(payload["machine_id"], "m_gone");
     }
 }
 

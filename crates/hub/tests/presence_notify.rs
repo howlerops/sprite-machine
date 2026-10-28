@@ -776,9 +776,10 @@ fn setup(name: &str) -> (PushService, Browser, String) {
 // ---- tests ------------------------------------------------------------------------------
 
 #[test]
-fn a_machine_back_with_queued_work_sends_one_push_with_ids_and_the_machine_name() {
+fn a_machine_back_with_queued_work_sends_one_push_with_ids_and_a_generic_title() {
     let _serial = serial();
     let (service, browser, endpoint) = setup("back");
+    // A named machine: its name must not reach the push (the phone looks it up itself).
     let (machine, credential) = named_machine("Garage Mac");
     let thread = unique("th", "back");
     init_thread(&thread, &machine);
@@ -793,11 +794,15 @@ fn a_machine_back_with_queued_work_sends_one_push_with_ids_and_the_machine_name(
     runner.read_commands(1);
     let payload = browser.open(&service.wait_for(0));
     assert_eq!(payload["kind"], "machine_back");
-    assert_eq!(payload["title"], "Garage Mac is back online");
+    assert_eq!(payload["title"], "Machine back online");
     assert_eq!(payload["thread_id"], thread.as_str());
     assert_eq!(payload["machine_id"], machine.as_str());
     let text = payload.to_string();
     assert!(!text.contains("do it"), "prompt text in a push: {text}");
+    assert!(
+        !text.contains("Garage Mac"),
+        "machine name in a push: {text}"
+    );
     service.assert_no_more_than(1);
 
     unsubscribe(&endpoint);

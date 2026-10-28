@@ -59,7 +59,7 @@ pub fn machine_back_thread<'a>(
 }
 
 /// The NOTIFY job for a machine that came back: one per comeback, named by the first thread with
-/// queued work. Ids only; the title names the machine when the service finds its name.
+/// queued work. Ids only: the thread and the machine, and the generic title.
 pub fn machine_back_job(thread_id: &str, machine_id: &str) -> NotifyJob {
     NotifyJob {
         kind: Kind::MachineBack,

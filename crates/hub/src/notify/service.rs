@@ -258,14 +258,7 @@ where
         to_send.push(target.subscription);
     }
 
-    // The machine's name is read only for the title of a machine back that has someone to send to.
-    let machine_name = match (job.kind, &job.machine_id) {
-        (Kind::MachineBack, Some(machine_id)) if !to_send.is_empty() => {
-            store::machine_name(db, &org_id, machine_id).await?
-        }
-        _ => None,
-    };
-    let notification = Notification::new(job.clone()).with_machine_name(machine_name);
+    let notification = Notification::new(job.clone());
     for subscription in to_send {
         match providers
             .send(&subscription, &notification, now_ms / 1000)
