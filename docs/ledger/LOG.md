@@ -161,3 +161,4 @@
 2026-10-28T09:57Z M2B-004e assigned→done (haiku); added M2B-004f (macOS build + real sleep test, mock logind; deps CI-001)
 2026-10-28T09:57Z M1B-008b merged 397fc7b (haiku); worker's final verify hit the full disk — leader re-running spike tests/clippy on the merged tree
 2026-10-28T09:57Z leader: disk full again — M2-008e worker built into a private worktree target/ (4.7 GB) against the brief; asked it to switch to the shared target and delete it
+2026-10-28T09:58Z M1B-008b → done (leader verify: spike 86 passed, clippy). M1B-008c acceptance += workload var, continuous terminal output, frame coverage. Disk 1.5 GB → deleted the M2-008e worker's private target (5.5 GB); 7.4 GB free

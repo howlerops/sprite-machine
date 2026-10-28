@@ -1621,7 +1621,8 @@ items:
     title: 'gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript'
     milestone: M1b
     phase: "P2"
-    status: "assigned"
+    status: "done"
+    evidence: "merged 397fc7b; leader re-ran on merged tree (worker's run hit the full disk): spike 11 test binaries 86 passed 0 failed, clippy clean, fmt OK, run-desktop dry-run OK; worker real xvfb screenshots of all four panes + approval click. run-desktop.sh needs GPUI_SPIKE_WORKLOAD=common (M1B-008c)"
     attempt: 1
     assignee: "worker:haiku"
     lane: client
@@ -1646,9 +1647,12 @@ items:
     owner: leader
     deps: [M1B-008a, M1B-008b, M1B-008d]
     paths:
-      - 'spikes/bench/results/gpui-kit/desktop_linux/**'
+      - "spikes/bench/results/gpui-kit/desktop_linux/**"
+      - "spikes/bench/run-desktop.sh"
+      - "spikes/gpui/**"
     acceptance:
-      - 'Five JSON files (frame_time_p95, key_to_glyph_p95, cold_start, rss_peak, binary_size) with five runs each, pinned versions and spike commit in notes; each validates'
+      - "Five JSON files (frame_time_p95, key_to_glyph_p95, cold_start, rss_peak, binary_size) with five runs each, pinned versions and spike commit in notes; each validates"
+      - "run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane keeps receiving output for the whole run (repeat the fixture output) and frame lines cover terminal/approval repaints (from M1B-008b discovered work)"
     verify:
       - 'python3 -I spikes/bench/validate_results.py spikes/bench/results/gpui-kit/desktop_linux/*.json'
 

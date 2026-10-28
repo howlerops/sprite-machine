@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 73/232 (3 dropped) · in-flight M1B-008b,M2-008e · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 69/120
+done 74/232 (3 dropped) · in-flight M2-008e · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 69/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 73/232 (3 dropped) · in-flight M1B-008b,M2-008e · blocked 11 (human: M0-0
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 52 | 20 | 2 |
+| P2 | 52 | 21 | 1 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -26,7 +26,7 @@ done 73/232 (3 dropped) · in-flight M1B-008b,M2-008e · blocked 11 (human: M0-0
 | M0-018 | human | rust | done | Provide a Cloudflare account + API token |
 | M1A-004a | worker | rust | done | sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn |
 | M1A-006c | worker | rust | done | runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume |
-| M1B-008b | worker | client | assigned | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
+| M1B-008b | worker | client | done | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
 | M1B-008c | leader | docs | todo | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
 | M1B-009 | leader | docs | todo | ADR 0001a: desktop client stack (no devices needed) |
 | M2-008b | worker | rust | done | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
