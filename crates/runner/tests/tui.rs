@@ -2355,3 +2355,34 @@ mod session {
         assert_eq!(result, AnswerResult::Failed("expired: too late".to_owned()));
     }
 }
+
+#[test]
+fn steps_subagents_and_raw_events_are_one_line_each() {
+    let mut app = new_app(false);
+    let mut hub = Hub::new();
+    let run = Some("run_tk1");
+    let task = Some("tk1");
+    let events = [
+        json!({"type": "StepStarted", "step_id": "implement.verify", "step_name": "verify", "iteration": 2}),
+        json!({"type": "StepFinished", "step_id": "implement.verify", "step_name": "verify", "iteration": 2, "outcome": "success"}),
+        json!({"type": "SubagentStarted", "subagent_run_id": "sub_1", "name": "reviewer"}),
+        json!({"type": "SubagentError", "subagent_run_id": "sub_1", "message": "child cancelled", "code": "cancelled"}),
+        json!({"type": "Raw", "source": "flow", "event": {"type": "custom"}}),
+    ];
+    for event in events {
+        let message = hub.emit(task, run, event);
+        app.incoming(message);
+    }
+    assert_screen(
+        &screen_sized(&app, 50, 8),
+        r#"
+ sm  th_tui1  [working]               remote: off
+  [step] verify #2: done
+  [subagent] reviewer: failed: child cancelled
+  [raw] Flow custom
+
+
+
+>"#,
+    );
+}

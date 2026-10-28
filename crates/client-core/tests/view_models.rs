@@ -8,11 +8,12 @@ use client_core::TaskStatus;
 use client_core::view::inbox::{InboxStatus, inbox, thread_status};
 use client_core::view::machines::machines;
 use client_core::view::transcript::ToolStatus;
-use client_core::view::{Item, LocalAnswer, ThreadView};
+use client_core::view::{Item, LocalAnswer, SubagentStatus, SubagentView, ThreadView};
 use protocol::tunnel::{Actor, ActorKind};
 use protocol::turn_event::{
     Activity, ActivityMode, ActivityType, DiffContent, Envelope, Event, MachinePresence,
-    PlanContent, RunStarted, StateScope, StateSnapshot, TerminalContent,
+    PlanContent, RawEventSource, RunStarted, StateScope, StateSnapshot, StepOutcome,
+    TerminalContent,
 };
 use serde_json::{Map, Value, json};
 
@@ -59,6 +60,28 @@ fn apply_all(view: &mut ThreadView, envelopes: &[Envelope]) {
     for envelope in envelopes {
         view.apply(envelope).expect("applies");
     }
+}
+
+/// The subagent item with this run id.
+fn subagent<'a>(items: &'a [Item], subagent_run_id: &str) -> &'a SubagentView {
+    items
+        .iter()
+        .find_map(|item| match item {
+            Item::Subagent(view) if view.subagent_run_id == subagent_run_id => Some(view.as_ref()),
+            _ => None,
+        })
+        .expect("subagent item")
+}
+
+/// The example with its subagent run id replaced (for a second subagent in one run).
+fn with_subagent_id(mut envelope: Envelope, id: &str) -> Envelope {
+    match &mut envelope.event {
+        Event::SubagentStarted(event) => event.subagent_run_id = id.to_owned(),
+        Event::SubagentFinished(event) => event.subagent_run_id = id.to_owned(),
+        Event::SubagentError(event) => event.subagent_run_id = id.to_owned(),
+        other => panic!("not a subagent event: {other:?}"),
+    }
+    envelope
 }
 
 fn hub_actor(id: &str) -> Actor {
@@ -643,4 +666,192 @@ fn a_delta_before_its_snapshot_leaves_last_seq_at_zero() {
     assert_eq!(view, before);
     assert_eq!(view.last_seq(), 0);
     assert!(view.state("usage").is_none());
+}
+
+#[test]
+fn steps_subagents_and_raw_events_are_kept_in_order() {
+    let mut events = sequence(&[
+        "UserMessage.json",
+        "RunStarted.json",
+        "StepStarted.json",
+        "SubagentStarted.json",
+        "Raw.json",
+        "SubagentFinished.json",
+        "StepFinished.json",
+    ]);
+    let next = events.len() as u64 + 1;
+    events.push(with_subagent_id(at(next, "SubagentStarted.json"), "sub_2"));
+    events.push(with_subagent_id(
+        at(next + 1, "SubagentError.json"),
+        "sub_2",
+    ));
+    let mut view = ThreadView::new("th_1");
+    apply_all(&mut view, &events);
+
+    let items = view.tasks()[0].transcript().items();
+    let order: Vec<&str> = items
+        .iter()
+        .map(|item| match item {
+            Item::User(_) => "user",
+            Item::Step(_) => "step",
+            Item::Subagent(view) => view.subagent_run_id.as_str(),
+            Item::Raw(_) => "raw",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(order, ["user", "step", "sub_1", "raw", "sub_2"]);
+
+    let Some(Item::Step(step)) = items.iter().find(|item| matches!(item, Item::Step(_))) else {
+        panic!("step item");
+    };
+    assert_eq!(step.step_id, "implement.verify");
+    assert_eq!(step.step_name, "verify");
+    assert_eq!(step.iteration, Some(2));
+    assert_eq!(step.outcome, Some(StepOutcome::Success));
+
+    let reviewer = subagent(items, "sub_1");
+    assert_eq!(reviewer.name, "reviewer");
+    assert_eq!(reviewer.child_thread_id.as_deref(), Some("th_child1"));
+    assert_eq!(reviewer.child_task_id.as_deref(), Some("tk_child1"));
+    assert_eq!(reviewer.agent_id.as_deref(), Some("agt_codex"));
+    assert_eq!(reviewer.parent_tool_call_id.as_deref(), Some("tc_9"));
+    assert_eq!(
+        reviewer.status,
+        SubagentStatus::Finished {
+            result: Some(json!({"verdict": "approve"})),
+        }
+    );
+
+    let cancelled = subagent(items, "sub_2");
+    assert!(!cancelled.is_open());
+    assert_eq!(
+        cancelled.status,
+        SubagentStatus::Failed {
+            message: "child cancelled".to_owned(),
+            code: Some("cancelled".to_owned()),
+        }
+    );
+
+    let Some(Item::Raw(raw)) = items.iter().find(|item| matches!(item, Item::Raw(_))) else {
+        panic!("raw item");
+    };
+    assert_eq!(raw.source, RawEventSource::Child);
+    assert_eq!(raw.child_thread_id.as_deref(), Some("th_child1"));
+    assert_eq!(raw.event["event"]["delta"], json!("Looks good."));
+}
+
+#[test]
+fn steps_and_subagents_upsert_and_the_first_close_wins() {
+    let mut view = ThreadView::new("th_1");
+    apply_all(
+        &mut view,
+        &sequence(&["UserMessage.json", "RunStarted.json"]),
+    );
+
+    let mut failed_step = at(6, "StepFinished.json");
+    if let Event::StepFinished(finished) = &mut failed_step.event {
+        finished.outcome = StepOutcome::Failed;
+    }
+    apply_all(
+        &mut view,
+        &[
+            at(3, "StepStarted.json"),
+            at(4, "StepStarted.json"),
+            at(5, "StepFinished.json"),
+            failed_step,
+            at(7, "SubagentStarted.json"),
+            at(8, "SubagentStarted.json"),
+            at(9, "SubagentError.json"),
+            at(10, "SubagentFinished.json"),
+        ],
+    );
+
+    let items = view.tasks()[0].transcript().items();
+    let steps = items
+        .iter()
+        .filter(|item| matches!(item, Item::Step(_)))
+        .count();
+    assert_eq!(steps, 1, "one item per step_id and iteration");
+    let Some(Item::Step(step)) = items.iter().find(|item| matches!(item, Item::Step(_))) else {
+        panic!("step item");
+    };
+    assert_eq!(
+        step.outcome,
+        Some(StepOutcome::Success),
+        "first outcome wins"
+    );
+
+    let subagents = items
+        .iter()
+        .filter(|item| matches!(item, Item::Subagent(_)))
+        .count();
+    assert_eq!(subagents, 1, "one item per subagent_run_id");
+    assert_eq!(
+        subagent(items, "sub_1").status,
+        SubagentStatus::Failed {
+            message: "child cancelled".to_owned(),
+            code: Some("cancelled".to_owned()),
+        },
+        "a SubagentFinished after the SubagentError does not reopen or replace it"
+    );
+}
+
+#[test]
+fn every_turn_event_example_applies_and_no_step_subagent_or_raw_is_dropped() {
+    let dir: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "protocol",
+        "schemas",
+        "turn-event",
+        "examples",
+    ]
+    .iter()
+    .collect();
+    let mut files: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("{}: {error}", dir.display()))
+        .map(|entry| {
+            entry
+                .expect("directory entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.ends_with(".json"))
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "the examples directory has examples");
+
+    // A task with a usage snapshot before it, so a StateDelta example has its snapshot.
+    let mut prologue = sequence(&["UserMessage.json", "RunStarted.json"]);
+    prologue.push(
+        serde_json::from_value(json!({
+            "v": 1, "seq": 3, "thread_id": "th_1", "task_id": null, "run_id": null,
+            "ts": "2026-10-27T22:00:00.000Z",
+            "event": {"type": "StateSnapshot", "scope": "usage",
+                      "snapshot": {"context_used": 1, "context_size": 200000, "cost": null}}
+        }))
+        .expect("parses"),
+    );
+
+    for file in &files {
+        let mut view = ThreadView::new("th_1");
+        apply_all(&mut view, &prologue);
+        let envelope = at(4, file);
+        view.apply(&envelope)
+            .unwrap_or_else(|error| panic!("{file} applies: {error}"));
+
+        let items = view.tasks()[0].transcript().items();
+        let kept = match &envelope.event {
+            Event::StepStarted(_) | Event::StepFinished(_) => {
+                items.iter().any(|item| matches!(item, Item::Step(_)))
+            }
+            Event::SubagentStarted(_) | Event::SubagentFinished(_) | Event::SubagentError(_) => {
+                items.iter().any(|item| matches!(item, Item::Subagent(_)))
+            }
+            Event::Raw(_) => items.iter().any(|item| matches!(item, Item::Raw(_))),
+            _ => true,
+        };
+        assert!(kept, "{file} is dropped by the transcript");
+    }
 }

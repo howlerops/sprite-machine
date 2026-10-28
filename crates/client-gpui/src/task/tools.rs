@@ -2,16 +2,20 @@
 //! plan, terminal, policy), interrupts and checkpoints. Pure functions from `client-core` view
 //! models to [`Row`]s, so they are tested without a window.
 
-use client_core::view::transcript::{ActivityView, InterruptView, ToolStatus, ToolView};
+use client_core::view::transcript::{
+    ActivityView, InterruptView, RawView, StepView, SubagentStatus, SubagentView, ToolStatus,
+    ToolView,
+};
 use protocol::tunnel::ContentPart;
 use protocol::turn_event::{
-    ActivityType, Checkpoint, PlanStatus, PolicyDecision, ResolvedOutcome, ToolKind,
+    ActivityType, Checkpoint, PlanStatus, PolicyDecision, RawEventSource, ResolvedOutcome,
+    StepOutcome, ToolKind,
 };
 
 use crate::shell::i18n::{tr, tr_args};
 use crate::task::transcript::{
-    MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, Row, RowKind, Tone, push_body, push_more,
-    sanitize, wrap_lines,
+    MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, Row, RowKind, Tone, cap, push_body,
+    push_more, sanitize, wrap_lines,
 };
 use client_core::view::transcript::LocalAnswer;
 
@@ -41,7 +45,7 @@ fn status_word(status: ToolStatus) -> (String, Tone) {
 }
 
 /// A tool call: a title row (`Edit src/main.rs (edit)`), its status, locations, input, output.
-pub fn tool_rows(tool: &ToolView, out: &mut Vec<Row>) {
+pub fn tool_rows(tool: &ToolView, expanded: bool, out: &mut Vec<Row>) {
     let title = match &tool.title {
         Some(title) => sanitize(title),
         None => tr_args(
@@ -79,7 +83,7 @@ pub fn tool_rows(tool: &ToolView, out: &mut Vec<Row>) {
         push_body(
             out,
             &pretty,
-            MAX_BODY_LINES,
+            cap(expanded, MAX_BODY_LINES),
             RowKind::ToolDetail,
             Tone::Normal,
             3,
@@ -99,7 +103,7 @@ pub fn tool_rows(tool: &ToolView, out: &mut Vec<Row>) {
             ContentPart::Text { text } => push_body(
                 out,
                 text,
-                MAX_BODY_LINES,
+                cap(expanded, MAX_BODY_LINES),
                 RowKind::ToolDetail,
                 Tone::Normal,
                 3,
@@ -119,7 +123,7 @@ pub fn tool_rows(tool: &ToolView, out: &mut Vec<Row>) {
         push_body(
             out,
             &pretty,
-            MAX_BODY_LINES,
+            cap(expanded, MAX_BODY_LINES),
             RowKind::ToolDetail,
             Tone::Normal,
             3,
@@ -128,7 +132,7 @@ pub fn tool_rows(tool: &ToolView, out: &mut Vec<Row>) {
 }
 
 /// A diff, plan, terminal or policy activity.
-pub fn activity_rows(activity: &ActivityView, out: &mut Vec<Row>) {
+pub fn activity_rows(activity: &ActivityView, expanded: bool, out: &mut Vec<Row>) {
     match activity.activity_type {
         ActivityType::Diff => match activity.diff() {
             Some(diff) => {
@@ -143,7 +147,7 @@ pub fn activity_rows(activity: &ActivityView, out: &mut Vec<Row>) {
                     1,
                     tr_args(id, &[("detail", &sanitize(&diff.path))]),
                 ));
-                diff_lines(diff.old_text.as_deref(), &diff.new_text, out);
+                diff_lines(diff.old_text.as_deref(), &diff.new_text, expanded, out);
             }
             None => generic(activity, out),
         },
@@ -186,7 +190,9 @@ pub fn activity_rows(activity: &ActivityView, out: &mut Vec<Row>) {
                 out.push(Row::new(RowKind::Terminal, Tone::Normal, 1, title));
                 if let Some(output) = &terminal.output {
                     let lines = wrap_lines(output.trim_end_matches('\n'), 110);
-                    let hidden = lines.len().saturating_sub(MAX_TERMINAL_LINES);
+                    let hidden = lines
+                        .len()
+                        .saturating_sub(cap(expanded, MAX_TERMINAL_LINES));
                     if hidden > 0 {
                         push_more(out, hidden, 2);
                     }
@@ -254,7 +260,7 @@ fn generic(activity: &ActivityView, out: &mut Vec<Row>) {
 
 /// A minimal diff: lines shared at the start and end are dropped, the rest is shown as removed
 /// (`-`) and added (`+`). The full side-by-side diff is the diff view's job.
-fn diff_lines(old: Option<&str>, new: &str, out: &mut Vec<Row>) {
+fn diff_lines(old: Option<&str>, new: &str, expanded: bool, out: &mut Vec<Row>) {
     let old_lines: Vec<&str> = old.map(|old| old.lines().collect()).unwrap_or_default();
     let new_lines: Vec<&str> = new.lines().collect();
     let prefix = old_lines
@@ -271,22 +277,23 @@ fn diff_lines(old: Option<&str>, new: &str, out: &mut Vec<Row>) {
     let removed = &old_lines[prefix..old_lines.len() - suffix];
     let added = &new_lines[prefix..new_lines.len() - suffix];
     let total = removed.len() + added.len();
+    let max = cap(expanded, MAX_DIFF_LINES);
     let signed = removed
         .iter()
         .map(|line| ('-', *line, Tone::Danger))
         .chain(added.iter().map(|line| ('+', *line, Tone::Success)));
-    for (sign, line, tone) in signed.take(MAX_DIFF_LINES) {
+    for (sign, line, tone) in signed.take(max) {
         let mut text = format!("{sign} {}", sanitize(line));
         text.truncate(text.floor_char_boundary(crate::task::transcript::WRAP_COLS));
         out.push(Row::new(RowKind::DiffLine, tone, 2, text));
     }
-    if total > MAX_DIFF_LINES {
-        push_more(out, total - MAX_DIFF_LINES, 2);
+    if total > max {
+        push_more(out, total - max, 2);
     }
 }
 
 /// An interrupt (approval, form, auth): title, message, options, expiry, then its resolution.
-pub fn interrupt_rows(view: &InterruptView, out: &mut Vec<Row>) {
+pub fn interrupt_rows(view: &InterruptView, expanded: bool, out: &mut Vec<Row>) {
     let interrupt = &view.interrupt;
     let id = match interrupt.kind {
         protocol::turn_event::InterruptKind::Approval => "interrupt-approval",
@@ -307,7 +314,7 @@ pub fn interrupt_rows(view: &InterruptView, out: &mut Vec<Row>) {
         push_body(
             out,
             message,
-            MAX_BODY_LINES,
+            cap(expanded, MAX_BODY_LINES),
             RowKind::Interrupt,
             Tone::Normal,
             2,
@@ -405,4 +412,143 @@ pub fn checkpoint_rows(checkpoint: &Checkpoint, out: &mut Vec<Row>) {
         None => tr_args("transcript-checkpoint", &[("detail", &name)]),
     };
     out.push(Row::new(RowKind::Checkpoint, Tone::Muted, 0, text));
+}
+
+/// A flow step: its name (and iteration) and where it stands.
+pub fn step_rows(step: &StepView, out: &mut Vec<Row>) {
+    let name = sanitize(&step.step_name);
+    let name = match step.iteration {
+        Some(iteration) => tr_args(
+            "transcript-step-iteration",
+            &[("detail", &name), ("choice", &iteration.to_string())],
+        ),
+        None => name,
+    };
+    let (state, tone) = match step.outcome {
+        None => ("transcript-step-running", Tone::Muted),
+        Some(StepOutcome::Success) => ("transcript-step-done", Tone::Success),
+        Some(StepOutcome::Failed) => ("transcript-step-failed", Tone::Danger),
+        Some(StepOutcome::Skipped) => ("transcript-step-skipped", Tone::Muted),
+        Some(StepOutcome::Cancelled) => ("transcript-step-cancelled", Tone::Warning),
+    };
+    out.push(Row::new(
+        RowKind::Step,
+        tone,
+        0,
+        tr_args(
+            "transcript-step",
+            &[("detail", &name), ("choice", &tr(state))],
+        ),
+    ));
+}
+
+/// A subagent run: name and status, the child task it runs in, and its result or error.
+pub fn subagent_rows(sub: &SubagentView, expanded: bool, out: &mut Vec<Row>) {
+    let name = sanitize(if sub.name.is_empty() {
+        &sub.subagent_run_id
+    } else {
+        &sub.name
+    });
+    let (state, tone) = match &sub.status {
+        SubagentStatus::Running => (tr("transcript-subagent-running"), Tone::Muted),
+        SubagentStatus::Finished { .. } => (tr("transcript-subagent-done"), Tone::Success),
+        SubagentStatus::Failed {
+            message,
+            code: Some(code),
+        } => (
+            tr_args(
+                "transcript-subagent-failed-code",
+                &[("code", &sanitize(code)), ("detail", &sanitize(message))],
+            ),
+            Tone::Danger,
+        ),
+        SubagentStatus::Failed {
+            message,
+            code: None,
+        } => (
+            tr_args(
+                "transcript-subagent-failed",
+                &[("detail", &sanitize(message))],
+            ),
+            Tone::Danger,
+        ),
+    };
+    out.push(Row::new(
+        RowKind::Subagent,
+        tone,
+        0,
+        tr_args(
+            "transcript-subagent",
+            &[("detail", &name), ("choice", &state)],
+        ),
+    ));
+    if let Some(description) = &sub.description {
+        push_body(
+            out,
+            description,
+            cap(expanded, MAX_BODY_LINES),
+            RowKind::Subagent,
+            Tone::Muted,
+            1,
+        );
+    }
+    if let Some(child) = sub.child_task_id.as_ref().or(sub.child_thread_id.as_ref()) {
+        out.push(Row::new(
+            RowKind::Subagent,
+            Tone::Muted,
+            1,
+            tr_args("transcript-subagent-child", &[("detail", &sanitize(child))]),
+        ));
+    }
+    if let SubagentStatus::Finished {
+        result: Some(result),
+    } = &sub.status
+    {
+        let pretty = serde_json::to_string_pretty(result).unwrap_or_default();
+        push_body(
+            out,
+            &pretty,
+            cap(expanded, MAX_BODY_LINES),
+            RowKind::ToolDetail,
+            Tone::Normal,
+            2,
+        );
+    }
+}
+
+/// A raw event: a child thread's event nested in this one, or an unmapped source event. Only
+/// its source and event type are shown.
+pub fn raw_rows(raw: &RawView, out: &mut Vec<Row>) {
+    let kind = |event: &serde_json::Map<String, serde_json::Value>| {
+        event
+            .get("type")
+            .and_then(|kind| kind.as_str())
+            .map(sanitize)
+    };
+    let source = match raw.source {
+        RawEventSource::Child => "transcript-raw-child",
+        RawEventSource::Acp => "transcript-raw-acp",
+        RawEventSource::A2a => "transcript-raw-peer",
+        RawEventSource::Flow => "transcript-raw-flow",
+    };
+    // A child's nested envelope carries the event one level down.
+    let nested = raw
+        .event
+        .get("event")
+        .and_then(|event| event.as_object())
+        .and_then(kind);
+    let event = nested
+        .or_else(|| kind(&raw.event))
+        .unwrap_or_else(|| tr("transcript-raw-unknown"));
+    let thread = raw
+        .child_thread_id
+        .as_deref()
+        .map(sanitize)
+        .unwrap_or_default();
+    out.push(Row::new(
+        RowKind::Raw,
+        Tone::Muted,
+        1,
+        tr_args(source, &[("detail", &event), ("choice", &thread)]),
+    ));
 }

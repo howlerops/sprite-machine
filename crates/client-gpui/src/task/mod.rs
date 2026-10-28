@@ -4,4 +4,4 @@
 pub mod tools;
 pub mod transcript;
 
-pub use transcript::{Row, RowKind, Tone, TranscriptPane, thread_rows};
+pub use transcript::{Row, RowKind, Tone, TranscriptPane, thread_rows, thread_rows_expanded};

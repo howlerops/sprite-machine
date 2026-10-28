@@ -9,6 +9,7 @@
 //! Item bodies are wrapped at [`WRAP_COLS`] columns and long bodies are capped (see
 //! [`crate::task::tools`]). Row wrapping is by character count, not measured pixels.
 
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use client_core::TaskStatus;
@@ -32,6 +33,8 @@ pub const ROW_HEIGHT: Pixels = px(22.);
 pub const PANE_ID: &str = "transcript";
 /// Element id carried by every laid-out row's text element.
 pub const ROW_ID: &str = "transcript-row";
+/// Element id of a clickable "more lines" / "show less" row.
+pub const MORE_ID: &str = "transcript-more";
 /// Characters per wrapped line.
 pub const WRAP_COLS: usize = 110;
 /// Lines shown from a tool input/output, a reasoning block or a diff before "N more lines".
@@ -58,6 +61,9 @@ pub enum RowKind {
     Policy,
     Interrupt,
     Checkpoint,
+    Step,
+    Subagent,
+    Raw,
     Error,
     /// "... N more lines" after a capped body.
     More,
@@ -81,6 +87,8 @@ pub struct Row {
     /// Indent steps (one step is a small left padding).
     pub indent: u8,
     pub text: String,
+    /// For a "more" or "less" row: the key of the item it expands or collapses.
+    pub expand: Option<usize>,
 }
 
 impl Row {
@@ -90,6 +98,7 @@ impl Row {
             tone,
             indent,
             text: text.into(),
+            expand: None,
         }
     }
 
@@ -160,7 +169,7 @@ pub fn push_more(out: &mut Vec<Row>, hidden: usize, indent: u8) {
 }
 
 /// The rows of one transcript item.
-pub fn item_rows(item: &Item, out: &mut Vec<Row>) {
+pub fn item_rows(item: &Item, expanded: bool, out: &mut Vec<Row>) {
     match item {
         Item::User(user) => {
             let who = if user.author.kind == ActorKind::User {
@@ -198,16 +207,19 @@ pub fn item_rows(item: &Item, out: &mut Vec<Row>) {
             push_body(
                 out,
                 &text.text,
-                MAX_BODY_LINES,
+                cap(expanded, MAX_BODY_LINES),
                 RowKind::Reasoning,
                 Tone::Muted,
                 1,
             );
         }
-        Item::Tool(tool) => tools::tool_rows(tool, out),
-        Item::Activity(activity) => tools::activity_rows(activity, out),
-        Item::Interrupt(interrupt) => tools::interrupt_rows(interrupt, out),
+        Item::Tool(tool) => tools::tool_rows(tool, expanded, out),
+        Item::Activity(activity) => tools::activity_rows(activity, expanded, out),
+        Item::Interrupt(interrupt) => tools::interrupt_rows(interrupt, expanded, out),
         Item::Checkpoint(checkpoint) => tools::checkpoint_rows(checkpoint, out),
+        Item::Step(step) => tools::step_rows(step, out),
+        Item::Subagent(sub) => tools::subagent_rows(sub, expanded, out),
+        Item::Raw(raw) => tools::raw_rows(raw, out),
         Item::Error { code, message } => {
             let message = sanitize(message);
             let text = match code {
@@ -235,17 +247,52 @@ pub fn status_row(status: TaskStatus) -> Row {
     Row::new(RowKind::Header, tone, 0, tr(id))
 }
 
-/// The rows of one task: its items, then its status.
-pub fn task_rows(task: &TaskView, out: &mut Vec<Row>) {
+/// Line limit for a body: `max`, or no limit when the item is expanded.
+pub fn cap(expanded: bool, max: usize) -> usize {
+    if expanded { usize::MAX } else { max }
+}
+
+/// The rows of one task: its items, then its status. `next_key` numbers the items of the
+/// thread; an item whose key is in `expanded` shows its capped bodies in full.
+pub fn task_rows(
+    task: &TaskView,
+    expanded: &BTreeSet<usize>,
+    next_key: &mut usize,
+    out: &mut Vec<Row>,
+) {
     for item in task.transcript().items() {
-        item_rows(item, out);
+        let key = *next_key;
+        *next_key += 1;
+        let start = out.len();
+        item_rows(item, false, out);
+        if !out[start..].iter().any(|row| row.kind == RowKind::More) {
+            continue;
+        }
+        if expanded.contains(&key) {
+            out.truncate(start);
+            item_rows(item, true, out);
+            let mut less = Row::new(RowKind::More, Tone::Muted, 1, tr("transcript-show-less"));
+            less.expand = Some(key);
+            out.push(less);
+        } else {
+            for row in out[start..].iter_mut().filter(|r| r.kind == RowKind::More) {
+                row.expand = Some(key);
+            }
+        }
     }
     out.push(status_row(task.status()));
 }
 
-/// The rows of a whole thread: title and machine presence, then each task in order.
+/// The rows of a whole thread with every body capped.
 pub fn thread_rows(thread: &ThreadView) -> Vec<Row> {
+    thread_rows_expanded(thread, &BTreeSet::new())
+}
+
+/// The rows of a whole thread: title and machine presence, then each task in order. Items are
+/// numbered in order across tasks; those numbered in `expanded` are shown in full.
+pub fn thread_rows_expanded(thread: &ThreadView, expanded: &BTreeSet<usize>) -> Vec<Row> {
     let mut out = Vec::new();
+    let mut next_key = 0;
     let title = thread
         .title()
         .map(sanitize)
@@ -303,7 +350,7 @@ pub fn thread_rows(thread: &ThreadView) -> Vec<Row> {
         ));
     }
     for task in thread.tasks() {
-        task_rows(task, &mut out);
+        task_rows(task, expanded, &mut next_key, &mut out);
     }
     out
 }
@@ -314,6 +361,8 @@ pub struct TranscriptPane {
     item_sizes: Rc<Vec<Size<Pixels>>>,
     scroll_handle: VirtualListScrollHandle,
     follow_tail: bool,
+    thread: Option<ThreadView>,
+    expanded: BTreeSet<usize>,
 }
 
 impl Default for TranscriptPane {
@@ -329,6 +378,8 @@ impl TranscriptPane {
             item_sizes: Rc::new(Vec::new()),
             scroll_handle: VirtualListScrollHandle::new(),
             follow_tail: false,
+            thread: None,
+            expanded: BTreeSet::new(),
         }
     }
 
@@ -343,18 +394,32 @@ impl TranscriptPane {
 
     /// Rebuilds the rows from `thread` and repaints.
     pub fn set_thread(&mut self, thread: &ThreadView, cx: &mut Context<Self>) {
-        self.rows = thread_rows(thread);
-        if self.item_sizes.len() != self.rows.len() {
-            self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); self.rows.len()]);
-        }
+        self.thread = Some(thread.clone());
+        self.rebuild(cx);
         if self.follow_tail && !self.rows.is_empty() {
             self.scroll_handle
                 .scroll_to_item(self.rows.len() - 1, ScrollStrategy::Bottom);
         }
+    }
+
+    /// Shows the capped bodies of item `key` in full, or caps them again.
+    pub fn toggle_expanded(&mut self, key: usize, cx: &mut Context<Self>) {
+        if !self.expanded.remove(&key) {
+            self.expanded.insert(key);
+        }
+        self.rebuild(cx);
+    }
+
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
+        let Some(thread) = &self.thread else { return };
+        self.rows = thread_rows_expanded(thread, &self.expanded);
+        if self.item_sizes.len() != self.rows.len() {
+            self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); self.rows.len()]);
+        }
         cx.notify();
     }
 
-    fn render_row(&self, ix: usize, cx: &App) -> impl IntoElement + use<> {
+    fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let row = &self.rows[ix];
         let text = SharedString::from(row.text.clone());
         let theme = cx.theme();
@@ -372,21 +437,40 @@ impl TranscriptPane {
         );
         let shaded = matches!(row.kind, RowKind::User);
         let background = theme.secondary;
-        div().id(("row", ix)).w_full().h(ROW_HEIGHT).child(
-            div()
-                .id(ROW_ID)
-                .test_support()
-                .aria_label(text.clone())
-                .size_full()
-                .px_3()
-                .pl(px(12. + 16. * f32::from(row.indent)))
-                .text_sm()
-                .text_color(color)
-                .when_some(mono, |el, family| el.font_family(family))
-                .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
-                .when(shaded, |el| el.bg(background))
-                .child(div().truncate().child(text)),
-        )
+        let expand = row.expand;
+        let outer_id: ElementId = if expand.is_some() {
+            MORE_ID.into()
+        } else {
+            ("row", ix).into()
+        };
+        let listener = cx.listener(move |pane, _, _, cx| {
+            if let Some(key) = expand {
+                pane.toggle_expanded(key, cx);
+            }
+        });
+        div()
+            .id(outer_id)
+            .test_support()
+            .w_full()
+            .h(ROW_HEIGHT)
+            .when(expand.is_some(), |el| {
+                el.cursor_pointer().on_click(listener)
+            })
+            .child(
+                div()
+                    .id(ROW_ID)
+                    .test_support()
+                    .aria_label(text.clone())
+                    .size_full()
+                    .px_3()
+                    .pl(px(12. + 16. * f32::from(row.indent)))
+                    .text_sm()
+                    .text_color(color)
+                    .when_some(mono, |el, family| el.font_family(family))
+                    .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
+                    .when(shaded, |el| el.bg(background))
+                    .child(div().truncate().child(text)),
+            )
     }
 }
 

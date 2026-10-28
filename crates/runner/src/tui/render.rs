@@ -5,10 +5,10 @@
 //! shared, the transcript (newest at the bottom), the open approval, the notice, the input line.
 
 use client_core::TaskStatus;
-use client_core::view::{InterruptView, Item, LocalAnswer, ToolStatus};
+use client_core::view::{InterruptView, Item, LocalAnswer, SubagentStatus, ToolStatus};
 use client_core::{Connectivity, ThreadView};
 use protocol::tunnel::Actor;
-use protocol::turn_event::{ActivityType, ResolvedOutcome};
+use protocol::turn_event::{ActivityType, ResolvedOutcome, StepOutcome};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -265,6 +265,58 @@ fn item_lines(item: &Item, width: usize, lines: &mut Vec<Line<'static>>) {
         ),
         Item::Error { message, .. } => {
             wrap_into(lines, "! ", message, width, Style::new().fg(Color::Red))
+        }
+        Item::Step(step) => {
+            let state = match step.outcome {
+                None => "running",
+                Some(StepOutcome::Success) => "done",
+                Some(StepOutcome::Failed) => "failed",
+                Some(StepOutcome::Skipped) => "skipped",
+                Some(StepOutcome::Cancelled) => "cancelled",
+            };
+            let iteration = step
+                .iteration
+                .map_or_else(String::new, |n| format!(" #{n}"));
+            wrap_into(
+                lines,
+                "  [step] ",
+                &format!("{}{iteration}: {state}", step.step_name),
+                width,
+                DIM,
+            );
+        }
+        Item::Subagent(sub) => {
+            let name = if sub.name.is_empty() {
+                &sub.subagent_run_id
+            } else {
+                &sub.name
+            };
+            let state = match &sub.status {
+                SubagentStatus::Running => "running".to_owned(),
+                SubagentStatus::Finished { .. } => "done".to_owned(),
+                SubagentStatus::Failed { message, .. } => format!("failed: {message}"),
+            };
+            wrap_into(
+                lines,
+                "  [subagent] ",
+                &format!("{name}: {state}"),
+                width,
+                DIM,
+            );
+        }
+        Item::Raw(raw) => {
+            let kind = raw
+                .event
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("event");
+            wrap_into(
+                lines,
+                "  [raw] ",
+                &format!("{:?} {kind}", raw.source),
+                width,
+                DIM,
+            );
         }
     }
 }
