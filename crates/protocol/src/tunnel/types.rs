@@ -42,12 +42,15 @@ pub enum ContentPart {
     },
 }
 
-/// The answer to an interrupt: an option the user picked, or cancelled (ACP
-/// `RequestPermissionOutcome`).
+/// The answer to an interrupt (tunnel.md §3.5): an option the user picked (`approval`), form data
+/// (`form`), a refusal (`form`, `auth`) or a cancel (any). `expired` is the runner's own and never
+/// sent down.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Outcome {
     Selected { option_id: String },
+    Submitted { data: serde_json::Value },
+    Declined,
     Cancelled,
 }
 

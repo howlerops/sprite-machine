@@ -3,28 +3,23 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use protocol::acp::{
-    ContentBlock, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification,
-};
+use protocol::acp::{ContentBlock, SessionNotification};
 use protocol::mapping::acp_turn::{
     AcpTurnMapper, IdSource, SequentialIds, StartTask, runner_actor,
 };
-use protocol::tunnel::{Command, CommandErrorCode, ContentPart, Disposition, Outcome};
+use protocol::tunnel::{Command, CommandErrorCode, ContentPart, Disposition};
 use protocol::turn_event::{Envelope, Event, RunErrorReason, RunOutcome, UserMessage};
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
 
 use super::handler::{Internal, Resources};
 use super::ids::SharedIds;
 use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand};
-use super::{ActiveTask, Bridge, BridgeError, PendingApproval, Start, ThreadState};
+use super::{ActiveTask, Bridge, BridgeError, Start, ThreadState};
 use crate::acp::client::ClientError;
 use crate::acp::fs::Workspace;
 use crate::acp::reattach::{ReattachError, expire_overdue_interrupts, rfc3339};
 use crate::acp::sessions::PromptResult;
 use crate::acp::terminal::{ActivitySink, TerminalScope, Terminals};
-use crate::store::{InterruptKind, PendingInterrupt};
 
 impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     /// Runs until the command source ends. Fails when the store, the agent connection's
@@ -55,11 +50,11 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         }
     }
 
-    fn now_ms(&self) -> u64 {
+    pub(super) fn now_ms(&self) -> u64 {
         self.store.now_ms()
     }
 
-    fn ts(&self) -> String {
+    pub(super) fn ts(&self) -> String {
         rfc3339(self.now_ms())
     }
 
@@ -83,7 +78,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         Ok(())
     }
 
-    async fn reject(
+    pub(super) async fn reject(
         &self,
         key: &str,
         code: CommandErrorCode,
@@ -361,71 +356,6 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         })
     }
 
-    async fn approve(
-        &mut self,
-        key: &str,
-        thread_id: &str,
-        task_id: &str,
-        interrupt_id: &str,
-        outcome: Outcome,
-    ) -> Result<(), BridgeError> {
-        if !self.threads.contains_key(thread_id) {
-            return self
-                .reject(
-                    key,
-                    CommandErrorCode::UnknownThread,
-                    format!("unknown thread {thread_id}"),
-                )
-                .await;
-        }
-        let open = self
-            .approvals
-            .get(interrupt_id)
-            .is_some_and(|pending| pending.thread_id == thread_id && pending.task_id == task_id);
-        let surfaced = open
-            && self
-                .threads
-                .get_mut(thread_id)
-                .is_some_and(|thread| thread.mapper.note_interrupt_resolved(interrupt_id));
-        let pending = if surfaced {
-            self.approvals.remove(interrupt_id)
-        } else {
-            None
-        };
-        let Some(pending) = pending else {
-            return self
-                .reject(
-                    key,
-                    CommandErrorCode::UnknownInterrupt,
-                    format!("no open interrupt {interrupt_id} in thread {thread_id}"),
-                )
-                .await;
-        };
-        self.store.resolve_interrupt(interrupt_id)?;
-        let ts = self.ts();
-        let mut events = match self.threads.get_mut(thread_id) {
-            Some(thread) => thread.mapper.resume(&ts),
-            None => Vec::new(),
-        };
-        events.extend(self.release_held(thread_id));
-        self.emit(thread_id, events).await?;
-
-        let outcome = match outcome {
-            Outcome::Selected { option_id } => {
-                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id))
-            }
-            Outcome::Cancelled => RequestPermissionOutcome::Cancelled,
-        };
-        if pending
-            .reply
-            .send(RequestPermissionResponse::new(outcome))
-            .is_err()
-        {
-            tracing::debug!(%interrupt_id, "the agent stopped waiting for the approval");
-        }
-        Ok(())
-    }
-
     async fn cancel(
         &mut self,
         key: &str,
@@ -500,6 +430,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     async fn on_internal(&mut self, message: Internal) -> Result<(), BridgeError> {
         match message {
             Internal::Permission { request, reply } => self.on_permission(request, reply).await,
+            Internal::Elicitation { request, reply } => self.on_elicitation(request, reply).await,
             Internal::Activity {
                 thread_id,
                 envelope,
@@ -510,56 +441,6 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                 result,
             } => self.on_prompt_done(&thread_id, &task_id, result).await,
         }
-    }
-
-    async fn on_permission(
-        &mut self,
-        request: RequestPermissionRequest,
-        reply: oneshot::Sender<RequestPermissionResponse>,
-    ) -> Result<(), BridgeError> {
-        let session = request.session_id.0.to_string();
-        let thread_id = self.by_session.get(&session).cloned();
-        let task = thread_id
-            .as_ref()
-            .and_then(|id| self.threads.get(id))
-            .and_then(|thread| thread.mapper.task_id().map(str::to_owned));
-        let (Some(thread_id), Some(task_id)) = (thread_id, task) else {
-            // Dropping `reply` answers the agent `cancelled`.
-            tracing::warn!(%session, "permission request outside a running task; cancelled");
-            return Ok(());
-        };
-        let interrupt_id = self.ids.next_id("int_");
-        let expires_at_ms = self.now_ms().saturating_add(
-            u64::try_from(self.config.approval_ttl.as_millis()).unwrap_or(u64::MAX),
-        );
-        self.store.save_interrupt(&PendingInterrupt {
-            interrupt_id: interrupt_id.clone(),
-            thread_id: thread_id.clone(),
-            task_id: task_id.clone(),
-            kind: InterruptKind::Approval,
-            request: serde_json::to_value(&request).unwrap_or(Value::Null),
-            expires_at_ms,
-        })?;
-        self.approvals.insert(
-            interrupt_id.clone(),
-            PendingApproval {
-                thread_id: thread_id.clone(),
-                task_id,
-                reply,
-                expires_at_ms,
-            },
-        );
-        let ts = self.ts();
-        let events = match self.threads.get_mut(&thread_id) {
-            Some(thread) => thread.mapper.on_request_permission(
-                &request,
-                &interrupt_id,
-                &rfc3339(expires_at_ms),
-                &ts,
-            ),
-            None => Vec::new(),
-        };
-        self.emit(&thread_id, events).await
     }
 
     async fn on_activity(
@@ -646,6 +527,8 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             return Ok(());
         };
         self.store.resolve_interrupt(interrupt_id)?;
+        // The agent's request is answered `cancelled` when its reply is dropped.
+        drop(self.handler.take_parked(interrupt_id));
         let ts = self.ts();
         let events = match self.threads.get_mut(&pending.thread_id) {
             Some(thread) => thread.mapper.on_interrupt_expired(interrupt_id, &ts),
@@ -695,7 +578,11 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
 
     /// Sends the events of one step, keeps the stored task states current and notices when the
     /// task ended.
-    async fn emit(&mut self, thread_id: &str, events: Vec<Envelope>) -> Result<(), BridgeError> {
+    pub(super) async fn emit(
+        &mut self,
+        thread_id: &str,
+        events: Vec<Envelope>,
+    ) -> Result<(), BridgeError> {
         if events.is_empty() {
             return Ok(());
         }
@@ -712,7 +599,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     }
 
     /// Terminal output teed during the pause, now belonging to the resumed run.
-    fn release_held(&mut self, thread_id: &str) -> Vec<Envelope> {
+    pub(super) fn release_held(&mut self, thread_id: &str) -> Vec<Envelope> {
         let Some(thread) = self.threads.get_mut(thread_id) else {
             return Vec::new();
         };
@@ -748,6 +635,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             .collect();
         for interrupt_id in ended {
             self.approvals.remove(&interrupt_id);
+            drop(self.handler.take_parked(&interrupt_id));
             self.store.resolve_interrupt(&interrupt_id)?;
         }
         Ok(())

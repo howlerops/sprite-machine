@@ -34,9 +34,11 @@
 //! line, so before the bridge acts on a request it drains the update channel first, and the
 //! events keep the order the agent produced them in.
 
+mod elicitation;
 mod handler;
 mod ids;
 mod io;
+mod permission;
 mod runtime;
 
 use std::collections::HashMap;

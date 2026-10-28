@@ -3,8 +3,8 @@
 //! - `fs/*` goes to the session's [`Workspace`], `terminal/*` to its [`Terminals`].
 //! - `session/request_permission` becomes an [`Internal::Permission`] for the bridge loop, which
 //!   emits the Interrupt and answers when the approval command arrives.
-//! - `elicitation/create` is answered `cancel`: the tunnel has no command for a submitted form
-//!   yet.
+//! - `elicitation/create` (form or url) becomes an [`Internal::Elicitation`] the same way; the
+//!   loop parks its reply here until the `approval` command arrives.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -34,6 +34,12 @@ pub(crate) enum Internal {
         request: RequestPermissionRequest,
         reply: oneshot::Sender<RequestPermissionResponse>,
     },
+    /// The agent asks for input (form) or authorization (url); the loop answers on `reply`.
+    /// Dropping `reply` answers the agent `cancel`.
+    Elicitation {
+        request: CreateElicitationRequest,
+        reply: oneshot::Sender<CreateElicitationResponse>,
+    },
     /// An `Activity{terminal}` envelope teed from a terminal of `thread_id`.
     Activity {
         thread_id: String,
@@ -45,6 +51,19 @@ pub(crate) enum Internal {
         task_id: String,
         result: PromptResult,
     },
+}
+
+/// An open elicitation interrupt: its kind, and where its answer goes.
+pub(crate) struct Parked {
+    pub kind: ParkedKind,
+    pub reply: oneshot::Sender<CreateElicitationResponse>,
+}
+
+/// The interrupt kind of a parked elicitation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParkedKind {
+    Form,
+    Auth,
 }
 
 /// What a session's `fs/*` and `terminal/*` requests run against.
@@ -59,6 +78,8 @@ pub(crate) struct Resources {
 pub(crate) struct BridgeHandler {
     tx: mpsc::UnboundedSender<Internal>,
     sessions: Arc<Mutex<HashMap<String, Arc<Resources>>>>,
+    /// Open elicitation interrupts by interrupt id.
+    parked: Arc<Mutex<HashMap<String, Parked>>>,
 }
 
 impl BridgeHandler {
@@ -66,11 +87,28 @@ impl BridgeHandler {
         Self {
             tx,
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            parked: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     fn table(&self) -> MutexGuard<'_, HashMap<String, Arc<Resources>>> {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Keeps the reply of an open elicitation until its answer arrives.
+    pub(crate) fn park(&self, interrupt_id: &str, parked: Parked) {
+        self.parked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(interrupt_id.to_owned(), parked);
+    }
+
+    /// Takes the parked elicitation of `interrupt_id`; `None` for a permission or a closed one.
+    pub(crate) fn take_parked(&self, interrupt_id: &str) -> Option<Parked> {
+        self.parked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(interrupt_id)
     }
 
     /// Sets what `session`'s requests run against (replacing the previous task's terminals).
@@ -108,10 +146,15 @@ impl ClientHandler for BridgeHandler {
 
     async fn create_elicitation(
         &self,
-        _request: CreateElicitationRequest,
+        request: CreateElicitationRequest,
     ) -> anyhow::Result<CreateElicitationResponse> {
-        tracing::warn!("elicitation/create is answered cancel: no tunnel command carries a form");
-        Ok(CreateElicitationResponse::new(ElicitationAction::Cancel))
+        let (reply, answer) = oneshot::channel();
+        self.tx
+            .send(Internal::Elicitation { request, reply })
+            .map_err(|_| anyhow!("the bridge stopped"))?;
+        Ok(answer
+            .await
+            .unwrap_or_else(|_| CreateElicitationResponse::new(ElicitationAction::Cancel)))
     }
 
     async fn read_text_file(

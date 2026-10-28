@@ -270,6 +270,8 @@ impl HubState {
             Outcome::Selected { option_id } => ResolvedOutcome::Selected {
                 option_id: option_id.clone(),
             },
+            Outcome::Submitted { data } => ResolvedOutcome::Submitted { data: data.clone() },
+            Outcome::Declined => ResolvedOutcome::Declined,
             Outcome::Cancelled => ResolvedOutcome::Cancelled,
         };
         let resolved = thread
