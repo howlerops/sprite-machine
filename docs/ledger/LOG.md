@@ -51,3 +51,5 @@
 2026-10-28T00:57Z leader: disk at 2.4 GB during M1B-004a build; removed stale release/ and wasm32 release/ outputs (→2.9 GB); full shared-target rebuild planned at P0 review
 2026-10-28T01:02Z MVP-000b review→done (CI tracer job green, run 40609114253)
 2026-10-28T01:02Z leader: macos CI red since M1A-003 merge (/proc-only test); fixed in 5b435f3 (kill -0, mutation-checked)
+2026-10-28T01:04Z M1B-004a assigned→done merged 0007480 (opus); CONVENTIONS.md updated with its GPUI API notes; discovered work → M1B-004b..d / M1B-008 (variable-height rows, streaming + frame timing)
+2026-10-28T01:04Z leader: all 12 P0 items done — P0 phase review starts (clean rebuild of the shared target)

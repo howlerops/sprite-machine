@@ -1205,7 +1205,8 @@ items:
     title: 'gpui spike: app shell + virtualized transcript pane'
     milestone: M1b
     phase: P0
-    status: "assigned"
+    status: "done"
+    evidence: "merged 0007480; verify: 9 tests (headless: 22 of 2504 rows laid out, scroll to row 200), pins test, clippy clean; lavapipe screenshot of the shell renders"
     assignee: "worker:opus"
     attempt: 1
     lane: client

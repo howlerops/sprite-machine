@@ -2,15 +2,15 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 23/192 (3 dropped) · in-flight M1B-004a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 19/120
+done 24/192 (3 dropped) · in-flight — · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 19/120
 
-MVP-000b done; macOS CI fix pushed; M1B-004a (last P0) in flight.
+P0 complete; phase review running.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
-| P0 | 12 | 11 | 1 |
+| P0 | 12 | 12 | 0 |
 | P1 | 30 | 7 | 0 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
@@ -19,22 +19,40 @@ MVP-000b done; macOS CI fix pushed; M1B-004a (last P0) in flight.
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
 
-## P0 items
+## P1 items
 
 | Item | Owner | Lane | Status | Title |
 | ---- | ----- | ---- | ------ | ----- |
-| M0-002 | leader | rust | done | Cargo workspace skeleton (all crates incl. client-gpui, runner, edges; web/) + Rust CI incl. macos-latest |
-| SPEC-001 | leader | docs | done | Spec: TurnEvent envelope (docs/specs/turn-event.md + JSON Schemas) |
-| SPEC-002 | leader | docs | done | Spec: runner ↔ hub tunnel (docs/specs/tunnel.md) |
-| MVP-000 | worker | rust | done | Tracer bullet: acp-mock → runner core → tunnel → hub on wrangler dev → headless client |
-| M0-003 | worker | client | done | Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build) |
-| M0-006 | worker | rust | done | protocol::acp — re-export ACP v1 schema from the official Rust SDK (agent-client-protocol 3.x) |
-| M0-017 | worker | rust | done | Spike: Cloudflare Workers (workers-rs + axum, SQLite DO + hibernatable WebSocket, D1, R2) under wrangler dev |
-| M1A-002 | worker | rust | done | acp-mock: scriptable ACP v1 agent |
-| GPUI-000 | leader | client | done | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |
-| M1B-002 | worker | rust | done | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
-| M1B-003 | leader | docs | done | Client-stack gates written before prototypes |
-| M1B-004a | worker | client | assigned | gpui spike: app shell + virtualized transcript pane |
+| MVP-000a | worker | rust | done | Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile |
+| MVP-000c | worker | rust | todo | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
+| MVP-000b | worker | rust | done | CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2 |
+| SPEC-003 | leader | docs | done | Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage |
+| M0-008a | worker | rust | todo | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
+| M0-008b | worker | rust | todo | hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests |
+| M1A-001 | worker | rust | done | sidecar (runner-core lib): config, tracing, /healthz server fn |
+| M1A-003 | worker | rust | done | sidecar (runner core): ACP client + session table (concurrency, pending tasks) |
+| M1A-004 | worker | rust | todo | sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal}) |
+| M1A-006a | worker | rust | todo | protocol::mapping ACP→TurnEvent + golden tests |
+| M1A-006b | worker | rust | todo | runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink) |
+| M1A-007 | worker | rust | todo | Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms) |
+| M1A-009 | worker | rust | todo | Durable store (SQLite) + ACP session re-attach after restart |
+| M1A-013 | worker | rust | todo | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
+| M1A-014 | worker | rust | todo | Attachments: user FilePart → ACP image/resource blocks |
+| M1B-004b | worker | client | todo | gpui spike: diff pane (gpui-kit editor) |
+| M1B-004c | worker | client | todo | gpui spike: terminal pane (alacritty_terminal) |
+| M1B-004d | worker | client | todo | gpui spike: approval card + build release |
+| M1B-008 | worker | rust | todo | Benchmark scripts per gates.yaml |
+| M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
+| M2-016 | worker | rust | todo | hub: D1 schema + migrations (org-wide metadata) |
+| M2-003a | worker | rust | todo | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
+| M2-008 | worker | rust | todo | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
+| M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
+| M2B-001a | worker | rust | todo | protocol: strict tunnel frame parsing + unknown command kind helper |
+| M2B-002 | worker | rust | todo | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
+| M2B-003 | worker | rust | todo | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
+| M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
+| M2B-011 | worker | rust | todo | runner: local checkpoints as shadow git commits |
+| M3-001 | worker | rust | todo | client-core: TurnEvent subscription client, view models, cache, outbound queue |
 
 ## Waiting on the human
 
