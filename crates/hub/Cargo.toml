@@ -15,9 +15,18 @@ protocol = { path = "../protocol" }
 serde.workspace = true
 serde_json.workspace = true
 
+[features]
+# Integration tests that need a running hub (HUB_URL). Off by default, so `cargo test -p hub`
+# stays a plain native run. `scripts/hub-test.sh <name>` turns it on.
+live = []
+
+[[test]]
+name = "smoke"
+required-features = ["live"]
+
 # Workers glue (spike M0-017 pins). wasm32 only, so native builds and tests stay plain Rust.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-worker = { version = "=0.8.7", features = ["http", "axum"] }
+worker = { version = "=0.8.7", features = ["http", "axum", "d1", "queue"] }
 worker-macros = { version = "=0.8.7", features = ["http"] }
 axum = { version = "0.8", default-features = false, features = ["json"] }
 tower-service = "0.3"

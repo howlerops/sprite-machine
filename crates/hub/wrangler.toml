@@ -1,5 +1,5 @@
-# Hub Worker. MVP-000 tracer bullet: local only, run by `cargo run -p cli -- e2e tracer`
-# under `wrangler dev --local`. Never deployed from here.
+# Hub Worker. Local only for now: run by `cargo run -p cli -- e2e tracer`, `scripts/hub-test.sh`
+# and `wrangler dev --local`. Never deployed from here. Placeholder ids below are for local runs.
 name = "sm-hub"
 main = "build/index.js"
 compatibility_date = "2026-10-01"
@@ -10,12 +10,63 @@ compatibility_date = "2026-10-01"
 # command with the same environment.
 command = "worker-build --release"
 
+# ---- Durable Objects (SQLite-backed: a class cannot switch storage later) -------------------
+
 # TRACER STUB: replaced by M2-008 / M2B-002 (Thread DO, Machine DO). One in-memory object
-# holds the whole tracer hub. SQLite class, as the real DOs need (a class cannot switch later).
+# holds the whole tracer hub.
 [[durable_objects.bindings]]
 name = "HUB"
 class_name = "TracerHub"
 
+# Skeletons (crates/hub/src/do/mod.rs), filled in by M2-008, M2B-002 and the flow item.
+[[durable_objects.bindings]]
+name = "THREAD"
+class_name = "Thread"
+
+[[durable_objects.bindings]]
+name = "MACHINE"
+class_name = "Machine"
+
+[[durable_objects.bindings]]
+name = "FLOW"
+class_name = "Flow"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TracerHub"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Thread", "Machine", "Flow"]
+
+# ---- D1, R2, Queues -----------------------------------------------------------------------
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sm-hub"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "sm-blobs"
+
+[[queues.producers]]
+binding = "NOTIFY"
+queue = "sm-notify"
+
+[[queues.consumers]]
+queue = "sm-notify"
+max_batch_size = 10
+max_batch_timeout = 1
+
+# ---- Static Assets: the mobile web page (plan §4.2) ----------------------------------------
+
+[assets]
+directory = "../../web"
+binding = "ASSETS"
+
+# ---- Dev only -----------------------------------------------------------------------------
+
+[env.dev.vars]
+DEV_FIXTURES = "1"

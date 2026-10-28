@@ -4,95 +4,34 @@
 //! WebSocket upgrades) forwarded unchanged to a Durable Object; hibernatable WebSockets with
 //! `setWebSocketAutoResponse` for the literal tunnel heartbeat.
 //!
-//! Routes (NO AUTH in the tracer; the real hub authenticates every one of them):
+//! The routes (NO AUTH in the tracer; the real hub authenticates every one of them) are
+//! mounted by `crate::worker` and all forward to ONE Durable Object instance (`TracerHub`,
+//! name `tracer`) that keeps all machine and thread state in memory ([`HubState`]). An
+//! eviction loses it:
 //!
-//! - `GET /health`
 //! - `GET /v1/machines/{machine_id}/tunnel` (WebSocket, subprotocol `sm.tunnel.v1`)
 //! - `GET /threads/{thread_id}/subscribe?after=<seq>` (WebSocket, turn-event.md §6)
 //! - `POST /threads/{thread_id}/prompts` (`Idempotency-Key` header, [`PromptRequest`] body)
 //! - `POST /threads/{thread_id}/interrupts/{interrupt_id}` (`Idempotency-Key`,
 //!   [`AnswerRequest`] body; 409 when another answer won)
-//!
-//! Every route goes to ONE Durable Object instance (`TracerHub`, name `tracer`) that keeps
-//! all machine and thread state in memory ([`HubState`]). An eviction loses it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
-use axum::{
-    Router,
-    body::Body,
-    extract::{Request, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{get, post},
-};
 use protocol::tunnel::{CloseCode, Frame, SUBPROTOCOL};
 use serde::Serialize;
-use tower_service::Service;
 // `#[durable_object]` expands to wasm-bindgen code that expects `wasm_bindgen` in scope.
 use worker::wasm_bindgen;
 use worker::{
-    Context, DurableObject, Env, HttpRequest, Method, WebSocket, WebSocketIncomingMessage,
-    WebSocketPair, WebSocketRequestResponsePair, durable_object, event, send::SendWrapper,
+    DurableObject, Env, Method, WebSocket, WebSocketIncomingMessage, WebSocketPair,
+    WebSocketRequestResponsePair, durable_object,
 };
 
 use super::state::{AnswerRequest, HttpError, HubState, Out, PromptRequest};
 
-type AppState = SendWrapper<Env>;
-
-/// Durable Object binding and the single instance name used by the tracer.
-const HUB_BINDING: &str = "HUB";
-const HUB_NAME: &str = "tracer";
-
 /// Socket tags: `tunnel:<machine_id>` and `sub:<thread_id>`.
 const TUNNEL_TAG: &str = "tunnel:";
 const SUB_TAG: &str = "sub:";
-
-fn router(env: Env) -> Router {
-    Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .route("/v1/machines/{machine_id}/tunnel", get(to_hub))
-        .route("/threads/{thread_id}/subscribe", get(to_hub))
-        .route("/threads/{thread_id}/prompts", post(to_hub))
-        .route(
-            "/threads/{thread_id}/interrupts/{interrupt_id}",
-            post(to_hub),
-        )
-        .with_state(SendWrapper::new(env))
-}
-
-#[event(fetch)]
-async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> worker::Result<Response<Body>> {
-    Ok(router(env).call(req).await?)
-}
-
-/// A worker error becomes a 500 with the message as body.
-struct AppError(worker::Error);
-
-impl From<worker::Error> for AppError {
-    fn from(e: worker::Error) -> Self {
-        Self(e)
-    }
-}
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
-    }
-}
-
-/// Forwards the request unchanged (WebSocket upgrades included) to the tracer DO.
-#[worker::send]
-async fn to_hub(State(env): State<AppState>, req: Request) -> Result<Response, AppError> {
-    let stub = env
-        .durable_object(HUB_BINDING)?
-        .id_from_name(HUB_NAME)?
-        .get_stub()?;
-    let req = worker::Request::try_from(req)?;
-    let res = stub.fetch_with_request(req).await?;
-    Ok(res.into())
-}
 
 /// The tracer hub Durable Object: in-memory [`HubState`] plus hibernatable sockets.
 #[durable_object]
