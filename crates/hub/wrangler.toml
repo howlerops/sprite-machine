@@ -4,6 +4,16 @@ name = "sm-hub"
 main = "build/index.js"
 compatibility_date = "2026-10-01"
 
+# M2-010: app-site association (crates/hub/src/links.rs). Empty means no document is served
+# (404), so nothing is claimed for an app that is not configured. Set the real values per
+# environment: the team id and bundle id for the iOS app, the package name and the comma-separated
+# SHA-256 certificate fingerprints for the Android app.
+[vars]
+APPLE_TEAM_ID = ""
+APPLE_BUNDLE_ID = ""
+ANDROID_PACKAGE_NAME = ""
+ANDROID_SHA256_CERT_FINGERPRINTS = ""
+
 [build]
 # The `wasm-release` profile (root Cargo.toml: opt-level "z", lto, codegen-units 1, strip off;
 # `strip` breaks worker-build 0.8.7, see docs/spikes/cloudflare.md). Then `cli wasm strip-names`

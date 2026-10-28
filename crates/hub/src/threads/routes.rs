@@ -4,7 +4,10 @@
 //! | Route                                                | Auth                      |
 //! | ---------------------------------------------------- | ------------------------- |
 //! | `POST /v1/threads`                                   | session token (member), `Idempotency-Key`; creates the thread (M2-008c) |
+//! | `GET  /v1/threads?machine_id=&status=&q=&cursor=`    | session token (viewer+); the org's threads from the D1 index (M2-010, `tasks::routes`) |
 //! | `GET  /v1/threads/{id}`                              | session token (viewer+), or `Bearer dev` + `DEV_FIXTURES=1` |
+//! | `PATCH /v1/threads/{id}`                             | member; `{title?, archived?}` (M2-010) |
+//! | `DELETE /v1/threads/{id}`                            | admin, `Idempotency-Key`; soft delete (M2-010) |
 //! | `GET  /v1/threads/{id}/subscribe?after=<seq>` (WebSocket) | same                 |
 //! | `POST /v1/threads/{id}/prompts`                      | same                      |
 //! | `GET  /v1/threads/{id}/pending`                      | same                      |
@@ -56,8 +59,14 @@ const ACTOR_HEADER: &str = "x-sm-actor";
 /// The `/v1/threads/...` routes of M2-008; merged into the Worker router by `worker.rs`.
 pub fn thread_routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/threads", post(create_thread))
-        .route("/v1/threads/{thread_id}", get(forward))
+        .route(
+            "/v1/threads",
+            post(create_thread).get(crate::tasks::routes::list_threads_route),
+        )
+        .route(
+            "/v1/threads/{thread_id}",
+            get(forward).patch(forward).delete(forward),
+        )
         .route("/v1/threads/{thread_id}/subscribe", get(forward))
         .route("/v1/threads/{thread_id}/prompts", post(forward))
         .route("/v1/threads/{thread_id}/pending", get(forward))

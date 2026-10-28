@@ -36,6 +36,21 @@ use super::store::{
     TaskRecord, TaskStatus, ThreadStore,
 };
 use super::timestamp::parse_timestamp;
+use crate::tasks::index::{IndexRow, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING};
+use crate::tasks::title::derive_title;
+
+/// The longest title a client may set (`POST /v1/threads`, `PATCH /v1/threads/{id}`).
+const MAX_TITLE_CHARS: usize = 200;
+
+/// `PATCH /v1/threads/{id}` body (client-api.md §5.2): a new title and/or the archive flag.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateThreadBody {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+}
 
 /// How long an `Idempotency-Key` answer is kept (client-api.md §3).
 pub const IDEMPOTENCY_TTL_MS: u64 = 24 * 60 * 60 * 1000;
@@ -334,6 +349,16 @@ impl<S: ThreadStore> ThreadCore<S> {
                     });
                 task.status = TaskStatus::Running;
                 self.store.put_task(&task)?;
+                // The auto-title comes from the first prompt (tasks::title); it is kept once.
+                let first_text = message.parts.iter().find_map(|part| match part {
+                    ContentPart::Text { text } => Some(text.as_str()),
+                    ContentPart::File { .. } => None,
+                });
+                if self.store.get_meta("derived_title")?.is_none()
+                    && let Some(title) = first_text.and_then(derive_title)
+                {
+                    self.store.put_meta("derived_title", &json!(title))?;
+                }
             }
             Event::RunStarted(_) => {
                 if let Some(run_id) = &envelope.run_id {
@@ -628,6 +653,153 @@ impl<S: ThreadStore> ThreadCore<S> {
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         }))
+    }
+
+    // ---- titles, archive and delete (client-api.md §5.2, M2-010) ----------------------------
+
+    /// `PATCH /v1/threads/{id}`: sets the title (the client's title wins over the auto-title)
+    /// and/or the archive flag. A title change is also appended as `StateDelta{thread}` when the
+    /// thread has state. 200 `{thread_id, title, archived}`; `400` for an empty body or a bad
+    /// title, `404` for an unknown thread.
+    pub fn update_thread(
+        &mut self,
+        body: UpdateThreadBody,
+        now_ms: u64,
+    ) -> Result<Reply, ApiError> {
+        if body.title.is_none() && body.archived.is_none() {
+            return Err(ApiError::invalid_request("send title and/or archived"));
+        }
+        let title = match body.title {
+            None => None,
+            Some(title) => {
+                let title = title.trim().to_owned();
+                if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+                    return Err(ApiError::invalid_request(format!(
+                        "title must be 1-{MAX_TITLE_CHARS} characters"
+                    )));
+                }
+                Some(title)
+            }
+        };
+        self.ensure_exists()?;
+        if let Some(title) = title {
+            let mut info = self.info()?;
+            info.insert("title".to_owned(), json!(title));
+            self.store.put_meta("info", &Value::Object(info))?;
+            if self
+                .store
+                .state_at(StateScope::Thread, self.head)?
+                .is_some()
+            {
+                let patch = vec![patch_add("/title", json!(title))];
+                self.append_thread_event(
+                    StateDelta {
+                        scope: StateScope::Thread,
+                        patch,
+                    },
+                    now_ms,
+                )?;
+            }
+        }
+        if let Some(archived) = body.archived {
+            self.store.put_meta("archived", &json!(archived))?;
+        }
+        let (title, _) = self.effective_title()?;
+        Ok(Reply::new(
+            200,
+            json!({
+                "thread_id": self.thread_id,
+                "title": title,
+                "archived": self.flag("archived")?,
+            }),
+        ))
+    }
+
+    /// `DELETE /v1/threads/{id}` (admin): a soft delete. The index drops the thread and the
+    /// event log stays. 204; `404` for an unknown thread.
+    pub fn delete_thread(&mut self) -> Result<Reply, ApiError> {
+        self.ensure_exists()?;
+        self.store.put_meta("deleted", &json!(true))?;
+        Ok(Reply::new(204, Value::Null))
+    }
+
+    /// The thread's row in the D1 task index (tasks::index) as of `now_ms`. The Thread DO
+    /// upserts it after a change that moves the title, status or lifecycle (`do/thread.rs`).
+    pub fn index_row(&self, now_ms: u64) -> Result<IndexRow, ApiError> {
+        self.ensure_exists()?;
+        let info = self.info()?;
+        let (title, title_source) = self.effective_title()?;
+        let mut status = STATUS_OPEN;
+        for task in self.store.tasks_with_status(TaskStatus::Running)? {
+            status = STATUS_RUNNING;
+            if !self.store.open_interrupts(&task.task_id)?.is_empty() {
+                status = STATUS_WAITING;
+                break;
+            }
+        }
+        Ok(IndexRow {
+            thread_id: self.thread_id.clone(),
+            machine_id: text_of(&info, "machine_id"),
+            agent: text_of(&info, "agent"),
+            workspace_path: info
+                .get("workspace")
+                .and_then(|workspace| workspace.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            title,
+            title_source,
+            status,
+            archived: self.flag("archived")?,
+            deleted: self.flag("deleted")?,
+            updated_at: format_timestamp(now_ms),
+            last_seq: i64::try_from(self.head).unwrap_or(i64::MAX),
+        })
+    }
+
+    /// The stored thread info (`machine_id`, `agent`, `workspace`, `title`, ...), or empty.
+    fn info(&self) -> Result<Map<String, Value>, ApiError> {
+        Ok(match self.store.get_meta("info")? {
+            Some(Value::Object(info)) => info,
+            _ => Map::new(),
+        })
+    }
+
+    /// A boolean lifecycle flag (`archived`, `deleted`); unset is `false`.
+    fn flag(&self, key: &str) -> Result<bool, ApiError> {
+        Ok(self
+            .store
+            .get_meta(key)?
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// The title the thread shows, and where it came from: the client's (`user`), else the
+    /// auto-title of the first prompt (`derived`), else empty.
+    fn effective_title(&self) -> Result<(String, &'static str), ApiError> {
+        let info = self.info()?;
+        let set = info
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty());
+        if let Some(title) = set {
+            return Ok((title.to_owned(), "user"));
+        }
+        let derived = self
+            .store
+            .get_meta("derived_title")?
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        Ok((derived, "derived"))
+    }
+
+    /// `404` unless something was recorded for the thread (the same test as `thread_info`).
+    fn ensure_exists(&self) -> Result<(), ApiError> {
+        if self.head == 0 && self.info()?.is_empty() {
+            return Err(ApiError::not_found(format!("no thread {}", self.thread_id)));
+        }
+        Ok(())
     }
 
     // ---- idempotency (client-api.md §3) -----------------------------------------------------
@@ -1348,6 +1520,14 @@ fn checked_id(field: &str, id: String) -> Result<String, ApiError> {
             "{field} must be 1-128 characters of [A-Za-z0-9_:.-]"
         )))
     }
+}
+
+/// A string field of the thread info, or empty.
+fn text_of(info: &Map<String, Value>, key: &str) -> String {
+    info.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn preview_of(parts: &[ContentPart]) -> String {

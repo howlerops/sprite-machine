@@ -1539,3 +1539,176 @@ fn a_session_change_needs_a_known_thread_and_a_key() {
     assert_eq!(api::handle(&mut keyed, &no_key, NOW).status, 400);
     assert!(queued_session_configs(&mut keyed).is_empty());
 }
+
+// ---- titles, archive, delete and the task index (client-api.md §5.2, M2-010) ---------------
+
+fn created(core: &mut ThreadCore<MemoryStore>, body: Value) {
+    let body: super::CreateThreadBody = serde_json::from_value(body).expect("create body");
+    core.create_thread(&actor("usr_1"), "idk_create", body, NOW)
+        .expect("create");
+}
+
+fn title_of(core: &ThreadCore<MemoryStore>) -> (String, &'static str) {
+    let row = core.index_row(NOW).expect("index row");
+    (row.title, row.title_source)
+}
+
+fn rename(title: Option<&str>, archived: Option<bool>) -> super::core::UpdateThreadBody {
+    super::core::UpdateThreadBody {
+        title: title.map(str::to_owned),
+        archived,
+    }
+}
+
+#[test]
+fn the_auto_title_is_the_first_prompts_first_line_and_a_client_title_wins() {
+    let mut core = core();
+    let mut body = create_body(true);
+    body.as_object_mut().expect("object").remove("title");
+    body["prompt"]["parts"][0]["text"] = json!("# Upgrade axum to 0.8\nthen run the tests");
+    created(&mut core, body);
+    assert_eq!(
+        title_of(&core),
+        ("Upgrade axum to 0.8".to_owned(), "derived")
+    );
+
+    let reply = core
+        .update_thread(rename(Some("  Axum upgrade  "), None), NOW)
+        .expect("rename");
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.body["title"], "Axum upgrade");
+    assert_eq!(title_of(&core), ("Axum upgrade".to_owned(), "user"));
+}
+
+#[test]
+fn a_title_given_at_creation_is_the_clients_and_is_never_replaced() {
+    let mut core = core();
+    created(&mut core, create_body(true));
+    assert_eq!(title_of(&core), ("Upgrade axum".to_owned(), "user"));
+}
+
+#[test]
+fn a_rename_is_a_thread_state_delta_for_subscribers() {
+    let mut core = core();
+    created(&mut core, create_body(false));
+    core.take_appended();
+    core.update_thread(rename(Some("New name"), None), NOW)
+        .expect("rename");
+    let appended = core.take_appended();
+    assert!(
+        appended.iter().any(|envelope| matches!(
+            &envelope.event,
+            Event::StateDelta(delta) if delta.scope == StateScope::Thread
+        )),
+        "a thread StateDelta: {appended:?}"
+    );
+}
+
+#[test]
+fn archive_and_delete_are_reflected_in_the_index_row() {
+    let mut core = core();
+    created(&mut core, create_body(false));
+    core.update_thread(rename(None, Some(true)), NOW)
+        .expect("archive");
+    assert!(core.index_row(NOW).expect("row").archived);
+    core.update_thread(rename(None, Some(false)), NOW)
+        .expect("unarchive");
+    assert!(!core.index_row(NOW).expect("row").archived);
+
+    let deleted = core.delete_thread().expect("delete");
+    assert_eq!(deleted.status, 204);
+    assert!(core.index_row(NOW).expect("row").deleted);
+}
+
+#[test]
+fn the_index_status_follows_the_run_and_its_approvals() {
+    let mut core = core();
+    created(&mut core, create_body(true));
+    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    append(&mut core, started("tk_1", "run_1"));
+    append(&mut core, interrupt("tk_1", "run_1", "int_1", NOW + 60_000));
+    assert_eq!(core.index_row(NOW).expect("row").status, "waiting");
+    let answer = core
+        .answer_interrupt(
+            &actor("usr_2"),
+            "idk_answer",
+            "int_1",
+            ResolvedOutcome::Selected {
+                option_id: "allow".to_owned(),
+            },
+            NOW,
+        )
+        .expect("answer");
+    assert_eq!(answer.status, 200);
+    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    append(&mut core, success("tk_1", "run_1"));
+    assert_eq!(core.index_row(NOW).expect("row").status, "open");
+}
+
+#[test]
+fn rename_and_delete_of_an_unknown_thread_are_404_and_a_bad_body_is_400() {
+    let mut core = core();
+    assert_eq!(
+        core.update_thread(rename(Some("x"), None), NOW)
+            .expect_err("unknown")
+            .status,
+        404
+    );
+    assert_eq!(core.delete_thread().expect_err("unknown").status, 404);
+
+    created(&mut core, create_body(false));
+    assert_eq!(
+        core.update_thread(rename(None, None), NOW)
+            .expect_err("empty")
+            .status,
+        400
+    );
+    assert_eq!(
+        core.update_thread(rename(Some("   "), None), NOW)
+            .expect_err("blank")
+            .status,
+        400
+    );
+    let long = "x".repeat(201);
+    assert_eq!(
+        core.update_thread(rename(Some(&long), None), NOW)
+            .expect_err("long")
+            .status,
+        400
+    );
+}
+
+#[test]
+fn the_http_layer_routes_patch_and_delete_to_the_core() {
+    let mut core = core();
+    created(&mut core, create_body(false));
+    let request_for = |method: &str, key: Option<&str>, body: Value| ApiRequest {
+        method: method.to_owned(),
+        path: "/v1/threads/th_1".to_owned(),
+        query: Vec::new(),
+        actor: Some(actor("usr_1")),
+        idempotency_key: key.map(str::to_owned),
+        body,
+        dev_fixtures: false,
+    };
+    let patch = request_for(
+        "PATCH",
+        None,
+        json!({ "title": "Via HTTP", "archived": false }),
+    );
+    let answer = api::handle(&mut core, &patch, NOW);
+    assert_eq!(answer.status, 200, "{:?}", answer.body);
+    assert_eq!(answer.body["title"], "Via HTTP");
+    let typo = request_for("PATCH", None, json!({ "tittle": "typo" }));
+    assert_eq!(api::handle(&mut core, &typo, NOW).status, 400);
+
+    let delete_without_key = request_for("DELETE", None, Value::Null);
+    assert_eq!(
+        api::handle(&mut core, &delete_without_key, NOW).status,
+        400,
+        "key required"
+    );
+    let delete = request_for("DELETE", Some("idk_del"), Value::Null);
+    assert_eq!(api::handle(&mut core, &delete, NOW).status, 204);
+    assert!(core.index_row(NOW).expect("row").deleted);
+}

@@ -8,8 +8,10 @@ pub mod audit;
 pub mod auth;
 pub mod db;
 pub mod devices;
+pub mod links;
 pub mod machines;
 pub mod router;
+pub mod tasks;
 pub mod threads;
 pub mod workspace_do;
 
