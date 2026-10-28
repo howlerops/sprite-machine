@@ -14,7 +14,9 @@ in your report.
 - Import through the umbrella crate: `use gpui_kit::*;` (re-exports `gpui`), plus
   `use gpui_kit::component::*;` — required for the styling extensions such as `.v_flex()` /
   `.h_flex()` (without it: `no method named v_flex`) — and specific widgets like
-  `use gpui_kit::component::button::Button;`. Don't import `gpui_component` directly in
+  `use gpui_kit::component::button::Button;`. Add `use gpui_kit::prelude::*;` too: it brings
+  `FluentBuilder` (`.when`, `.when_some`, `.map`), which `use gpui_kit::*` alone does not cover on
+  wrapped elements such as the one `.test_support()` returns. Don't import `gpui_component` directly in
   views unless the item needs a type gpui-kit does not re-export.
 - No business logic in this crate. View models, sync, caching, the outbound queue and every
   decision live in `crates/client-core` (natively tested). A view reads a view model and turns
@@ -143,6 +145,16 @@ fn clicking_the_button_updates_the_status(cx: &mut TestAppContext) {
   `role`) — this doubles as the screen-reader label (plan §3 cross-cutting a11y).
 - Interactions: `window.click`, `window.input("text", cx)`, `window.key("cmd-enter", cx)` /
   keystrokes, `window.scroll`; then `render_frame` before asserting.
+- `.test_support()` is a no-op without the `test-support` feature, so views may call it
+  unconditionally; call `.aria_label(…)` after `.id(…)`.
+- **Virtual lists** (verified in `spikes/gpui/tests/transcript_headless.rs`): `v_virtual_list` needs
+  every item size up front (fixed-height rows, or a measuring pass for wrapped text). The list
+  itself is not observable: wrap it in an element with `.id("transcript").test_support()` and
+  scroll that (`window.scroll("transcript", ScrollDelta::Pixels(point(px(0.), px(-dy))), cx)`;
+  negative y scrolls down). `find_all(id)` matches only the last id segment, so give each row a
+  unique wrapper id (`("row", ix)`) plus an inner element with a shared id (`"transcript-row"`);
+  `find_all("transcript-row")` then counts only the rows actually laid out (assert it is ≪ the
+  item count), and `.visible()` drops rows drawn just outside the viewport.
 - Drive views from `client-core` fixtures (TurnEvent examples in
   `crates/protocol/schemas/turn-event/examples/`), not from a live hub.
 - Tests run on the GPUI test platform (no display, no GPU). Pixel output is checked only by
