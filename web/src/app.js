@@ -18,6 +18,7 @@ import {
   signOut,
 } from '/src/api.js';
 import { pollDevice, redeemLink, startDevice } from '/src/pairing.js';
+import { disablePush, forgetSession, mountPushButton, registerServiceWorker, rememberSession } from '/src/push.js';
 import { mountSessions } from '/src/sessions.js';
 import { clearThreadCaches, mountThread } from '/src/thread.js';
 
@@ -157,8 +158,10 @@ function showSessions(session) {
       <button type="button" id="signout">Sign out</button>
     </header>
     <main id="list" aria-label="Machines and sessions"></main>`);
+  mountPushButton(root.querySelector('.bar'));
   teardown = mountSessions(root.querySelector('#list'));
   root.querySelector('#signout').addEventListener('click', async () => {
+    await disablePush();
     await signOut();
     clearThreadCaches();
     go('/');
@@ -195,6 +198,7 @@ function route() {
     return;
   }
   if (session) {
+    rememberSession(session);
     if (path !== '/') {
       history.replaceState(null, '', `/${location.hash}`);
     }
@@ -209,10 +213,12 @@ function route() {
 
 setUnauthorizedHandler(() => {
   clearSession();
+  forgetSession();
   clearThreadCaches();
   notice = 'Your session ended. Sign in again.';
   go('/');
 });
 window.addEventListener('hashchange', route);
 window.addEventListener('popstate', route);
+registerServiceWorker();
 route();

@@ -23,6 +23,19 @@ export CARGO_PROFILE_RELEASE_STRIP=false
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 export WRANGLER_SEND_METRICS=false
 
+# WEB-004: a random per-run P-256 VAPID key (never a real one), so the hub can sign pushes to the
+# test's fake push service; as scripts/hub-test.sh does.
+VAPID_KEYS=$(node -e '
+const { generateKeyPairSync } = require("crypto");
+const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+const { d } = privateKey.export({ format: "jwk" });
+const { x, y } = publicKey.export({ format: "jwk" });
+const point = Buffer.concat([Buffer.from([4]), Buffer.from(x, "base64url"), Buffer.from(y, "base64url")]);
+process.stdout.write(`${d} ${point.toString("base64url")}`);
+')
+VAPID_PRIVATE_KEY=${VAPID_KEYS% *}
+VAPID_PUBLIC_KEY=${VAPID_KEYS#* }
+
 STATE=$(mktemp -d)
 WRANGLER_PID=""
 scratch_created=0
@@ -53,6 +66,7 @@ trap cleanup EXIT
   --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" \
   --var "DEV_FIXTURES:1" \
+  --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
   --show-interactive-dev-session=false) &
 WRANGLER_PID=$!
 wait "$WRANGLER_PID"
