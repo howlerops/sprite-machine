@@ -14,6 +14,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use runner::login::{CredentialStore, Login};
 use runner::server::{self, Options, PermissionMode, Projects, RcArgs, SpawnMode};
+use runner::trust::TrustStore;
 use runner::tunnel::Timing;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -301,6 +302,11 @@ impl Rig {
                 credential: "smm_test_credential".to_owned(),
             })
             .unwrap();
+        // The directories the tests dispatch into are trusted, as a user who ran `sm trust` would
+        // have them (`repo()` adds its own).
+        TrustStore::new(&rig.state(), &rig.root.join("home"))
+            .trust(&rig.work())
+            .unwrap();
         rig
     }
 
@@ -332,6 +338,8 @@ impl Rig {
                 welcome_timeout: Duration::from_secs(5),
             },
             signin: None,
+            asker: None,
+            allow_remote_terminal: false,
         }
     }
 
@@ -370,6 +378,9 @@ impl Rig {
                 .unwrap();
             assert!(status.success());
         }
+        TrustStore::new(&self.state(), &self.root.join("home"))
+            .trust(&repo)
+            .unwrap();
         repo
     }
 }
