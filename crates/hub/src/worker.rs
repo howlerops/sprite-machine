@@ -51,6 +51,7 @@ pub fn router(env: Env) -> Router {
         .merge(crate::auth::routes::auth_routes())
         .merge(crate::threads::routes::thread_routes())
         .merge(crate::machines::routes::machine_routes())
+        .merge(crate::devices::routes::device_routes())
         .merge(crate::attachments::routes::attachment_routes())
         .merge(tracer_routes())
         .merge(crate::workspace_do::dev::routes())
