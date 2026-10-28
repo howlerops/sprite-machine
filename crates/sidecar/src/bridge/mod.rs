@@ -134,6 +134,9 @@ pub struct Config {
     /// or `session/load` and before its first prompt. A mode the agent does not advertise, or
     /// that it refuses, fails the task (`RunError`) instead of running in another mode.
     pub initial_mode: Option<String>,
+    /// How user file parts are fetched and stored (see [`files`]). Defaults to the production
+    /// policy; only a `test-support` build can construct the loopback one.
+    pub file_policy: files::FilePolicy,
 }
 
 impl Config {
@@ -153,6 +156,7 @@ impl Config {
             thread_mcp_servers: HashMap::new(),
             mcp_provider: None,
             initial_mode: None,
+            file_policy: files::FilePolicy::default(),
         }
     }
 

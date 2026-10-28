@@ -10,6 +10,7 @@ use std::time::Duration;
 use anyhow::Result;
 use protocol::tunnel::{Command, CommandErrorCode, Workspace};
 use serde_json::json;
+use sidecar::bridge::files::FilePolicy;
 use sidecar::bridge::{
     Bridge, CommandFailure, CommandSource, Config, EventSink, IncomingCommand, McpProvider, UlidIds,
 };
@@ -43,6 +44,8 @@ pub(super) struct Context {
     pub trust: TrustStore,
     pub audit: Audit,
     pub asker: Option<Asker>,
+    /// How each session's bridge fetches user file parts.
+    pub file_policy: FilePolicy,
 }
 
 struct Session {
@@ -572,6 +575,7 @@ impl Router {
         if self.ctx.permission_mode != PermissionMode::Default {
             config.initial_mode = Some(self.ctx.permission_mode.as_str().to_owned());
         }
+        config.file_policy = self.ctx.file_policy.clone();
         // http / sse servers need the agent's `mcp_capabilities`, known after `initialize`.
         let home = self.ctx.home.clone();
         let mcp_cwd = cwd.clone();

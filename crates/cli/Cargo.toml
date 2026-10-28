@@ -10,8 +10,12 @@ description = "Developer CLI: end-to-end checks such as `e2e tracer`."
 protocol = { path = "../protocol" }
 acp-mock = { path = "../acp-mock" }
 sidecar = { path = "../sidecar" }
-runner = { path = "../runner" }
+# `test-support`: the loopback attachment policy of `cli e2e attachments` (see runner's features).
+runner = { path = "../runner", features = ["test-support"] }
 client-core = { path = "../client-core" }
+# The attachment check builds PNG bodies and compares sha256 / base64 (same pins as sidecar).
+base64 = "=0.22.1"
+sha2 = "0.10"
 anyhow.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

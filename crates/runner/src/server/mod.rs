@@ -48,6 +48,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use sidecar::bridge::files::FilePolicy;
 use sidecar::store::Store;
 
 use crate::harness;
@@ -258,8 +259,28 @@ impl RcArgs {
     }
 }
 
-/// Runs the server until `shutdown` completes (or the tunnel stops for good).
+/// Runs the server until `shutdown` completes (or the tunnel stops for good). Attachments are
+/// fetched under [`FilePolicy::default`].
 pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result<()> {
+    run_with(options, FilePolicy::default(), shutdown).await
+}
+
+/// TEST ONLY: [`run`] with another attachment policy, such as
+/// [`FilePolicy::loopback_for_tests`]. Compiled only with the `test-support` feature.
+#[cfg(feature = "test-support")]
+pub async fn run_with_file_policy(
+    options: Options,
+    file_policy: FilePolicy,
+    shutdown: impl Future<Output = ()>,
+) -> Result<()> {
+    run_with(options, file_policy, shutdown).await
+}
+
+async fn run_with(
+    options: Options,
+    file_policy: FilePolicy,
+    shutdown: impl Future<Output = ()>,
+) -> Result<()> {
     let login = options
         .credentials
         .load()?
@@ -337,6 +358,7 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
             trust,
             audit,
             asker: options.asker,
+            file_policy,
         },
         sink,
         commands,
@@ -355,4 +377,25 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
 /// `state_dir/sessions/<thread id>`: the sidecar store of one session.
 pub(crate) fn session_dir(state_dir: &Path, thread_id: &str) -> PathBuf {
     state_dir.join("sessions").join(thread_id)
+}
+
+#[cfg(test)]
+mod file_policy_tests {
+    use super::FilePolicy;
+
+    /// The policy `run` uses in every build: `http` and loopback are refused.
+    #[test]
+    fn the_production_policy_refuses_loopback() {
+        assert!(!FilePolicy::default().insecure_loopback_for_tests);
+    }
+
+    /// The loopback policy is built only by the `test-support` constructor, so a build without
+    /// the feature has no way to make one.
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn the_loopback_policy_comes_only_from_the_test_constructor() {
+        let policy = FilePolicy::loopback_for_tests(1024);
+        assert!(policy.insecure_loopback_for_tests);
+        assert_eq!(policy.max_bytes, 1024);
+    }
 }

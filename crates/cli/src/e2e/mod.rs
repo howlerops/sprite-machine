@@ -1,5 +1,6 @@
 //! `cli e2e <check>`: end-to-end checks.
 
+pub mod attachments;
 pub mod tracer;
 
 use anyhow::{Result, bail};
@@ -8,6 +9,9 @@ use anyhow::{Result, bail};
 pub async fn run(args: &[&str]) -> Result<()> {
     match args {
         ["tracer"] => tracer::run().await,
-        _ => bail!("usage: cli e2e tracer"),
+        ["attachments"] => attachments::run().await,
+        // Not a check: the agent process the attachments check's stub harness starts.
+        ["attachments-agent"] => attachments::agent().await,
+        _ => bail!("usage: cli e2e tracer | cli e2e attachments"),
     }
 }
