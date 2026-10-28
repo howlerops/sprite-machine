@@ -252,3 +252,4 @@
 2026-10-28T20:42Z WEB-006 done. Disk hit 31 MB free (spike-gpui debug 5.8 GB from M1B-008e + bench release build) → bench pre-build and a pwa run failed; freed to 11 GB, pwa 9/9. Starting M1B-008c real run on the idle machine
 2026-10-28T20:54Z M1B-008c done: 4 of 5 desktop gates pass; frame_time_p95 56 ms fails on CPU-only lavapipe (not representative). M1B-008f (human, P7) re-runs on GPU hardware
 2026-10-28T20:54Z M1B-009 done: ADR 0001a written (gpui-kit desktop, provisional on M1B-008f)
+2026-10-28T20:56Z P2 review note: only human/permission-blocked P2 items remain after M2B-019a and M2B-004f (M2-014/M2-015/M2-014a/M2B-020 deploy chain; M0-009 needs M0-008c + an R2 bucket; M2B-006a CLI installs). Continuing into P3 under the user's go-ahead. Assign M2B-019a (haiku), M2B-004f (sonnet), M3-001k (haiku), M3-002 (sonnet, desktop shell; disk guard in brief). Briefs now tell workers to check their worktree is on v2

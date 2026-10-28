@@ -2578,6 +2578,9 @@ items:
     title: 'runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
@@ -3861,6 +3864,9 @@ items:
     title: 'client (desktop): shell, login (pairing + GitHub OAuth), settings, navigation, theming, i18n'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     size: M
     deps: [M1B-009, M3-001, M2-003b, M2B-005, GPUI-000]
@@ -6002,6 +6008,9 @@ items:
     title: 'client-core: a Subscription that starts Offline when the hub is unreachable (Connection can be built offline; reconnect() retries)'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
@@ -6022,6 +6031,9 @@ items:
     title: 'runner tui: a line typed while a task runs is queued behind it (like a phone prompt at the hub) or the TUI says busy; never dropped silently'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
