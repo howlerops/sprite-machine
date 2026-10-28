@@ -67,3 +67,6 @@
 2026-10-28T02:35Z SPEC-001a todo→done merged 1ecc2b9
 2026-10-28T02:52Z M1B-004c assigned→done merged bf85e18 (haiku); CONVENTIONS.md += keyboard test helpers, Rust 2024 capture note
 2026-10-28T02:52Z leader: M1B-004d (release gpui build ~5 GB) held until disk is cleaned (6.8 GB free)
+2026-10-28T02:55Z M2-016 assigned→done merged bfc51e3 (haiku); discovered: D1 runtime route + retention/audit-export jobs noted for later M2 items; agents↔machines FK → M2B-002
+2026-10-28T02:55Z M0-008b todo→assigned attempt 1 (haiku)
+2026-10-28T02:55Z leader: briefs now forbid claude-code-remote / session / messaging tools (workers called list_sessions/send_message)

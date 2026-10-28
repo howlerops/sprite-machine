@@ -427,6 +427,9 @@ items:
     title: 'hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests'
     milestone: M0
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 1
     deps: [M0-008a, M2-001]
     paths:
@@ -1459,7 +1462,8 @@ items:
     title: 'hub: D1 schema + migrations (org-wide metadata)'
     milestone: M2
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged bfc51e3; verify: migrations apply on a fresh local D1 (0001+0002), d1_schema 17 passed, hub wasm32 + no tokio runtime, clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
