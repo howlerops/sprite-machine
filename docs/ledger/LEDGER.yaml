@@ -2482,6 +2482,46 @@ items:
     verify:
       - 'cargo test -p runner'
 
+  - id: M2B-006a
+    title: 'Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-006]
+    paths:
+      - 'crates/runner/src/harness/**'
+      - 'crates/runner/tests/discovery.rs'
+      - 'docs/spikes/harness-invocations.md'
+    context:
+      - 'docs/ledger/reports/M2B-006.md'
+    acceptance:
+      - 'For each harness: install it in the dev container if it is an npm/pip/cargo package (no API key needed for initialize), run its ACP entry point and complete `initialize` (and session/new where no login is needed) with a tiny ACP client script; record version, exact command and result in docs/spikes/harness-invocations.md; fix any wrong row in HARNESSES'
+      - 'Harnesses that need a login or a paid account for session/new are marked so in the table and the doc (no credentials used)'
+    verify:
+      - 'cargo test -p runner --test discovery'
+      - 'test -s docs/spikes/harness-invocations.md'
+
+  - id: M2B-006c
+    title: 'Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-006]
+    paths:
+      - 'crates/runner/src/harness/**'
+      - 'crates/runner/tests/discovery.rs'
+    context:
+      - 'docs/ledger/reports/M2B-006.md (Discovered work c, d)'
+    acceptance:
+      - 'A bare command such as npx is resolved against PATH before McpServer::Stdio; an unresolvable command skips that server with a warning naming it (not its env)'
+      - 'sse entries become McpServer::Sse when the agent advertises mcp_capabilities.sse; ${VAR} in command, args, env and headers expand from the runner environment (tests)'
+    verify:
+      - 'cargo test -p runner --test discovery'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -2853,7 +2893,8 @@ items:
     title: 'runner: local harness discovery + local logins/MCP passthrough'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged b316bb5; runner 97 passed (discovery 15), clippy clean; invocations are table data, unconfirmed offline -> M2B-006a"
     attempt: 1
     assignee: "worker:haiku"
     deps: [M2B-003]
@@ -2889,6 +2930,7 @@ items:
     acceptance:
       - "--spawn same-dir|worktree (git worktree per session), --capacity (default 32), --permission-mode, --name-prefix (default hostname, names like host-word-word), -c/--continue resumes the last session for the directory; spawn mode saved per project"
       - "The server builds each session's bridge with Bridge::spawn_with (a Connector that spawns the harness), so a crashed agent is respawned and resumed on the next prompt (test kills the agent); the tunnel uses KeychainCredentials and the sleep watcher (M2B-004e) is started; every runner-started thread calls TunnelSink::mark_local_thread + thread_open before its first event"
+      - "Hello capabilities come from harness::capabilities(harness::discover(...)); the bridge Config::mcp_servers from harness::local_mcp_servers; a dispatch for a harness that is not discovered fails with command_result code harness_missing (test)"
     verify:
       - 'cargo test -p runner --test server_mode'
 
