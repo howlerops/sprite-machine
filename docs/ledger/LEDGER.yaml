@@ -1239,7 +1239,8 @@ items:
     title: 'Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged d144a60; files 17 + bridge_attachments 1 passed on merged tree, sidecar all ok, clippy clean, tracer PASS; worker mutation-checked the sniff"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -1645,7 +1646,8 @@ items:
     title: 'scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver)'
     milestone: M1b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 071a6ef; bash -n ok; setup-dev.sh re-run by leader prints 'xdotool present'"
     attempt: 1
     assignee: "worker:haiku"
     lane: docs

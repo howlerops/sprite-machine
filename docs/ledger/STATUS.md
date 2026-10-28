@@ -2,14 +2,14 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 51/211 (3 dropped) · in-flight M1A-014a,M1B-004d,M1B-008d,M2B-004 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 50/120
+done 53/211 (3 dropped) · in-flight M1B-004d,M2B-004 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 50/120
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 38 | 33 | 4 |
+| P1 | 38 | 35 | 2 |
 | P2 | 31 | 2 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
@@ -39,14 +39,14 @@ done 51/211 (3 dropped) · in-flight M1A-014a,M1B-004d,M1B-008d,M2B-004 · block
 | M1A-009 | worker | rust | done | Durable store (SQLite) + ACP session re-attach after restart |
 | M1A-013 | worker | rust | done | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
 | M1A-014 | worker | rust | done | Attachments: user FilePart → ACP image/resource blocks |
-| M1A-014a | worker | rust | assigned | Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME |
+| M1A-014a | worker | rust | done | Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME |
 | M1B-004b | worker | client | done | gpui spike: diff pane (gpui-kit editor) |
 | M1B-004c | worker | client | done | gpui spike: terminal pane (alacritty_terminal) |
 | M1B-004d | worker | client | review | gpui spike: approval card + build release |
 | M1B-008 | worker | docs | done | Benchmark scripts per gates.yaml |
 | M1B-008a | worker | client | done | gpui spike: bench hooks (fixture feed, BENCH_MARKER, frame and key-to-glyph JSONL) |
 | M1B-008b | worker | client | todo | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
-| M1B-008d | worker | docs | assigned | scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver) |
+| M1B-008d | worker | docs | done | scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver) |
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
 | M2-016 | worker | rust | done | hub: D1 schema + migrations (org-wide metadata) |
 | M2-003a | worker | rust | done | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
