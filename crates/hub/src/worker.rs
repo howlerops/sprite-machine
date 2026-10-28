@@ -52,6 +52,7 @@ pub fn router(env: Env) -> Router {
         .merge(crate::notify::routes::push_routes())
         .merge(crate::links::routes::link_routes())
         .merge(crate::workspace_do::dev::routes())
+        .merge(crate::dev_fixtures::routes::routes())
         .fallback(not_found)
         .layer(middleware::from_fn(observe))
         .with_state(SendWrapper::new(env))
