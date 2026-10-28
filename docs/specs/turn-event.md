@@ -278,8 +278,11 @@ These cases are not spelled out by ACP; `AcpTurnMapper` implements them and they
   `InterruptResolved{cancelled}` (nobody can answer it any more; `expired` is only for TTL
   expiry); then, as for cancel and expiry above, a short `RunStarted{resume}` run that closes
   open tool calls with `ToolCallEnd{failed}`, then `RunError{error, code:"harness_exited"}`.
-  A task with several open interrupts gets an `InterruptResolved` for each. The next prompt
-  respawns the harness and resumes the ACP session.
+  A request the agent sent while the run was already paused (buffered under rule 6) is
+  announced and resolved the same way in its own resume run (`RunStarted{resume}`,
+  `Interrupt`, `RunFinished{interrupt}`, `InterruptResolved{cancelled}`), so every interrupt the
+  harness opened ends resolved before the `RunError`. The next prompt respawns the harness and
+  resumes the ACP session.
 - **A tool call still open at the end of a turn**: closed with `ToolCallEnd{completed}` when the
   stop reason is `end_turn`, `ToolCallEnd{failed}` for any other stop reason or error.
 - **`session_info_update`**: only the title maps (`StateDelta{thread}` on `/title`). The hub owns
