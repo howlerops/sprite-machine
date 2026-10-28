@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sprite-machine:spikes:bench:results:v1",
+  "title": "Client-stack benchmark result (one gate, one candidate, one device)",
+  "description": "Evidence file spikes/bench/results/<candidate>/<device>/<gate>.json (gates.yaml rules.evidence). Numeric gates carry raw samples and a gated value; hard gates carry a human verdict. Semantic rules that JSON Schema cannot express (percentile recomputation, pass == value <= threshold, thresholds copied from gates.yaml, path/field agreement, pinned versions per candidate) are checked by spikes/bench/validate_results.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "candidate", "device", "device_model", "os_version", "date",
+    "pinned", "gate", "kind", "unit", "threshold", "statistic", "value",
+    "samples", "p50", "p95", "pass"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "candidate": {
+      "description": "Candidate id from gates.yaml candidates (gpui-kit, flutter, hybrid), or example for illustrative files.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "device": {
+      "description": "gates.yaml device key (iphone, android, desktop_linux, desktop_macos). The example file uses linux.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "device_model": {
+      "description": "Hardware model as reported by the device (e.g. iPhone15,2, Pixel 8, Lenovo ThinkPad X1). Use unknown only when it cannot be read; record why in notes.",
+      "type": "string",
+      "minLength": 1
+    },
+    "os_version": {
+      "description": "OS name and version (e.g. iOS 19.1, Android 16 API 36, Ubuntu 24.04 kernel 6.18).",
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "description": "Measurement date, YYYY-MM-DD.",
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "pinned": {
+      "description": "Versions the number is valid for (gates.yaml rules.version_pin). Which keys are required depends on the candidate; see validate_results.py.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gpui_rev": {
+          "description": "gpui crate pin, e.g. gpui-pre@0.3.10 (crates.io version; the root Cargo.toml pins it by version, not git rev).",
+          "type": "string",
+          "minLength": 1
+        },
+        "gpui_component_rev": {
+          "description": "gpui-component git rev (40 hex chars), root Cargo.toml.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "flutter": {
+          "description": "Flutter SDK version (M1B-006).",
+          "type": "string",
+          "minLength": 1
+        },
+        "flutter_rust_bridge": {
+          "description": "flutter_rust_bridge version.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "gate": {
+      "description": "gates.yaml numeric or hard gate id.",
+      "type": "string",
+      "enum": [
+        "frame_time_p95", "key_to_glyph_p95", "cold_start", "rss_peak", "binary_size",
+        "ime_japanese", "ime_chinese", "autocorrect", "dictation", "image_paste",
+        "hardware_keyboard", "screen_reader_approval", "dynamic_type_200",
+        "background_resume", "push_tap_killed", "stacked_screens", "testflight_upload"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["numeric", "hard"]
+    },
+    "unit": {
+      "description": "ms, s or MB for numeric gates (gates.yaml); pass_fail for hard gates.",
+      "type": "string",
+      "enum": ["ms", "s", "MB", "pass_fail"]
+    },
+    "threshold": {
+      "description": "The gates.yaml max for this device (numeric). null for hard gates.",
+      "type": ["number", "null"]
+    },
+    "statistic": {
+      "description": "How value is derived. median_of_run_p95: median over runs of each run's p95 (frame time, key-to-glyph; samples are pooled raw values). median_of_runs: median of samples, one sample per run (cold start, RSS). single: one measurement (binary size). verdict: hard gates.",
+      "type": "string",
+      "enum": ["median_of_run_p95", "median_of_runs", "single", "verdict"]
+    },
+    "value": {
+      "description": "The number compared with threshold (numeric), per statistic. null for hard gates.",
+      "type": ["number", "null"]
+    },
+    "samples": {
+      "description": "Raw samples in unit. Numeric: frame or key-to-glyph values pooled over all runs, or one value per run, or one value. Hard gates: empty.",
+      "type": "array",
+      "items": {"type": "number"}
+    },
+    "p50": {
+      "description": "Nearest-rank 50th percentile of samples (pooled). null for hard gates.",
+      "type": ["number", "null"]
+    },
+    "p95": {
+      "description": "Nearest-rank 95th percentile of samples (pooled). null for hard gates.",
+      "type": ["number", "null"]
+    },
+    "runs": {
+      "description": "Per-run summaries (numeric gates with several runs). p95 is the run's own nearest-rank p95 of its raw values.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run", "n"],
+        "properties": {
+          "run": {"type": "integer", "minimum": 1},
+          "n": {"type": "integer", "minimum": 1},
+          "p50": {"type": "number"},
+          "p95": {"type": "number"},
+          "value": {"type": "number"}
+        }
+      }
+    },
+    "pass": {
+      "description": "Numeric: value <= threshold. Hard: the human verdict (true only if every step in HARD_GATES.md passed).",
+      "type": "boolean"
+    },
+    "checked_by": {
+      "description": "Hard gates: who ran the check (role and name or handle).",
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence": {
+      "description": "Repo-relative paths to raw logs, screen recordings or screenshots backing the result.",
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "notes": {
+      "description": "Workload, renderer, build profile, known deviations from the procedure.",
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"kind": {"const": "numeric"}},
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "unit": {"enum": ["ms", "s", "MB"]},
+          "statistic": {"enum": ["median_of_run_p95", "median_of_runs", "single"]},
+          "threshold": {"type": "number"},
+          "value": {"type": "number"},
+          "p50": {"type": "number"},
+          "p95": {"type": "number"},
+          "samples": {"minItems": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"kind": {"const": "hard"}},
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["checked_by", "evidence"],
+        "properties": {
+          "unit": {"const": "pass_fail"},
+          "statistic": {"const": "verdict"},
+          "threshold": {"type": "null"},
+          "value": {"type": "null"},
+          "p50": {"type": "null"},
+          "p95": {"type": "null"},
+          "samples": {"maxItems": 0},
+          "evidence": {"minItems": 1}
+        }
+      }
+    }
+  ]
+}

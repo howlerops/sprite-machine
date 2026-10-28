@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "candidate": "example",
+  "device": "linux",
+  "device_model": "example (not a device)",
+  "os_version": "example (Ubuntu 24.04, kernel 6.18)",
+  "date": "2026-10-28",
+  "pinned": {
+    "gpui_rev": "gpui-pre@0.3.10",
+    "gpui_component_rev": "c8917c3661ed1090870f403c312b39e0d8a62e0b"
+  },
+  "gate": "cold_start",
+  "kind": "numeric",
+  "unit": "s",
+  "threshold": 1.5,
+  "statistic": "median_of_runs",
+  "value": 1.21,
+  "samples": [1.21, 1.18, 1.25, 1.3, 1.19],
+  "p50": 1.21,
+  "p95": 1.3,
+  "pass": true,
+  "notes": "EXAMPLE ONLY: illustrative numbers that show the file shape, not a measurement. The threshold is the gates.yaml desktop_linux value. Real results live under results/gpui-kit/desktop_linux/ and are written by run-desktop.sh."
+}
