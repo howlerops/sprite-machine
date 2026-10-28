@@ -993,6 +993,9 @@ items:
     title: 'sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn'
     milestone: M1a
     phase: P2
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
     priority: 2
     risk: high
     deps: [M1A-004]
