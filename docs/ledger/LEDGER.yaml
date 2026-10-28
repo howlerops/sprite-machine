@@ -3436,6 +3436,9 @@ items:
     title: 'runner: interactive TUI shared with remote devices (`sm --rc`)'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     size: M
     deps: [M2B-007, M3-001, M2B-002, M2-008, WEB-003]
     paths:
@@ -3724,6 +3727,9 @@ items:
     title: 'web: PWA + Web Push'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     deps: [WEB-003, M2-011]
     paths:
       - 'web/manifest.webmanifest'
@@ -5581,3 +5587,89 @@ items:
       - 'A delta before its snapshot (or a bad patch) leaves last_seq and the view unchanged; next_persisted does not append it to the cache; tests for both'
     verify:
       - 'cargo test -p client-core'
+
+  - id: M2-008k
+    title: 'hub: DELETE /v1/threads/{id}/pending/{task_id} is member-level (client-api §5.3/§5.5) instead of admin; the web composer uses it instead of the cancel workaround'
+    milestone: M2
+    phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
+    lane: rust
+    size: S
+    risk: medium
+    deps: [WEB-003]
+    paths:
+      - 'crates/hub/src/auth/policy.rs'
+      - 'crates/hub/tests/authz.rs'
+      - 'web/src/composer*'
+      - 'web/src/outbox*'
+      - 'web/tests/composer.spec.js'
+    context:
+      - 'docs/ledger/reports/WEB-003.md (Notes: spec deviation)'
+      - 'docs/specs/client-api.md §5.3, §5.5'
+    acceptance:
+      - 'A member session removes a queued task with DELETE (live authz test: member 2xx, viewer 403); audit action unchanged'
+      - 'The composer chip removal calls DELETE .../pending/{task_id}; composer.spec.js asserts the method'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh authz'
+      - 'cd web && npx playwright test tests/composer.spec.js'
+
+  - id: M2B-014d
+    title: 'notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-014]
+    paths:
+      - 'crates/hub/src/notify/**'
+      - 'crates/hub/src/do/machine.rs'
+      - 'crates/hub/tests/presence_notify.rs'
+    context:
+      - 'docs/ledger/reports/M2B-014.md (Deviations, Discovered work)'
+    acceptance:
+      - 'A user with two subscriptions gets the machine_back push on both (live test replaces the once-per-user test); payload has machine_id; no prompt text'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh presence_notify'
+
+  - id: M2B-014c
+    title: 'hub tests: one shared live-test helper module (tunnel client, fake runner, fake push service) used by machine_do, notify and presence_notify'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-014]
+    paths:
+      - 'crates/hub/tests/**'
+    context:
+      - 'docs/ledger/reports/M2B-014.md (Discovered work)'
+    acceptance:
+      - 'No duplicated helper code across the three files; all three live suites pass'
+    verify:
+      - 'bash scripts/hub-test.sh machine_do'
+      - 'bash scripts/hub-test.sh notify'
+      - 'bash scripts/hub-test.sh presence_notify'
+
+  - id: WEB-003a
+    title: 'web: queue picked attachments offline (IndexedDB) and upload them when back online'
+    milestone: M2b
+    phase: P4
+    lane: client
+    size: S
+    risk: low
+    deps: [WEB-003]
+    paths:
+      - 'web/src/composer*'
+      - 'web/src/outbox*'
+      - 'web/tests/composer.spec.js'
+    context:
+      - 'docs/ledger/reports/WEB-003.md (Notes, Discovered work)'
+    acceptance:
+      - 'A file picked offline is kept and uploaded on reconnect, then sent once; Playwright setOffline test'
+    verify:
+      - 'cd web && npx playwright test tests/composer.spec.js'
