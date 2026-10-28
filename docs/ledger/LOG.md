@@ -272,3 +272,4 @@
 2026-10-28T22:49Z M2-003f oauth 11/11 on merged tree → done
 2026-10-28T22:49Z M2-008i back (haiku): access_log path-only + ticket strip as pure fns with tests; percent-encoded key gap pinned → merged; added M2-008l (P4); verify running
 2026-10-28T22:55Z M2-008i verify green → done. M3-008 back (sonnet): virtualized transcript pane, 26/32 examples render (steps/subagents/Raw dropped by client-core), 10k fixture layout p95 1 ms headless → merged; verify running. Added M3-001m (client-core steps/subagents), M3-008a (render them, expandable bodies), M3-008b (incremental rows)
+2026-10-28T22:56Z disk hit 0 MB (a ledger commit failed; client-gpui verify empty) → pruned stale test exes to 5.3 GB, committed, re-running M3-008 verify. Assign M3-001m (haiku)

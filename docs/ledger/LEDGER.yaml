@@ -6239,6 +6239,9 @@ items:
     title: 'client-core: step and subagent view models (StepStarted/Finished, SubagentStarted/Finished/Error) and a Raw item, so clients can render them'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
