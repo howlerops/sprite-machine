@@ -267,6 +267,7 @@ impl ThreadStore for SqlStore {
             Command::Approval { task_id, .. } => ("approval", Some(task_id.as_str())),
             Command::Dispatch { task_id, .. } => ("dispatch", Some(task_id.as_str())),
             Command::Cancel { task_id, .. } => ("cancel", Some(task_id.as_str())),
+            Command::SessionConfig { .. } => ("session_config", None),
         };
         // The id is assigned by the table; the JSON carries everything but the id.
         let record = serde_json::json!({

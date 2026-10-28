@@ -11,6 +11,11 @@
 //! pending task and runs after it. `session/cancel` ends the running prompt with
 //! `cancelled`, and any permission or elicitation request the agent is waiting on is
 //! answered with a cancel.
+//!
+//! The client also remembers what each session advertises (its modes and config options, from
+//! the `session/new`, `session/load` or `session/resume` response and the later
+//! `current_mode_update` / `config_option_update`), so the bridge can check a `session_config`
+//! command before it reaches the agent ([`AcpClient::advertised`]).
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -23,10 +28,13 @@ use protocol::acp::{
     CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse, ElicitationAction,
     ElicitationCapabilities, ElicitationFormCapabilities, ElicitationMode, ElicitationScope,
     ElicitationUrlCapabilities, FileSystemCapabilities, Implementation, InitializeRequest,
-    InitializeResponse, KillTerminalRequest, KillTerminalResponse, McpServer, NewSessionRequest,
-    NewSessionResponse, PromptRequest, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
+    InitializeResponse, KillTerminalRequest, KillTerminalResponse, LoadSessionResponse, McpServer,
+    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    ResumeSessionResponse, SessionConfigId, SessionConfigOption, SessionConfigOptionValue,
+    SessionId, SessionModeId, SessionModeState, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
     StopReason, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
@@ -149,6 +157,28 @@ pub fn client_capabilities() -> ClientCapabilities {
         )
 }
 
+/// The modes and config options a session advertises. `None` means the agent did not advertise
+/// that part of the session state.
+#[derive(Debug, Clone, Default)]
+pub struct Advertised {
+    /// The current mode and the modes the session can switch to.
+    pub modes: Option<SessionModeState>,
+    /// The session's config options, with their current values.
+    pub config_options: Option<Vec<SessionConfigOption>>,
+}
+
+impl Advertised {
+    fn new(
+        modes: Option<SessionModeState>,
+        config_options: Option<Vec<SessionConfigOption>>,
+    ) -> Self {
+        Self {
+            modes,
+            config_options,
+        }
+    }
+}
+
 /// The receiving end of `session/update` notifications is the caller's own channel.
 pub type UpdateSender = mpsc::UnboundedSender<SessionNotification>;
 
@@ -225,6 +255,7 @@ impl<H: ClientHandler> AcpClient<H> {
             writer: tokio::sync::Mutex::new(writer),
             calls: Mutex::new(Calls::default()),
             sessions: SessionTable::default(),
+            advertised: Mutex::new(HashMap::new()),
             updates,
         });
         let reader = tokio::spawn(read_loop(Arc::clone(&inner), reader));
@@ -269,6 +300,10 @@ impl<H: ClientHandler> AcpClient<H> {
             .await?;
         let response: NewSessionResponse = serde_json::from_value(value)?;
         self.inner.sessions.insert(&response.session_id);
+        self.inner.remember(
+            &response.session_id,
+            Advertised::new(response.modes, response.config_options),
+        );
         Ok(response.session_id)
     }
 
@@ -280,10 +315,17 @@ impl<H: ClientHandler> AcpClient<H> {
         cwd: impl Into<PathBuf>,
     ) -> Result<(), ClientError> {
         let request = protocol::acp::ResumeSessionRequest::new(session.clone(), cwd);
-        self.inner
+        let value = self
+            .inner
             .call("session/resume", serde_json::to_value(request)?)
             .await?;
+        // The response's session state is optional here: a missing one only means nothing is
+        // advertised until the agent says so in an update.
+        let advertised = serde_json::from_value::<ResumeSessionResponse>(value)
+            .map(|response| Advertised::new(response.modes, response.config_options))
+            .unwrap_or_default();
         self.inner.sessions.insert(session);
+        self.inner.remember(session, advertised);
         Ok(())
     }
 
@@ -295,10 +337,57 @@ impl<H: ClientHandler> AcpClient<H> {
         cwd: impl Into<PathBuf>,
     ) -> Result<(), ClientError> {
         let request = protocol::acp::LoadSessionRequest::new(session.clone(), cwd);
-        self.inner
+        let value = self
+            .inner
             .call("session/load", serde_json::to_value(request)?)
             .await?;
+        let advertised = serde_json::from_value::<LoadSessionResponse>(value)
+            .map(|response| Advertised::new(response.modes, response.config_options))
+            .unwrap_or_default();
         self.inner.sessions.insert(session);
+        self.inner.remember(session, advertised);
+        Ok(())
+    }
+
+    /// What `session` advertises: its modes and config options as the agent last reported
+    /// them. `None` for a session this client does not know.
+    pub fn advertised(&self, session: &SessionId) -> Option<Advertised> {
+        lock(&self.inner.advertised)
+            .get(&session.0.to_string())
+            .cloned()
+    }
+
+    /// Sends `session/set_mode`. The agent reports the change as a `current_mode_update`.
+    pub async fn set_mode(
+        &self,
+        session: &SessionId,
+        mode: SessionModeId,
+    ) -> Result<(), ClientError> {
+        let request = SetSessionModeRequest::new(session.clone(), mode);
+        self.inner
+            .call("session/set_mode", serde_json::to_value(request)?)
+            .await?;
+        Ok(())
+    }
+
+    /// Sends `session/set_config_option`. The agent answers with the session's full config
+    /// options and reports the change as a `config_option_update`.
+    pub async fn set_config_option(
+        &self,
+        session: &SessionId,
+        config: SessionConfigId,
+        value: SessionConfigOptionValue,
+    ) -> Result<(), ClientError> {
+        let request = SetSessionConfigOptionRequest::new(session.clone(), config, value);
+        let answer = self
+            .inner
+            .call("session/set_config_option", serde_json::to_value(request)?)
+            .await?;
+        if let Ok(SetSessionConfigOptionResponse { config_options, .. }) =
+            serde_json::from_value(answer)
+        {
+            self.inner.update_config_options(session, config_options);
+        }
         Ok(())
     }
 
@@ -381,7 +470,45 @@ struct Inner<H> {
     writer: tokio::sync::Mutex<Box<dyn AsyncWrite + Send + Unpin>>,
     calls: Mutex<Calls>,
     sessions: SessionTable,
+    /// What each session advertises, by session id (see [`AcpClient::advertised`]).
+    advertised: Mutex<HashMap<String, Advertised>>,
     updates: UpdateSender,
+}
+
+impl<H> Inner<H> {
+    /// Records what a session advertised in its session/new, load or resume response.
+    fn remember(&self, session: &SessionId, advertised: Advertised) {
+        lock(&self.advertised).insert(session.0.to_string(), advertised);
+    }
+
+    /// Replaces the config options a session advertises.
+    fn update_config_options(&self, session: &SessionId, options: Vec<SessionConfigOption>) {
+        let mut table = lock(&self.advertised);
+        table
+            .entry(session.0.to_string())
+            .or_default()
+            .config_options = Some(options);
+    }
+
+    /// Keeps what a session advertises current with the agent's own updates. Runs before the
+    /// update is forwarded, so the bridge sees the state the update left.
+    fn observe(&self, update: &SessionNotification) {
+        let mut table = lock(&self.advertised);
+        let Some(advertised) = table.get_mut(&update.session_id.0.to_string()) else {
+            return;
+        };
+        match &update.update {
+            SessionUpdate::CurrentModeUpdate(mode) => {
+                if let Some(modes) = advertised.modes.as_mut() {
+                    modes.current_mode_id = mode.current_mode_id.clone();
+                }
+            }
+            SessionUpdate::ConfigOptionUpdate(options) => {
+                advertised.config_options = Some(options.config_options.clone());
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Requests we sent that are waiting for an answer.
@@ -622,6 +749,7 @@ fn notification<H: ClientHandler>(inner: &Arc<Inner<H>>, method: &str, params: O
     };
     match serde_json::from_value::<SessionNotification>(params.clone()) {
         Ok(update) => {
+            inner.observe(&update);
             if inner.updates.send(update).is_err() {
                 tracing::warn!("no receiver for session updates; dropping one");
             }
