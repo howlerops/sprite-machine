@@ -15,7 +15,8 @@ use std::cell::RefCell;
 use std::future::Future;
 
 use protocol::tunnel::{
-    CloseCode, Command, Frame, MAX_FRAME_BYTES, NackCode, PresenceState, parse_frame,
+    Actor, ActorKind, AnswerStatus, CloseCode, Command, Frame, MAX_FRAME_BYTES, NackCode, Outcome,
+    PresenceState, parse_frame,
 };
 use protocol::turn_event::{
     Envelope, MAX_ENVELOPE_BYTES, Presence, RunError, RunErrorReason, RunReason, RunStarted,
@@ -38,6 +39,24 @@ pub enum HostError {
     Unavailable(String),
 }
 
+/// The Thread DO's verdict on an interrupt answer from the machine's terminal (tunnel.md §3.6a).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnswerVerdict {
+    pub status: AnswerStatus,
+    pub resolved_by: Option<Actor>,
+    pub message: String,
+}
+
+/// The machine's local user: the actor of an answer typed on its terminal (tunnel.md §3.6a).
+pub fn local_user(machine_id: &str) -> Actor {
+    Actor {
+        kind: ActorKind::User,
+        id: format!("local:{machine_id}"),
+        name: Some("terminal".to_owned()),
+        device_id: Some(machine_id.to_owned()),
+    }
+}
+
 /// The objects a machine talks to: the thread hosts and the D1 mirror of its presence.
 pub trait ThreadHost {
     /// Appends one envelope (`seq: 0`) to a thread (Thread DO `POST /internal/threads/{id}/events`).
@@ -50,6 +69,16 @@ pub trait ThreadHost {
         event_id: Option<&str>,
         envelope: &Value,
     ) -> impl Future<Output = Result<(), HostError>>;
+
+    /// Resolves an answer typed on the machine's terminal, exactly as the phone's
+    /// `POST /v1/threads/{id}/interrupts/{interrupt_id}` would (Thread DO
+    /// `POST /internal/threads/{id}/interrupt-answers`). The winning answer's `approval` command
+    /// is queued by the Thread DO and reaches the machine like a phone's.
+    fn answer_interrupt(
+        &self,
+        thread_id: &str,
+        answer: &MachineAnswer<'_>,
+    ) -> impl Future<Output = Result<AnswerVerdict, HostError>>;
 
     /// The machine a Thread DO records as the thread's host, if the thread exists.
     fn thread_machine(
@@ -94,6 +123,15 @@ pub trait ThreadHost {
         machine_id: &str,
         capabilities: &Value,
     ) -> impl Future<Output = ()>;
+}
+
+/// One `interrupt_answer` as it goes to the Thread DO.
+#[derive(Debug, Clone, Copy)]
+pub struct MachineAnswer<'a> {
+    pub interrupt_id: &'a str,
+    pub answer_id: &'a str,
+    pub outcome: &'a Outcome,
+    pub actor: &'a Actor,
 }
 
 /// The core behind a `RefCell`, shared by every entry point of the DO.
@@ -226,6 +264,24 @@ where
             });
             thread_open(core, host, (seq, &event_id, &thread_id), info, now_ms, emit).await?;
         }
+        Frame::InterruptAnswer {
+            seq,
+            event_id,
+            thread_id,
+            interrupt_id,
+            answer_id,
+            outcome,
+        } => {
+            let answer = UpAnswer {
+                seq,
+                event_id: &event_id,
+                thread_id: &thread_id,
+                interrupt_id: &interrupt_id,
+                answer_id: &answer_id,
+                outcome: &outcome,
+            };
+            interrupt_answer(core, host, &answer, now_ms, emit).await?;
+        }
         Frame::CommandResult {
             seq,
             event_id,
@@ -248,7 +304,10 @@ where
             };
             command_result(core, host, &result, now_ms, emit).await?;
         }
-        Frame::Welcome { .. } | Frame::Command { .. } | Frame::Nack { .. } => {
+        Frame::Welcome { .. }
+        | Frame::Command { .. }
+        | Frame::Nack { .. }
+        | Frame::InterruptAnswerResult { .. } => {
             emit(Out::close(
                 CloseCode::ProtocolError,
                 "down-stream frame sent by the runner",
@@ -342,6 +401,81 @@ where
         .complete_up(epoch, seq, Some(event_id), now_ms)?;
     if let Some(refusal) = refusal {
         emit(refusal);
+    }
+    Ok(())
+}
+
+/// The fields of an `interrupt_answer` frame.
+#[derive(Clone, Copy)]
+struct UpAnswer<'a> {
+    seq: u64,
+    event_id: &'a str,
+    thread_id: &'a str,
+    interrupt_id: &'a str,
+    answer_id: &'a str,
+    outcome: &'a Outcome,
+}
+
+/// `interrupt_answer` (tunnel.md §3.6a): the thread must be hosted by this machine; the Thread
+/// DO resolves the answer like a phone's, and the verdict goes back as `interrupt_answer_result`.
+/// A frame whose `event_id` was recorded already (a retransmit on a fresh stream) is acked
+/// without a second resolution or reply.
+async fn interrupt_answer<S, H>(
+    core: &Core<S>,
+    host: &H,
+    answer: &UpAnswer<'_>,
+    now_ms: u64,
+    emit: &mut impl FnMut(Out),
+) -> StoreResult<()>
+where
+    S: MachineStore,
+    H: ThreadHost,
+{
+    let Some(epoch) = up_preface(core, answer.seq, emit) else {
+        return Ok(());
+    };
+    let mut reply: Option<Out> = None;
+    if !core.borrow().event_seen(answer.event_id, now_ms)? {
+        if core.borrow().hosted(answer.thread_id)?.is_none() {
+            reply = Some(nack(
+                answer.seq,
+                NackCode::Forbidden,
+                format!("thread {} is not hosted by this machine", answer.thread_id),
+            ));
+        } else {
+            let actor = local_user(core.borrow().machine_id());
+            let request = MachineAnswer {
+                interrupt_id: answer.interrupt_id,
+                answer_id: answer.answer_id,
+                outcome: answer.outcome,
+                actor: &actor,
+            };
+            match host.answer_interrupt(answer.thread_id, &request).await {
+                Ok(verdict) => {
+                    reply = Some(Out::send(Frame::InterruptAnswerResult {
+                        answer_id: answer.answer_id.to_owned(),
+                        status: verdict.status,
+                        resolved_by: verdict.resolved_by,
+                        message: verdict.message,
+                    }));
+                }
+                Err(HostError::Rejected { code, message }) => {
+                    reply = Some(nack(answer.seq, code, message));
+                }
+                Err(HostError::Unavailable(message)) => {
+                    emit(Out::close(
+                        CloseCode::ServerRestart,
+                        format!("thread host unavailable: {message}"),
+                    ));
+                    return Ok(());
+                }
+            }
+        }
+    }
+    core.borrow_mut()
+        .complete_up(epoch, answer.seq, Some(answer.event_id), now_ms)?;
+    if let Some(reply) = reply {
+        emit(reply);
     }
     Ok(())
 }

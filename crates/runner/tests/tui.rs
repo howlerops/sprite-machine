@@ -1321,7 +1321,8 @@ mod session {
     use protocol::tunnel::{Command, ContentPart, Workspace};
     use runner::tui::driver::execute;
     use runner::tui::session::{
-        Handle, Identity, Registrar, Registration, Session, Upstream, UpstreamFuture,
+        Handle, HubAnswerFuture, HubVerdict, Identity, Registrar, Registration, Session, Upstream,
+        UpstreamFuture, local_actor,
     };
     use sidecar::bridge::{Bridge, Config, IncomingCommand, Origin, SequentialGenerator};
     use sidecar::store::Store;
@@ -1336,6 +1337,13 @@ mod session {
     struct Recording {
         opened: Mutex<Vec<(String, String)>>,
         sent: Mutex<Vec<Envelope>>,
+        /// The answers typed here that went up (interrupt id, outcome).
+        answers: Mutex<Vec<(String, Outcome)>>,
+        /// What the hub says to the next answer: `Ok(verdict)`, or `Err` for no verdict.
+        verdict: Mutex<Option<Result<HubVerdict, String>>>,
+        /// When set, the hub accepts and sends the `approval` command back, as the Thread DO
+        /// does for the winner, with the command's `seq`.
+        approve_with: Mutex<Option<(Handle, u64)>>,
     }
 
     impl Upstream for Recording {
@@ -1356,6 +1364,46 @@ mod session {
         fn send<'a>(&'a self, envelopes: Vec<Envelope>) -> UpstreamFuture<'a> {
             self.sent.lock().expect("lock").extend(envelopes);
             Box::pin(async { Ok(()) })
+        }
+
+        fn answer<'a>(
+            &'a self,
+            _thread_id: &'a str,
+            interrupt_id: &'a str,
+            outcome: &'a Outcome,
+        ) -> HubAnswerFuture<'a> {
+            self.answers
+                .lock()
+                .expect("lock")
+                .push((interrupt_id.to_owned(), outcome.clone()));
+            let verdict = self
+                .verdict
+                .lock()
+                .expect("lock")
+                .take()
+                .unwrap_or_else(|| Err("no verdict scripted".to_owned()));
+            let approve = self.approve_with.lock().expect("lock").clone();
+            let interrupt = interrupt_id.to_owned();
+            let outcome = outcome.clone();
+            Box::pin(async move {
+                if let (Ok(HubVerdict::Accepted), Some((handle, seq))) = (&verdict, approve) {
+                    handle
+                        .hub_command(IncomingCommand {
+                            seq,
+                            idempotency_key: format!("ans_{seq}"),
+                            command: Command::Approval {
+                                thread_id: THREAD.to_owned(),
+                                task_id: "tk_t11".to_owned(),
+                                interrupt_id: interrupt,
+                                outcome,
+                                resolved_by: local_actor(),
+                            },
+                            origin: Origin::Hub,
+                        })
+                        .await;
+                }
+                verdict
+            })
         }
     }
 
@@ -1842,5 +1890,147 @@ mod session {
             )
             .await;
         assert!(matches!(result, AnswerResult::Failed(_)), "{result:?}");
+    }
+
+    /// Shared session: the answer goes to the hub, which accepts it and sends the `approval`
+    /// command back; only that command reaches the agent, and the terminal's answer is not an
+    /// event sent up.
+    #[tokio::test]
+    async fn a_shared_answer_is_applied_only_after_the_hub_accepts_it() {
+        let mut rig = rig(vec![permission_turn("Running.", "All green.")], true).await;
+        rig.start().await;
+        *rig.hub.verdict.lock().expect("lock") = Some(Ok(HubVerdict::Accepted));
+        *rig.hub.approve_with.lock().expect("lock") = Some((rig.handle.clone(), 7));
+        rig.say("run the tests").await;
+        rig.until("the approval", open_approval).await;
+        let interrupt = rig
+            .app
+            .pending_approval()
+            .expect("approval")
+            .id()
+            .to_owned();
+        let task = rig.app.view().tasks()[0].task_id.clone();
+        assert!(
+            !rig.hub.kinds().contains(&"InterruptResolved".to_owned()),
+            "nothing is applied before the hub decides"
+        );
+
+        rig.press(Key::Enter).await;
+        rig.until("the turn to finish", |app| rig_done(app, &task))
+            .await;
+        assert_eq!(
+            *rig.hub.answers.lock().expect("lock"),
+            vec![(
+                interrupt,
+                Outcome::Selected {
+                    option_id: "allow".to_owned()
+                }
+            )],
+            "the answer went up to the hub"
+        );
+        let shown = screen_sized(&rig.app, 60, 16);
+        assert!(shown.contains("answered: Allow (by terminal)"), "{shown}");
+        assert!(shown.contains("agent> All green."), "{shown}");
+        assert!(
+            !rig.hub.kinds().contains(&"InterruptResolved".to_owned()),
+            "the hub's log gets the answer from the hub, not as a runner event: {:?}",
+            rig.hub.kinds()
+        );
+    }
+
+    /// The phone answered first: the hub refuses the terminal's answer, the terminal says
+    /// "already answered", nothing of the terminal's choice reaches the agent, and the phone's
+    /// choice (its `approval` command) is what runs.
+    #[tokio::test]
+    async fn a_terminal_answer_that_loses_to_the_phone_at_the_hub_shows_already_answered() {
+        let mut rig = rig(vec![permission_turn("Running.", "All green.")], true).await;
+        rig.start().await;
+        rig.say("run the tests").await;
+        rig.until("the approval", open_approval).await;
+        let interrupt = rig
+            .app
+            .pending_approval()
+            .expect("approval")
+            .id()
+            .to_owned();
+        let task = rig.app.view().tasks()[0].task_id.clone();
+
+        // The terminal picks Reject; at the hub the phone's Allow got there first.
+        *rig.hub.verdict.lock().expect("lock") = Some(Ok(HubVerdict::AlreadyAnswered {
+            by: Some(phone_actor()),
+        }));
+        let reject = Outcome::Selected {
+            option_id: "reject".to_owned(),
+        };
+        let result = rig.session.answer(&interrupt, reject.clone()).await;
+        assert_eq!(
+            result,
+            AnswerResult::AlreadyAnswered {
+                by: Some(phone_actor())
+            }
+        );
+        rig.app.answered(&interrupt, result);
+        assert!(screen(&rig.app).contains("already answered by phone"));
+        assert_eq!(
+            *rig.hub.answers.lock().expect("lock"),
+            vec![(interrupt.clone(), reject)]
+        );
+        assert!(rig.app.pending_approval().is_none());
+
+        // The phone's command arrives; the agent runs the phone's choice (the mock script
+        // expects `allow`, so a `reject` anywhere would fail the turn).
+        rig.handle
+            .hub_command(hub_approval(1, &task, &interrupt, "allow"))
+            .await;
+        rig.until("the turn to finish", |app| rig_done(app, &task))
+            .await;
+        let shown = screen_sized(&rig.app, 60, 16);
+        assert!(shown.contains("answered: Allow (by phone)"), "{shown}");
+        assert!(!shown.contains("(by terminal)"), "{shown}");
+        assert!(
+            !rig.hub.kinds().contains(&"InterruptResolved".to_owned()),
+            "{:?}",
+            rig.hub.kinds()
+        );
+    }
+
+    /// No verdict from the hub (tunnel down): the answer is not applied anywhere and the
+    /// approval stays open to try again; a rejection reads the same.
+    #[tokio::test]
+    async fn without_a_verdict_from_the_hub_a_shared_answer_is_not_applied() {
+        let mut rig = rig(vec![permission_turn("Running.", "All green.")], true).await;
+        rig.start().await;
+        rig.say("run the tests").await;
+        rig.until("the approval", open_approval).await;
+        let interrupt = rig
+            .app
+            .pending_approval()
+            .expect("approval")
+            .id()
+            .to_owned();
+        let task = rig.app.view().tasks()[0].task_id.clone();
+
+        *rig.hub.verdict.lock().expect("lock") = Some(Err("the hub has not answered yet".into()));
+        let allow = Outcome::Selected {
+            option_id: "allow".to_owned(),
+        };
+        let result = rig.session.answer(&interrupt, allow.clone()).await;
+        assert_eq!(
+            result,
+            AnswerResult::Failed("the hub has not answered yet".to_owned())
+        );
+        rig.app.answered(&interrupt, result);
+        let shown = screen(&rig.app);
+        assert!(shown.contains("your answer was not sent"), "{shown}");
+        assert!(open_approval(&rig.app), "still open for another try");
+        assert!(
+            !rig.task_succeeded(&task),
+            "the agent was not told anything"
+        );
+
+        *rig.hub.verdict.lock().expect("lock") =
+            Some(Ok(HubVerdict::Rejected("expired: too late".to_owned())));
+        let result = rig.session.answer(&interrupt, allow).await;
+        assert_eq!(result, AnswerResult::Failed("expired: too late".to_owned()));
     }
 }

@@ -9,8 +9,9 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use protocol::tunnel::{
-    Actor, ActorKind, Capabilities, CloseCode, Command, CommandErrorCode, ContentPart,
-    DedupeWindow, Disposition, Frame, NackCode, PresenceState, Receiver, Sender, Verdict,
+    Actor, ActorKind, AnswerStatus, Capabilities, CloseCode, Command, CommandErrorCode,
+    ContentPart, DedupeWindow, Disposition, Frame, NackCode, PresenceState, Receiver, Sender,
+    Verdict,
 };
 use protocol::turn_event::{Envelope, TextMessageContent, format_timestamp};
 use rusqlite::params_from_iter;
@@ -20,7 +21,7 @@ use serde_json::{Value, json};
 use super::admin::{self, MachineControl};
 use super::core::{Auth, Heartbeat, HelloInfo, MachineCore, Out, PresenceChange, PushBody};
 use super::credential;
-use super::driver::{self, Core, HostError, ThreadHost, handle_text};
+use super::driver::{self, AnswerVerdict, Core, HostError, MachineAnswer, ThreadHost, handle_text};
 use super::store::{HostKind, MemoryStore};
 use crate::auth::{Principal, authenticate};
 use crate::db::{Db, DbError, MIGRATIONS, Param, Role, Row};
@@ -56,6 +57,10 @@ struct FakeHost {
     presence: RefCell<Vec<String>>,
     /// The capabilities mirrored at each accepted hello.
     capabilities: RefCell<Vec<Value>>,
+    /// Each interrupt answer passed to the thread host: thread, answer id, interrupt id, actor id.
+    answers: RefCell<Vec<(String, String, String, String)>>,
+    /// The verdicts the Thread DO gives, oldest first; `accepted` when empty.
+    verdicts: RefCell<VecDeque<AnswerVerdict>>,
 }
 
 impl FakeHost {
@@ -114,6 +119,25 @@ impl ThreadHost for FakeHost {
                 Ok(())
             }
         })
+    }
+
+    fn answer_interrupt(
+        &self,
+        thread_id: &str,
+        answer: &MachineAnswer<'_>,
+    ) -> impl Future<Output = Result<AnswerVerdict, HostError>> {
+        self.answers.borrow_mut().push((
+            thread_id.to_owned(),
+            answer.answer_id.to_owned(),
+            answer.interrupt_id.to_owned(),
+            answer.actor.id.clone(),
+        ));
+        let verdict = self.verdicts.borrow_mut().pop_front();
+        ready(Ok(verdict.unwrap_or_else(|| AnswerVerdict {
+            status: AnswerStatus::Accepted,
+            resolved_by: Some(answer.actor.clone()),
+            message: "accepted".to_owned(),
+        })))
     }
 
     fn thread_machine(
@@ -195,6 +219,8 @@ struct Runner {
     got: Vec<Command>,
     closes: Vec<(CloseCode, String)>,
     nacks: Vec<(u64, NackCode)>,
+    /// `interrupt_answer_result` frames received: answer id, status, winner.
+    results: Vec<(String, AnswerStatus, Option<Actor>)>,
     welcome: Option<(bool, u64)>,
     seen_down: Vec<u64>,
     next_event: u32,
@@ -210,6 +236,7 @@ impl Runner {
             got: Vec::new(),
             closes: Vec::new(),
             nacks: Vec::new(),
+            results: Vec::new(),
             welcome: None,
             seen_down: Vec::new(),
             next_event: 0,
@@ -278,6 +305,12 @@ impl Runner {
                         self.up.on_nack(seq).expect("nack");
                         self.nacks.push((seq, code));
                     }
+                    Frame::InterruptAnswerResult {
+                        answer_id,
+                        status,
+                        resolved_by,
+                        ..
+                    } => self.results.push((answer_id, status, resolved_by)),
                     _ => {}
                 },
                 Out::Close(code, message) => self.closes.push((code, message)),
@@ -746,6 +779,101 @@ fn a_superseded_socket_is_ignored_and_does_not_change_presence() {
 }
 
 // ---- up stream -----------------------------------------------------------------------------
+
+fn answer_frame(event_id: &str, thread: &str, answer_id: &str) -> Value {
+    json!({
+        "t": "interrupt_answer",
+        "event_id": event_id,
+        "thread_id": thread,
+        "interrupt_id": "int_1",
+        "answer_id": answer_id,
+        "outcome": { "type": "selected", "option_id": "allow" },
+    })
+}
+
+#[test]
+fn an_interrupt_answer_goes_to_the_thread_host_as_the_local_user_and_the_verdict_comes_back() {
+    let world = new_world();
+    let phone = Actor {
+        kind: ActorKind::User,
+        id: "usr_1".to_owned(),
+        name: None,
+        device_id: Some("dev_phone".to_owned()),
+    };
+    world.host.verdicts.borrow_mut().extend([
+        AnswerVerdict {
+            status: AnswerStatus::Accepted,
+            resolved_by: Some(driver::local_user(MACHINE)),
+            message: "accepted".to_owned(),
+        },
+        AnswerVerdict {
+            status: AnswerStatus::AlreadyResolved,
+            resolved_by: Some(phone.clone()),
+            message: "this interrupt was already answered".to_owned(),
+        },
+    ]);
+    let mut runner = Runner::new();
+    let conn = world.connect(&mut runner, NOW);
+    runner.up_frame(answer_frame("evt_a", THREAD, "ans_1"));
+    runner.up_frame(answer_frame("evt_b", THREAD, "ans_2"));
+    world.pump_up(conn, &mut runner, NOW);
+
+    assert_eq!(
+        *world.host.answers.borrow(),
+        vec![
+            (
+                THREAD.to_owned(),
+                "ans_1".to_owned(),
+                "int_1".to_owned(),
+                format!("local:{MACHINE}")
+            ),
+            (
+                THREAD.to_owned(),
+                "ans_2".to_owned(),
+                "int_1".to_owned(),
+                format!("local:{MACHINE}")
+            ),
+        ],
+        "the answer is resolved by the thread host, not appended as an event"
+    );
+    assert!(
+        world.host.types().is_empty(),
+        "no InterruptResolved event is appended by the machine"
+    );
+    assert_eq!(runner.results.len(), 2);
+    assert_eq!(runner.results[0].0, "ans_1");
+    assert_eq!(runner.results[0].1, AnswerStatus::Accepted);
+    assert_eq!(runner.results[1].0, "ans_2");
+    assert_eq!(runner.results[1].1, AnswerStatus::AlreadyResolved);
+    assert_eq!(
+        runner.results[1].2,
+        Some(phone),
+        "the loser is told who won"
+    );
+    assert!(runner.nacks.is_empty());
+}
+
+#[test]
+fn an_interrupt_answer_for_a_thread_the_machine_does_not_host_is_nacked_and_a_retransmit_is_not_resolved_twice()
+ {
+    let world = new_world();
+    let mut runner = Runner::new();
+    let conn = world.connect(&mut runner, NOW);
+    runner.up_frame(answer_frame("evt_a", "th_other", "ans_1"));
+    world.pump_up(conn, &mut runner, NOW);
+    assert_eq!(runner.nacks, vec![(1, NackCode::Forbidden)]);
+    assert!(world.host.answers.borrow().is_empty());
+    assert!(runner.results.is_empty());
+
+    // The same frame again on a fresh stream (same event_id): acked, not resolved again.
+    runner.up_frame(answer_frame("evt_b", THREAD, "ans_2"));
+    world.pump_up(conn, &mut runner, NOW);
+    let mut again = runner.restarted();
+    let conn = world.connect(&mut again, NOW + 1);
+    again.up_frame(answer_frame("evt_b", THREAD, "ans_2"));
+    world.pump_up(conn, &mut again, NOW + 1);
+    assert_eq!(world.host.answers.borrow().len(), 1, "evt_b resolved once");
+}
 
 #[test]
 fn runner_events_carry_their_event_id_to_the_thread_host() {

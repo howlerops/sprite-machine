@@ -5,11 +5,13 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use protocol::tunnel::{MAX_FRAME_BYTES, Workspace};
+use std::time::Duration;
+
+use protocol::tunnel::{Actor, AnswerStatus, MAX_FRAME_BYTES, Outcome, Workspace};
 use serde_json::{Value, json};
 use sidecar::bridge::{CommandFailure, CommandSource, EventSink, IncomingCommand, SinkError};
 use sidecar::store::Store;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, oneshot};
 
 use protocol::turn_event::Envelope;
 
@@ -27,6 +29,17 @@ pub(crate) struct Shared {
     /// `thread_open`. Held across the check and the enqueue, so `thread_open` is always the
     /// first frame of its thread in the outbox.
     pub local_threads: Mutex<HashMap<String, bool>>,
+    /// Interrupt answers waiting for the hub's verdict, by `answer_id` (tunnel.md §3.6a).
+    pub answers: Mutex<HashMap<String, oneshot::Sender<Result<AnswerReply, String>>>>,
+}
+
+/// The hub's verdict on one `interrupt_answer` (tunnel.md §3.6a).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerReply {
+    pub status: AnswerStatus,
+    /// Who won: the local user for `accepted`, the other answerer for `already_resolved`.
+    pub resolved_by: Option<Actor>,
+    pub message: String,
 }
 
 impl Shared {
@@ -43,6 +56,23 @@ impl Shared {
             last_seq: AtomicU64::new(0),
             closed: AtomicBool::new(false),
             local_threads: Mutex::new(HashMap::new()),
+            answers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn lock_answers(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<String, oneshot::Sender<Result<AnswerReply, String>>>>
+    {
+        self.answers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Hands the hub's verdict (or its refusal of the frame) to whoever waits for `answer_id`.
+    pub fn finish_answer(&self, answer_id: &str, verdict: Result<AnswerReply, String>) {
+        if let Some(waiter) = self.lock_answers().remove(answer_id) {
+            let _ = waiter.send(verdict);
         }
     }
 
@@ -161,6 +191,40 @@ impl TunnelSink {
         Ok(seq)
     }
 
+    /// Sends an interrupt answer typed on this runner up and waits for the hub's verdict
+    /// (tunnel.md §3.6a). The frame is in the durable outbox first, so it survives a dead
+    /// socket; `Err` means no verdict came within `wait` (or the hub refused the frame), and
+    /// the answer may still be applied by the hub later.
+    pub async fn interrupt_answer(
+        &self,
+        thread_id: &str,
+        interrupt_id: &str,
+        outcome: &Outcome,
+        wait: Duration,
+    ) -> Result<AnswerReply, String> {
+        let answer_id = new_event_id().replacen("evt_", "ans_", 1);
+        let (tx, rx) = oneshot::channel();
+        self.shared.lock_answers().insert(answer_id.clone(), tx);
+        let queued = self.shared.enqueue(json!({
+            "t": "interrupt_answer",
+            "thread_id": thread_id,
+            "interrupt_id": interrupt_id,
+            "answer_id": answer_id,
+            "outcome": outcome,
+        }));
+        if let Err(error) = queued {
+            self.shared.lock_answers().remove(&answer_id);
+            return Err(error.to_string());
+        }
+        let verdict = tokio::time::timeout(wait, rx).await;
+        self.shared.lock_answers().remove(&answer_id);
+        match verdict {
+            Ok(Ok(verdict)) => verdict,
+            Ok(Err(_)) => Err("the tunnel stopped before the hub answered".to_owned()),
+            Err(_) => Err("the hub has not answered yet".to_owned()),
+        }
+    }
+
     /// Queues event bodies, refusing the whole batch if an envelope belongs to a local thread
     /// that was never opened.
     fn send_events(&self, envelopes: &[Envelope]) -> Result<(), SinkError> {
@@ -219,5 +283,86 @@ impl CommandSource for TunnelCommands {
     async fn processed(&mut self, _seq: u64, idempotency_key: &str) {
         // The client is gone when this fails; nothing is left to ack.
         let _ = self.processed.send(idempotency_key.to_owned());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sink() -> (TunnelSink, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().expect("state dir");
+        let store = Arc::new(Store::open(dir.path()).expect("store"));
+        (
+            TunnelSink {
+                shared: Arc::new(Shared::new(store)),
+            },
+            dir,
+        )
+    }
+
+    fn allow() -> Outcome {
+        Outcome::Selected {
+            option_id: "allow".to_owned(),
+        }
+    }
+
+    /// The answer is a durable `interrupt_answer` up frame, and the caller gets the hub's verdict
+    /// for exactly that `answer_id`.
+    #[tokio::test]
+    async fn an_interrupt_answer_is_queued_up_and_resolves_with_the_hubs_verdict() {
+        let (sink, _dir) = sink();
+        let waiting = {
+            let sink = sink.clone();
+            tokio::spawn(async move {
+                sink.interrupt_answer("th_1", "int_1", &allow(), Duration::from_secs(5))
+                    .await
+            })
+        };
+        let body = loop {
+            let rows = sink.shared.store.outbound_since(0).expect("outbox");
+            if let Some(row) = rows.into_iter().next() {
+                break row.body;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(body["t"], "interrupt_answer");
+        assert_eq!(body["thread_id"], "th_1");
+        assert_eq!(body["interrupt_id"], "int_1");
+        assert_eq!(body["outcome"]["option_id"], "allow");
+        let answer_id = body["answer_id"].as_str().expect("answer_id").to_owned();
+        assert!(answer_id.starts_with("ans_"), "{answer_id}");
+
+        // A verdict for another answer changes nothing; the right one resolves the wait.
+        let winner = Actor {
+            kind: protocol::tunnel::ActorKind::User,
+            id: "usr_1".to_owned(),
+            name: None,
+            device_id: Some("dev_phone".to_owned()),
+        };
+        sink.shared
+            .finish_answer("ans_other", Err("not for this wait".to_owned()));
+        sink.shared.finish_answer(
+            &answer_id,
+            Ok(AnswerReply {
+                status: AnswerStatus::AlreadyResolved,
+                resolved_by: Some(winner.clone()),
+                message: "this interrupt was already answered".to_owned(),
+            }),
+        );
+        let reply = waiting.await.expect("task").expect("a verdict");
+        assert_eq!(reply.status, AnswerStatus::AlreadyResolved);
+        assert_eq!(reply.resolved_by, Some(winner));
+    }
+
+    /// No verdict in time is an error, never an acceptance, and the waiter is cleaned up.
+    #[tokio::test]
+    async fn an_interrupt_answer_without_a_verdict_is_an_error() {
+        let (sink, _dir) = sink();
+        let result = sink
+            .interrupt_answer("th_1", "int_1", &allow(), Duration::from_millis(30))
+            .await;
+        assert!(result.is_err(), "{result:?}");
+        assert!(sink.shared.lock_answers().is_empty());
     }
 }

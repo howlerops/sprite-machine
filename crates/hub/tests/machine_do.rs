@@ -324,6 +324,10 @@ struct Runner {
     /// Command frames received, in order, duplicates dropped.
     commands: Vec<Value>,
     nacks: Vec<Value>,
+    /// `interrupt_answer_result` frames received, in order.
+    results: Vec<Value>,
+    /// The thread the test opened on this runner (for `interrupt_answer`).
+    thread: String,
     next_event: u64,
 }
 
@@ -406,6 +410,8 @@ impl Runner {
             welcome,
             commands: Vec::new(),
             nacks: Vec::new(),
+            results: Vec::new(),
+            thread: String::new(),
             next_event: saved.next_event,
         };
         runner.flush();
@@ -471,6 +477,7 @@ impl Runner {
                     self.commands.push(frame.clone());
                 }
             }
+            Some("interrupt_answer_result") => self.results.push(frame.clone()),
             Some("pong") | None => {}
             other => panic!("unexpected frame {other:?}: {frame}"),
         }
@@ -500,6 +507,13 @@ impl Runner {
     /// Reads until `n` commands were received in total.
     fn read_commands(&mut self, n: usize) {
         self.read_until(&format!("{n} commands"), |r| r.commands.len() >= n);
+    }
+
+    /// Reads until `n` `interrupt_answer_result` frames were received in total.
+    fn read_results(&mut self, n: usize) {
+        self.read_until(&format!("{n} interrupt answer results"), |r| {
+            r.results.len() >= n
+        });
     }
 
     /// Acks the down stream up to what was processed.
@@ -1419,4 +1433,156 @@ fn a_failed_command_result_fails_the_task() {
     assert_eq!(error["task_id"], "tk_1");
     assert_eq!(error["event"]["code"], "capacity");
     assert_eq!(error["event"]["reason"], "error");
+}
+
+// ---- an interrupt answer typed on the runner (M2B-010a, tunnel.md §3.6a) --------------------
+
+/// A hosted thread paused on the approval `int_1`, as a runner reports it.
+fn paused_on_interrupt(runner: &mut Runner, thread: &str) {
+    runner.open_thread(thread);
+    runner.event(user_message(thread));
+    runner.event(run_event(thread, started()));
+    runner.event(run_event(
+        thread,
+        json!({
+            "type": "Interrupt",
+            "interrupt_id": "int_1",
+            "kind": "approval",
+            "title": "Run cargo test?",
+            "expires_at": format_timestamp(now_ms() + 10 * 60 * 1000),
+            "options": [
+                { "option_id": "allow", "name": "Allow", "kind": "allow_once" },
+                { "option_id": "reject", "name": "Reject", "kind": "reject_once" },
+            ],
+        }),
+    ));
+    runner.event(run_event(
+        thread,
+        json!({"type": "RunFinished", "outcome": {"type": "interrupt", "interrupt_ids": ["int_1"]}}),
+    ));
+    runner.read_acks();
+    assert!(runner.nacks.is_empty(), "nacks: {:?}", runner.nacks);
+}
+
+fn answer_up(runner: &mut Runner, answer_id: &str, interrupt: &str, option: &str) {
+    runner.next_event += 1;
+    let event_id = format!("evt_ans_{answer_id}_{}", runner.next_event);
+    runner.up_frame(json!({
+        "t": "interrupt_answer",
+        "event_id": event_id,
+        "thread_id": runner.thread.clone(),
+        "interrupt_id": interrupt,
+        "answer_id": answer_id,
+        "outcome": {"type": "selected", "option_id": option},
+    }));
+}
+
+fn phone_answer(thread: &str, key: &str, option: &str) -> Reply {
+    http(
+        "POST",
+        &format!("/v1/threads/{thread}/interrupts/int_1"),
+        true,
+        Some(key),
+        Some(&json!({"outcome": {"type": "selected", "option_id": option}})),
+    )
+}
+
+fn resolutions(thread: &str) -> Vec<Value> {
+    thread_events(thread)
+        .into_iter()
+        .filter(|e| type_of(e) == "InterruptResolved")
+        .collect()
+}
+
+/// The terminal's answer reaches the Thread DO first: it wins, the runner gets the `approval`
+/// command like a phone's answer would, and the phone's answer is a 409 naming the terminal.
+#[test]
+fn a_runner_answer_that_reaches_the_hub_first_wins_and_the_phone_gets_409() {
+    let machine = unique("mch", "ansfirst");
+    let thread = unique("th", "ansfirst");
+    let credential = dev_credential(&machine);
+    let mut runner = Runner::first(&machine, &credential);
+    runner.thread = thread.clone();
+    paused_on_interrupt(&mut runner, &thread);
+
+    answer_up(&mut runner, "ans_first", "int_1", "allow");
+    runner.read_results(1);
+    let result = &runner.results[0];
+    assert_eq!(result["answer_id"], "ans_first");
+    assert_eq!(result["status"], "accepted", "{result}");
+    let local = format!("local:{machine}");
+    assert_eq!(result["resolved_by"]["id"], local.as_str());
+
+    // The winning answer reaches the runner as an `approval` command, like a phone's.
+    runner.read_commands(1);
+    let command = &runner.commands[0]["command"];
+    assert_eq!(command["kind"], "approval");
+    assert_eq!(command["interrupt_id"], "int_1");
+    assert_eq!(command["outcome"]["option_id"], "allow");
+    assert_eq!(command["resolved_by"]["id"], local.as_str());
+
+    // The phone is too late.
+    let late = phone_answer(&thread, "idk_ansfirst_phone", "reject");
+    assert_eq!(late.status, 409, "late phone answer: {}", late.body);
+    assert_eq!(late.json()["error"], "already_resolved");
+    assert_eq!(late.json()["resolved_by"]["id"], local.as_str());
+
+    // The hub's log has the terminal's answer once.
+    let resolved = resolutions(&thread);
+    assert_eq!(resolved.len(), 1, "{resolved:?}");
+    assert_eq!(resolved[0]["event"]["outcome"]["option_id"], "allow");
+    assert_eq!(resolved[0]["event"]["resolved_by"]["id"], local.as_str());
+
+    // An answer to an interrupt that does not exist is refused with a typed result.
+    answer_up(&mut runner, "ans_unknown", "int_9", "allow");
+    runner.read_results(2);
+    assert_eq!(runner.results[1]["status"], "rejected");
+    assert!(runner.results[1]["resolved_by"].is_null());
+    assert!(
+        runner.results[1]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("int_9")),
+        "{}",
+        runner.results[1]
+    );
+}
+
+/// The phone answers first: the runner's answer is refused with `already_resolved` naming the
+/// phone's user, and the only `approval` command the runner gets is the phone's.
+#[test]
+fn a_runner_answer_that_loses_to_the_phone_is_refused_and_the_agent_runs_the_phone_choice() {
+    let machine = unique("mch", "anslate");
+    let thread = unique("th", "anslate");
+    let credential = dev_credential(&machine);
+    let mut runner = Runner::first(&machine, &credential);
+    runner.thread = thread.clone();
+    paused_on_interrupt(&mut runner, &thread);
+
+    let won = phone_answer(&thread, "idk_anslate_phone", "allow");
+    assert_eq!(won.status, 200, "phone answer: {}", won.body);
+
+    answer_up(&mut runner, "ans_late", "int_1", "reject");
+    runner.read_results(1);
+    let result = &runner.results[0];
+    assert_eq!(result["answer_id"], "ans_late");
+    assert_eq!(result["status"], "already_resolved", "{result}");
+    assert_eq!(result["resolved_by"]["id"], "usr_dev");
+    assert_eq!(result["resolved_by"]["device_id"], "dev_dev");
+
+    // Exactly one approval reaches the runner, and it is the phone's choice.
+    runner.read_commands(1);
+    runner.ack_down();
+    let approvals: Vec<&Value> = runner
+        .commands
+        .iter()
+        .filter(|c| c["command"]["kind"] == "approval")
+        .collect();
+    assert_eq!(approvals.len(), 1, "{:?}", runner.commands);
+    assert_eq!(approvals[0]["command"]["outcome"]["option_id"], "allow");
+    assert_eq!(approvals[0]["command"]["resolved_by"]["id"], "usr_dev");
+
+    let resolved = resolutions(&thread);
+    assert_eq!(resolved.len(), 1, "{resolved:?}");
+    assert_eq!(resolved[0]["event"]["resolved_by"]["id"], "usr_dev");
+    assert_eq!(resolved[0]["event"]["outcome"]["option_id"], "allow");
 }

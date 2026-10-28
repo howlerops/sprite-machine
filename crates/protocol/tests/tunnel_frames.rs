@@ -2,8 +2,8 @@
 //! verbatim from the spec. Deserializing it and serializing it back must give an equal value.
 
 use protocol::tunnel::{
-    Actor, ActorKind, CloseCode, Command, CommandErrorCode, ContentPart, Frame, NackCode, Outcome,
-    PresenceState,
+    Actor, ActorKind, AnswerStatus, CloseCode, Command, CommandErrorCode, ContentPart, Frame,
+    NackCode, Outcome, PresenceState,
 };
 use serde_json::Value;
 
@@ -602,4 +602,61 @@ fn actor_round_trips_with_optional_fields_absent() {
 #[test]
 fn unknown_frame_tag_fails_to_parse() {
     assert!(serde_json::from_str::<Frame>(r#"{ "t": "resize", "seq": 1 }"#).is_err());
+}
+
+#[test]
+fn interrupt_answer_example_roundtrips() {
+    let frame = roundtrip_frame(
+        r#"{
+  "t": "interrupt_answer",
+  "seq": 122,
+  "event_id": "evt_01JBW5E0A9",
+  "thread_id": "th_1",
+  "interrupt_id": "int_1",
+  "answer_id": "ans_01JBW5E0A8",
+  "outcome": { "type": "selected", "option_id": "allow" }
+}"#,
+    );
+    match frame {
+        Frame::InterruptAnswer {
+            answer_id, outcome, ..
+        } => {
+            assert_eq!(answer_id, "ans_01JBW5E0A8");
+            assert_eq!(
+                outcome,
+                Outcome::Selected {
+                    option_id: "allow".to_owned()
+                }
+            );
+        }
+        other => panic!("expected interrupt_answer, got {other:?}"),
+    }
+}
+
+#[test]
+fn interrupt_answer_result_example_roundtrips() {
+    let frame = roundtrip_frame(
+        r#"{
+  "t": "interrupt_answer_result",
+  "answer_id": "ans_01JBW5E0A8",
+  "status": "already_resolved",
+  "resolved_by": { "kind": "user", "id": "usr_1", "device_id": "dev_phone" },
+  "message": "this interrupt was already answered"
+}"#,
+    );
+    match frame {
+        Frame::InterruptAnswerResult {
+            status,
+            resolved_by,
+            ..
+        } => {
+            assert_eq!(status, AnswerStatus::AlreadyResolved);
+            assert_eq!(resolved_by.map(|actor| actor.id).as_deref(), Some("usr_1"));
+        }
+        other => panic!("expected interrupt_answer_result, got {other:?}"),
+    }
+    // `rejected` carries no `resolved_by`.
+    roundtrip_frame(
+        r#"{"t":"interrupt_answer_result","answer_id":"a","status":"rejected","message":"no interrupt int_9"}"#,
+    );
 }

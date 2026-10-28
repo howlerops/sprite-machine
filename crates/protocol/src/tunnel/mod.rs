@@ -21,7 +21,8 @@ use std::fmt;
 pub use command::{Command, KNOWN_COMMAND_KINDS, ParsedCommand, parse_command_frame};
 pub use dedupe::{DedupeWindow, Disposition, EVENT_ID_TTL_MS, IDEMPOTENCY_KEY_TTL_MS};
 pub use frame::{
-    Capabilities, CloseCode, CommandErrorCode, Frame, NackCode, PresenceState, parse_frame,
+    AnswerStatus, Capabilities, CloseCode, CommandErrorCode, Frame, NackCode, PresenceState,
+    parse_frame,
 };
 pub use seq::{ACK_BATCH, Receiver, Sender, Verdict};
 pub use types::{Actor, ActorKind, ContentPart, Outcome, Workspace};

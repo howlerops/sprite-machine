@@ -20,7 +20,7 @@ mod tls;
 
 pub use backoff::{Backoff, Jitter, RandomJitter};
 pub use client::{CredentialSource, Exit, SleepHint, StaticCredential, TunnelClient};
-pub use io::{TunnelCommands, TunnelSink};
+pub use io::{AnswerReply, TunnelCommands, TunnelSink};
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
