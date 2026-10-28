@@ -75,6 +75,20 @@ BOOTSTRAP_OWNER_TOKEN=$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')
 export BOOTSTRAP_OWNER_TOKEN
 # M2-009: a random per-run attachment URL signing key (the hub fails closed without one).
 ATTACHMENT_SIGNING_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+# M2-011a: a random P-256 VAPID key per run (never a real one). node generates it in memory; the
+# private scalar and the uncompressed public point (base64url, space separated) go to the hub as
+# --var, like the other per-run values.
+VAPID_KEYS=$(node -e '
+const { generateKeyPairSync } = require("crypto");
+const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+const { d } = privateKey.export({ format: "jwk" });
+const { x, y } = publicKey.export({ format: "jwk" });
+const point = Buffer.concat([Buffer.from([4]), Buffer.from(x, "base64url"), Buffer.from(y, "base64url")]);
+process.stdout.write(`${d} ${point.toString("base64url")}`);
+')
+VAPID_PRIVATE_KEY=${VAPID_KEYS% *}
+VAPID_PUBLIC_KEY=${VAPID_KEYS#* }
+[[ -n $VAPID_PRIVATE_KEY && -n $VAPID_PUBLIC_KEY ]] || fail "could not generate a VAPID key"
 
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
@@ -82,6 +96,7 @@ echo "== wrangler dev --local --test-scheduled on port $PORT"
 (cd "$HUB_DIR" && exec setsid wrangler dev --local --test-scheduled --ip 127.0.0.1 --port "$PORT" \
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" --var DEV_FIXTURES:1 \
+  --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
   --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 

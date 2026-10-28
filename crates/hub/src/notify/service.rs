@@ -201,13 +201,18 @@ pub struct JobReport {
     pub removed: usize,
     /// Sends that failed for good, or went to a provider that is not configured.
     pub failed: usize,
-    /// At least one send hit a temporary failure: ask the queue to retry the message.
-    pub retry: bool,
+    /// Subscriptions that failed temporarily (5xx, 429, network) and still need the notification:
+    /// the queue re-sends the job with only these ([`NotifyJob::follow_up`]).
+    pub pending: Vec<String>,
 }
 
 /// The consumer's work for one job: find the thread's org, then for every deliverable
 /// subscription apply the user's prefs and send through the provider of its kind.
-/// `Err` is a database failure, which the caller retries.
+///
+/// Reads come first, then the sends, so a database error (`Err`, retried by the queue as a whole)
+/// happens before anything was sent. A delivered subscription is never sent to again: the
+/// follow-up job carries only `report.pending`. A subscription whose deletion fails after a
+/// `410` is kept pending as well, since a send to a gone endpoint reaches nobody.
 pub async fn process_job<D, W, A, F>(
     db: &D,
     providers: &Providers<W, A, F>,
@@ -224,10 +229,18 @@ where
     let Some(org_id) = store::org_of_thread(db, &job.thread_id).await? else {
         return Ok(report);
     };
-    let notification = Notification::new(job.clone());
+    let mut to_send = Vec::new();
     let mut prefs_by_user: HashMap<String, Prefs> = HashMap::new();
     for target in store::targets(db, &org_id).await? {
         let subscription = &target.subscription;
+        // A follow-up job sends to its pending subscriptions only.
+        if job
+            .subscriptions
+            .as_ref()
+            .is_some_and(|ids| !ids.contains(&subscription.id))
+        {
+            continue;
+        }
         // Only someone who may answer an approval is asked to.
         if job.kind == Kind::ApprovalNeeded && !target.role.allows(Role::Member) {
             report.skipped += 1;
@@ -242,16 +255,21 @@ where
             report.skipped += 1;
             continue;
         }
+        to_send.push(target.subscription);
+    }
+
+    let notification = Notification::new(job.clone());
+    for subscription in to_send {
         match providers
-            .send(subscription, &notification, now_ms / 1000)
+            .send(&subscription, &notification, now_ms / 1000)
             .await
         {
             Delivery::Delivered => report.delivered += 1,
-            Delivery::Gone => {
-                store::delete_subscription(db, &subscription.id).await?;
-                report.removed += 1;
-            }
-            Delivery::Retry(_) => report.retry = true,
+            Delivery::Gone => match store::delete_subscription(db, &subscription.id).await {
+                Ok(()) => report.removed += 1,
+                Err(_) => report.pending.push(subscription.id),
+            },
+            Delivery::Retry(_) => report.pending.push(subscription.id),
             Delivery::Failed(_) | Delivery::NotConfigured => report.failed += 1,
         }
     }

@@ -3,9 +3,9 @@
 //! fake push service served by this test process, whose body the test decrypts with the
 //! subscription's private key.
 //!
-//! Needs `HUB_URL` and a hub started with `DEV_FIXTURES=1` (`crates/hub/.dev.vars`) and a
-//! `ATTACHMENT_SIGNING_KEY` var, from which a hub with `DEV_FIXTURES=1` and no `VAPID_PRIVATE_KEY`
-//! derives a throwaway VAPID key. `bash scripts/hub-test.sh notify` does all of that. Without
+//! Needs `HUB_URL` and a hub started with `DEV_FIXTURES=1` and a `VAPID_PRIVATE_KEY` var, a P-256
+//! key that `scripts/hub-test.sh` generates for each run. `bash scripts/hub-test.sh notify` does
+//! all of that. Without
 //! `HUB_URL` every test fails with a message saying so; nothing passes vacuously. The `live`
 //! feature (required by `[[test]] notify`) keeps this file out of a plain `cargo test -p hub`.
 //!
@@ -13,7 +13,7 @@
 //! user's subscriptions, so the tests run one at a time (`serial()`) and remove their
 //! subscriptions and prefs when they start.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -164,11 +164,12 @@ impl Received {
 }
 
 /// A push service on a loopback port: records every POST and answers with the next status of
-/// `script`, else 201.
+/// the endpoint's own script (`answer_for`), else of `script` (`answer_next`), else 201.
 struct PushService {
     port: u16,
     received: Arc<Mutex<Vec<Received>>>,
     script: Arc<Mutex<VecDeque<u16>>>,
+    by_path: Arc<Mutex<HashMap<String, VecDeque<u16>>>>,
 }
 
 impl PushService {
@@ -177,17 +178,24 @@ impl PushService {
         let port = listener.local_addr().expect("addr").port();
         let received = Arc::new(Mutex::new(Vec::new()));
         let script = Arc::new(Mutex::new(VecDeque::new()));
-        let (log, answers) = (Arc::clone(&received), Arc::clone(&script));
+        let by_path = Arc::new(Mutex::new(HashMap::new()));
+        let (log, answers, paths) = (
+            Arc::clone(&received),
+            Arc::clone(&script),
+            Arc::clone(&by_path),
+        );
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (log, answers) = (Arc::clone(&log), Arc::clone(&answers));
-                std::thread::spawn(move || serve(stream, &log, &answers));
+                let (log, answers, paths) =
+                    (Arc::clone(&log), Arc::clone(&answers), Arc::clone(&paths));
+                std::thread::spawn(move || serve(stream, &log, &answers, &paths));
             }
         });
         Self {
             port,
             received,
             script,
+            by_path,
         }
     }
 
@@ -199,8 +207,29 @@ impl PushService {
         self.script.lock().unwrap().extend(statuses.iter().copied());
     }
 
+    /// The next statuses of the endpoint `name` only, before the shared script.
+    fn answer_for(&self, name: &str, statuses: &[u16]) {
+        self.by_path
+            .lock()
+            .unwrap()
+            .entry(format!("/push/{name}"))
+            .or_default()
+            .extend(statuses.iter().copied());
+    }
+
     fn count(&self) -> usize {
         self.received.lock().unwrap().len()
+    }
+
+    /// How many requests reached the endpoint `name`.
+    fn count_for(&self, name: &str) -> usize {
+        let path = format!("/push/{name}");
+        self.received
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.path == path)
+            .count()
     }
 
     /// The `n`th request (0-based), waiting up to [`PUSH_WAIT`] for it.
@@ -225,7 +254,12 @@ impl PushService {
     }
 }
 
-fn serve(mut stream: TcpStream, log: &Mutex<Vec<Received>>, answers: &Mutex<VecDeque<u16>>) {
+fn serve(
+    mut stream: TcpStream,
+    log: &Mutex<Vec<Received>>,
+    answers: &Mutex<VecDeque<u16>>,
+    by_path: &Mutex<HashMap<String, VecDeque<u16>>>,
+) {
     stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
@@ -274,12 +308,18 @@ fn serve(mut stream: TcpStream, log: &Mutex<Vec<Received>>, answers: &Mutex<VecD
         }
         body = dechunk(&body);
     }
+    let status = by_path
+        .lock()
+        .unwrap()
+        .get_mut(&path)
+        .and_then(VecDeque::pop_front)
+        .or_else(|| answers.lock().unwrap().pop_front())
+        .unwrap_or(201);
     log.lock().unwrap().push(Received {
         path,
         headers,
         body,
     });
-    let status = answers.lock().unwrap().pop_front().unwrap_or(201);
     let reply = format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     stream.write_all(reply.as_bytes()).ok();
 }
@@ -590,6 +630,47 @@ fn a_gone_endpoint_is_deleted_and_a_5xx_is_retried_by_the_queue() {
         again.body
     );
     unsubscribe(&endpoint);
+}
+
+#[test]
+fn a_partly_failed_job_is_retried_for_its_failed_subscription_only() {
+    let _serial = serial();
+    reset_prefs();
+    let service = PushService::start();
+    let (ok, flaky) = (
+        service.endpoint("partial_ok"),
+        service.endpoint("partial_flaky"),
+    );
+    let (ok_browser, flaky_browser) = (Browser::new(), Browser::new());
+    assert_eq!(subscribe(&ok_browser, &ok).status, 201);
+    assert_eq!(subscribe(&flaky_browser, &flaky).status, 201);
+
+    // One subscription answers 503 once; the other answers 201 and must not be sent to again.
+    service.answer_for("partial_flaky", &[503]);
+    let thread = unique_thread("partial");
+    start_run(&thread, "tk_partial");
+    finish_run(&thread, "tk_partial");
+
+    // Three requests in all: the 201 subscription once, the 503 one twice (the retry is a new job).
+    service.wait_for(2);
+    service.assert_no_more_than(3);
+    assert_eq!(
+        service.count_for("partial_ok"),
+        1,
+        "the delivered subscription gets exactly one push"
+    );
+    assert_eq!(service.count_for("partial_flaky"), 2);
+    let received = service.received.lock().unwrap().clone();
+    for request in received.iter().filter(|r| r.path == "/push/partial_flaky") {
+        assert_eq!(request.header("topic"), "tk_partial");
+        assert_eq!(flaky_browser.open(request)["kind"], "task_done");
+    }
+    for request in received.iter().filter(|r| r.path == "/push/partial_ok") {
+        assert_eq!(ok_browser.open(request)["kind"], "task_done");
+    }
+
+    unsubscribe(&ok);
+    unsubscribe(&flaky);
 }
 
 #[test]

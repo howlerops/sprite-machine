@@ -19,28 +19,18 @@ pub fn dev_fixtures(env: &Env) -> bool {
     dev_fixtures_enabled(var(env, "DEV_FIXTURES").as_deref())
 }
 
-/// The hub's VAPID identity, or `None` when none is configured (then pushes are not sent).
+/// The hub's VAPID identity, or `None` when no `VAPID_PRIVATE_KEY` secret is set (then no pushes
+/// are sent).
 ///
 /// The private key is the Worker secret `VAPID_PRIVATE_KEY` (base64url, 32 bytes) and is never
-/// logged. Only with `DEV_FIXTURES=1` and no such secret, a throwaway key is derived from
-/// `ATTACHMENT_SIGNING_KEY`, which `scripts/hub-test.sh` sets to a random per-run value.
+/// logged. There is no fallback: `scripts/hub-test.sh` generates a P-256 key per run and passes it
+/// with `--var`, and production sets the secret with `wrangler secret put`.
 pub fn load_vapid(env: &Env) -> Option<Vapid> {
     let subject = var(env, "VAPID_SUBJECT").unwrap_or_else(|| DEFAULT_SUBJECT.to_owned());
-    if let Some(private) = env
+    let private = env
         .secret("VAPID_PRIVATE_KEY")
         .ok()
         .map(|secret| secret.to_string())
-        .filter(|secret| !secret.trim().is_empty())
-    {
-        return Vapid::from_private(&private, &subject).ok();
-    }
-    if dev_fixtures(env) {
-        let seed = env
-            .secret("ATTACHMENT_SIGNING_KEY")
-            .ok()
-            .map(|secret| secret.to_string())
-            .filter(|secret| !secret.is_empty())?;
-        return Vapid::dev_derived(&seed, &subject).ok();
-    }
-    None
+        .filter(|secret| !secret.trim().is_empty())?;
+    Vapid::from_private(&private, &subject).ok()
 }

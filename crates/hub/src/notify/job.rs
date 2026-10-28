@@ -67,6 +67,36 @@ pub struct NotifyJob {
     /// The id of the interrupt's first reject option.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny_option_id: Option<String>,
+    /// The subscriptions still to send, when this job re-queues the failed part of an earlier
+    /// send. `None` sends to every subscription of the thread's org.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscriptions: Option<Vec<String>>,
+    /// How many sends this job has had before (0 for a job from an event).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub attempt: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Sends of one job before its failed subscriptions are given up on (the queue's own retries).
+pub const MAX_ATTEMPTS: u32 = 5;
+
+impl NotifyJob {
+    /// The job to queue for the subscriptions that failed temporarily (`pending`), or `None` when
+    /// there are none or [`MAX_ATTEMPTS`] sends were made. The subscriptions that were delivered
+    /// (or failed for good) are not in it, so they never get the same notification twice.
+    pub fn follow_up(&self, pending: Vec<String>) -> Option<NotifyJob> {
+        if pending.is_empty() || self.attempt + 1 >= MAX_ATTEMPTS {
+            return None;
+        }
+        Some(NotifyJob {
+            subscriptions: Some(pending),
+            attempt: self.attempt + 1,
+            ..self.clone()
+        })
+    }
 }
 
 /// The jobs for events just appended to a thread, in order. Only these events notify:
@@ -87,6 +117,8 @@ pub fn jobs_for(appended: &[Envelope]) -> Vec<NotifyJob> {
             interrupt_id: None,
             allow_option_id: None,
             deny_option_id: None,
+            subscriptions: None,
+            attempt: 0,
         };
         match &envelope.event {
             Event::Interrupt(interrupt) => {
