@@ -13,7 +13,9 @@ use serde_json::{Value, json};
 /// The env var that forces the file store at the given path.
 pub const CREDENTIAL_FILE_ENV: &str = "SM_CREDENTIAL_FILE";
 
+#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "sm";
+#[cfg(target_os = "macos")]
 const KEYCHAIN_USER: &str = "machine-credential";
 
 /// What `sm login` learned: which hub, which machine, and the credential. `Debug` hides the
@@ -70,14 +72,14 @@ pub trait Keychain: Send + Sync {
     fn delete(&self) -> Result<()>;
 }
 
-/// The platform keychain through the `keyring` crate: keyutils on Linux, the Keychain on macOS.
-/// Other platforms have none (`CredentialStore::from_env` then uses the file).
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+/// The macOS Keychain through the `keyring` crate. Other platforms have none, and Linux does not
+/// use keyutils (session-scoped, lost at reboot): `CredentialStore::from_env` uses the file there.
+#[cfg(target_os = "macos")]
 pub struct OsKeychain {
     entry: keyring::Entry,
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 impl OsKeychain {
     pub fn open() -> Result<Self> {
         let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
@@ -86,7 +88,7 @@ impl OsKeychain {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 impl Keychain for OsKeychain {
     fn get(&self) -> Result<Option<String>> {
         match self.entry.get_password() {
@@ -133,19 +135,20 @@ pub struct CredentialStore {
 }
 
 impl CredentialStore {
-    /// The default store: `SM_CREDENTIAL_FILE` forces the file; otherwise the OS keychain with
-    /// the file (`$XDG_CONFIG_HOME/sm/credential.json`, else `~/.config/sm/credential.json`) as
-    /// the fallback.
+    /// The default store: `SM_CREDENTIAL_FILE` forces the file. Otherwise the file
+    /// (`$XDG_CONFIG_HOME/sm/credential.json`, else `~/.config/sm/credential.json`), with the
+    /// macOS Keychain in front of it. Linux has no keychain here: keyutils lives in kernel memory
+    /// and is lost at reboot, so the `0600` file is the persistence path (see the module docs).
     pub fn from_env() -> Result<Self> {
         if let Some(path) = std::env::var_os(CREDENTIAL_FILE_ENV).filter(|p| !p.is_empty()) {
             return Ok(Self::file_only(PathBuf::from(path)));
         }
         let file = default_file()?;
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         let keychain = OsKeychain::open()
             .ok()
             .map(|keychain| Box::new(keychain) as Box<dyn Keychain>);
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(target_os = "macos"))]
         let keychain = None;
         Ok(Self { keychain, file })
     }

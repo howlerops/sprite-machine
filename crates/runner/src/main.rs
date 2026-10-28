@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
 use runner::login::flow::normalize_hub;
-use runner::login::{Confirm, CredentialStore, login, real_sleeper, terminal_prompter};
+use runner::login::{
+    Confirm, CredentialStore, login, logout, real_sleeper, status, terminal_prompter,
+};
 use runner::server::{self, Options, RcArgs};
 use runner::trust::{self, Audit, TrustStore};
 use runner::tunnel::Timing;
@@ -12,9 +14,11 @@ use runner::tunnel::Timing;
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags] | sm rc close <thread id> | \
-sm trust <dir> | sm untrust <dir>";
+const USAGE: &str = "usage: sm login --hub <url> | sm logout | sm status | sm rc [flags] | \
+sm rc close <thread id> | sm trust <dir> | sm untrust <dir>";
 const LOGIN_USAGE: &str = "usage: sm login --hub <url> [--yes]";
+const LOGOUT_USAGE: &str = "usage: sm logout";
+const STATUS_USAGE: &str = "usage: sm status";
 const CLOSE_USAGE: &str = "usage: sm rc close <thread id>";
 const TRUST_USAGE: &str = "usage: sm trust <dir> | sm untrust <dir>";
 
@@ -23,6 +27,8 @@ async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("login") => run_login(&args[1..]).await,
+        Some("logout") => run_logout(&args[1..]),
+        Some("status") => run_status(&args[1..]),
         Some("rc") if args.get(1).map(String::as_str) == Some("close") => {
             run_close(&args[2..]).await
         }
@@ -61,6 +67,23 @@ async fn run_login(args: &[String]) -> Result<()> {
     )
     .await?;
     Ok(())
+}
+
+/// `sm logout`: forgets the stored credential (keychain and file) on this machine.
+fn run_logout(args: &[String]) -> Result<()> {
+    if !args.is_empty() {
+        bail!("{LOGOUT_USAGE}");
+    }
+    logout(&CredentialStore::from_env()?, &mut std::io::stdout())
+}
+
+/// `sm status`: the stored hub, machine id and whether a credential is present. Never the
+/// credential.
+fn run_status(args: &[String]) -> Result<()> {
+    if !args.is_empty() {
+        bail!("{STATUS_USAGE}");
+    }
+    status(&CredentialStore::from_env()?, &mut std::io::stdout())
 }
 
 /// `sm rc [flags]` (`sm run` is the same command): the server mode (see `runner::server`). Keeps
