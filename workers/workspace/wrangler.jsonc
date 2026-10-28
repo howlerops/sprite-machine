@@ -1,0 +1,32 @@
+// Workspace Durable Object worker (plan §4.3). Local dev only for now: never deployed from here.
+// Local: `wrangler dev --enable-containers=false` with DEV_FAKE_SANDBOX=1 (scripts/dev-smoke.sh).
+// Real container start/stop and backup/restore need a deployed preview environment (FUSE).
+{
+  "name": "sm-workspace",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "durable_objects": {
+    "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+  },
+  // SQLite-backed (a class cannot switch storage later).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
+
+  // The image is built by M0-008c (images/workspace/Dockerfile).
+  "containers": [
+    {
+      "class_name": "WorkspaceDO",
+      "image": "../../images/workspace/Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 10
+    }
+  ],
+
+  // DirectoryBackup target (backup(dir) / restoreBackup(handle)).
+  "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "sm-workspace-backups" }],
+
+  "vars": {
+    "BACKUP_PREFIX": "backups/"
+  }
+}
