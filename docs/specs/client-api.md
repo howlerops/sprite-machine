@@ -241,7 +241,7 @@ before it stores the token.
 > M2-011. Web Push (RFC 8291 aes128gcm, RFC 8292 VAPID); APNs/FCM later behind the same hub
 > provider trait.
 
-- **`GET /v1/push/vapid-public-key`** → 200 `{ "key" }` (the page passes it to `pushManager.subscribe`).
+- **`GET /v1/push/vapid-public-key`** → 200 `{ "public_key" }` (base64url, uncompressed P-256 point) (the page passes it to `pushManager.subscribe`).
 - **`POST /v1/push/subscriptions`** `{ "endpoint", "keys": { "p256dh", "auth" } }` (member) → 201,
   or 200 with the same id when this user and device already registered the endpoint.
   **`DELETE /v1/push/subscriptions`** `{ "endpoint" }` → 204. Both are idempotent by the endpoint
