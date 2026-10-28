@@ -6261,14 +6261,19 @@ items:
     title: 'desktop task view: render steps, subagents and Raw (after M3-001m); flip known_gaps_are_still_gaps; expandable capped bodies'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     size: S
     risk: low
     deps: [M3-008, M3-001m]
     paths:
-      - 'crates/client-gpui/src/task/**'
-      - 'crates/client-gpui/tests/transcript.rs'
-      - 'crates/client-gpui/locales/**'
+      - "crates/client-gpui/src/task/**"
+      - "crates/client-gpui/tests/transcript.rs"
+      - "crates/client-gpui/locales/**"
+      - "crates/runner/src/tui/render.rs"
+      - "crates/runner/tests/tui.rs"
     context:
       - 'docs/ledger/reports/M3-008.md'
     acceptance:
