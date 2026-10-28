@@ -2,15 +2,15 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 53/211 (3 dropped) · in-flight M1B-004d,M2B-004 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 50/120
+done 54/214 (3 dropped) · in-flight M1B-004d · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 50/120
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 38 | 35 | 2 |
-| P2 | 31 | 2 | 0 |
+| P1 | 38 | 36 | 1 |
+| P2 | 34 | 2 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -55,7 +55,7 @@ done 53/211 (3 dropped) · in-flight M1B-004d,M2B-004 · blocked 8 (human: M0-01
 | M2B-001a | worker | rust | done | protocol: strict tunnel frame parsing + unknown command kind helper |
 | M2B-002 | worker | rust | done | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
 | M2B-003 | worker | rust | done | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
-| M2B-004 | worker | rust | assigned | runner: tunnel client with reconnect/backoff/resume |
+| M2B-004 | worker | rust | done | runner: tunnel client with reconnect/backoff/resume |
 | M2B-011 | worker | rust | done | runner: local checkpoints as shadow git commits |
 | M3-001 | worker | rust | done | client-core: TurnEvent subscription client, view models, cache, outbound queue |
 | M3-001a | worker | rust | done | client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner |

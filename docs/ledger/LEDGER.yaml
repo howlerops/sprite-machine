@@ -2031,6 +2031,72 @@ items:
     verify:
       - 'cargo test -p hub machines::'
 
+  - id: M2B-004a
+    title: 'Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: M
+    risk: high
+    deps: [M2B-004]
+    paths:
+      - 'crates/sidecar/src/store/**'
+      - 'crates/sidecar/tests/durability.rs'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/tests/tunnel_client.rs'
+      - 'crates/protocol/src/tunnel/seq.rs'
+    context:
+      - 'docs/specs/tunnel.md §4 (seq/ack, hello.last_down_seq = highest durably processed)'
+      - 'docs/ledger/reports/M2B-004.md (Design notes and limits, Discovered work)'
+    acceptance:
+      - 'A command whose frame was received but not yet processed when the runner crashes is redelivered after restart (test: kill between receive and processed, restart from the same Store, command applied exactly once via idempotency key)'
+      - 'Store::restart_outbound_stream is atomic (one transaction) so a concurrent enqueue is never lost (test), and the client no longer needs its external lock'
+      - 'A late processed(seq) from before a fresh stream cannot ack a new command with the same seq (test)'
+      - 'Sender honours welcome.max_inflight (test with a small window)'
+    verify:
+      - 'cargo test -p runner --test tunnel_client'
+      - 'cargo test -p sidecar --test durability'
+      - 'cargo run -p cli -- e2e tracer'
+
+  - id: M2B-004b
+    title: 'runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite)'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-004]
+    paths:
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/tests/tunnel_client.rs'
+    context:
+      - 'docs/ledger/reports/M2B-004.md'
+    acceptance:
+      - 'TunnelConfig accepts https/wss hub URLs and connects over TLS (rustls, no native-tls/openssl; crypto provider installed once); test against a local TLS fake hub with a test CA'
+      - 'ws:// stays allowed only for loopback hosts'
+    verify:
+      - 'cargo test -p runner --test tunnel_client'
+      - 'cargo tree -p runner -i openssl-sys 2>&1 | grep -q "did not match"'
+
+  - id: M2B-004c
+    title: 'runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-004]
+    paths:
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/tests/tunnel_client.rs'
+    context:
+      - 'docs/specs/tunnel.md §3.4, §3.7'
+    acceptance:
+      - 'thread_open is sent (via the outbox) before the first event of a runner-started thread (test)'
+      - 'A sleep hint API sends presence{asleep} or close{going_to_sleep}; close{normal} on clean shutdown (tests against the fake hub)'
+    verify:
+      - 'cargo test -p runner --test tunnel_client'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -2319,7 +2385,8 @@ items:
     title: 'runner: tunnel client with reconnect/backoff/resume'
     milestone: M2b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 51725de; tunnel_client 34 passed x2 on merged tree (worker 6 runs), runner+protocol ok, clippy clean, tracer PASS on the new client vs real Machine DO; leader read credential handling (header only, dropped after connect); known gap: commit-before-apply window -> M2B-004a"
     attempt: 1
     assignee: "worker:sonnet"
     deps: [M2B-001, M2B-003]

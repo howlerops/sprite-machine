@@ -115,3 +115,4 @@
 2026-10-28T06:03Z M1B-008d assigned (haiku)
 2026-10-28T06:06Z M1A-014a assigned→done merged d144a60 (haiku; no runtime.rs change needed)
 2026-10-28T06:06Z M1B-008d assigned→done merged 071a6ef (haiku)
+2026-10-28T06:09Z M2B-004 assigned→done merged 51725de (sonnet; Cargo.toml dep union conflict with M2B-011 resolved by leader); added M2B-004a (durability, high), M2B-004b (wss), M2B-004c (presence/thread_open)
