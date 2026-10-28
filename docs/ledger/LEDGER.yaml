@@ -2487,7 +2487,8 @@ items:
     title: 'runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; runner fmt/clippy clean, cargo test -p runner 169 passed on merged tree; login tests incl. sm rc fake-hub dial"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -3402,7 +3403,8 @@ items:
     title: 'runner: session URL, QR code, `sm mobile`, auto-connect setting'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; qr 7 passed, runner 169 passed; sm rc wiring split to M2B-009a, autoConnect to M2B-010"
     assignee: "haiku"
     attempt: 1
     deps: [M2B-007, M2-010]
@@ -5404,6 +5406,9 @@ items:
     title: 'runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode)'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
