@@ -3,9 +3,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError};
 
-use protocol::mapping::acp_turn::{
-    AcpTurnMapper, IdSource, SequentialIds, StartTask, runner_actor,
-};
+use protocol::mapping::acp_turn::{AcpTurnMapper, StartTask, runner_actor};
 use protocol::tunnel::{Command, CommandErrorCode};
 use protocol::turn_event::{Envelope, Event, RunErrorReason, RunOutcome, UserMessage};
 use serde_json::Value;
@@ -14,15 +12,13 @@ use super::files::{self, FilePolicy};
 use super::handler::{Internal, Resources};
 use super::ids::SharedIds;
 use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand};
+use super::stale::{end_interrupts_of_earlier_process, stale_mapper};
 use super::{ActiveTask, Bridge, BridgeError, Start, ThreadState};
 use crate::acp::client::{AcpClient, ClientError};
 use crate::acp::fs::Workspace;
-use crate::acp::reattach::{
-    ReattachError, expire_overdue_interrupts, fail_stale_interrupts, rfc3339,
-};
+use crate::acp::reattach::{ReattachError, expire_overdue_interrupts, rfc3339};
 use crate::acp::sessions::PromptResult;
 use crate::acp::terminal::{ActivitySink, TerminalScope, Terminals};
-use crate::store::PendingInterrupt;
 
 impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     /// Runs until the command source ends. Fails when the store, the agent connection's
@@ -67,7 +63,10 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
 
     // ---- commands ---------------------------------------------------------------------------
 
-    async fn on_incoming(&mut self, incoming: IncomingCommand) -> Result<(), BridgeError> {
+    pub(super) async fn on_incoming(
+        &mut self,
+        incoming: IncomingCommand,
+    ) -> Result<(), BridgeError> {
         let IncomingCommand {
             seq,
             idempotency_key,
@@ -77,12 +76,14 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         // when told `processed` below. The bridge only reads, so a crash before then leaves the
         // command uncommitted and the hub redelivers it. `applied` covers a repeat that arrives
         // before the commit.
-        if self.store.seen_key(&idempotency_key)? || !self.applied.insert(idempotency_key.clone()) {
+        if self.store.seen_key(&idempotency_key)? || !self.applied.insert(&idempotency_key) {
             tracing::debug!(%idempotency_key, "duplicate command ignored");
         } else {
             self.apply(&idempotency_key, command).await?;
         }
         self.commands.processed(seq, &idempotency_key).await;
+        // The source has committed the key by now: the store answers for it from here on.
+        self.applied.prune(&self.store)?;
         Ok(())
     }
 
@@ -643,12 +644,15 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         self.end_stale(runs).await
     }
 
-    /// At startup: ends the task of every stored interrupt, whatever its deadline. The ACP
-    /// request it waited on died with the previous agent process, so nobody can answer it.
+    /// At startup: ends the task of every stored interrupt, whatever its deadline, with
+    /// `cancelled` + `harness_exited` (SPEC-004). The ACP request it waited on died with the
+    /// previous agent process, so nobody can answer it.
     async fn fail_stale(&mut self) -> Result<(), BridgeError> {
         let now = self.now_ms();
-        let runs = fail_stale_interrupts(&self.store, |interrupt| stale_mapper(interrupt, now));
-        self.end_stale(runs).await
+        for ended in end_interrupts_of_earlier_process(&self.store, now)? {
+            self.emit(&ended.thread_id, ended.events).await?;
+        }
+        Ok(())
     }
 
     async fn end_stale(
@@ -735,17 +739,6 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         }
         Ok(())
     }
-}
-
-/// The mapper that rebuilds a stored interrupt's paused state. The expiry functions want the
-/// default id source, so skip ahead to make a run id unlikely to repeat one the thread already
-/// used.
-fn stale_mapper(interrupt: &PendingInterrupt, now: u64) -> AcpTurnMapper {
-    let mut ids = SequentialIds::default();
-    for _ in 0..1_000 + (now / 1_000) % 100_000 {
-        ids.next_id("run_");
-    }
-    AcpTurnMapper::new(interrupt.thread_id.clone(), ids)
 }
 
 /// The stored task state an event implies, if it changes it.

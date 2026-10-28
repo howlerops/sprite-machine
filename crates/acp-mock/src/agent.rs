@@ -29,6 +29,36 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 const INTERNAL_ERROR: i64 = -32603;
 
+/// Every message the agent received, in order. Clones share one log, so a test keeps a clone
+/// and reads it while the agent runs.
+#[derive(Debug, Clone, Default)]
+pub struct Recorder {
+    messages: Arc<std::sync::Mutex<Vec<Value>>>,
+}
+
+impl Recorder {
+    /// An empty log.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The messages received so far (requests, notifications and responses), in order, as the
+    /// client sent them.
+    pub fn messages(&self) -> Vec<Value> {
+        self.messages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn push(&self, message: Value) {
+        self.messages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(message);
+    }
+}
+
 /// Serves ACP for one connection until the reader reaches end of file.
 ///
 /// `reader` carries the client's messages and `writer` carries the agent's. Each
@@ -39,8 +69,23 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    run_recorded(script, Recorder::new(), reader, writer).await
+}
+
+/// [`run`] that also appends every message it receives to `recorder`.
+pub async fn run_recorded<R, W>(
+    script: Script,
+    recorder: Recorder,
+    reader: R,
+    writer: W,
+) -> Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
     let mock = Arc::new(Mock {
         script,
+        recorder,
         writer: Mutex::new(writer),
         next_request_id: AtomicU64::new(1),
         pending: Mutex::new(HashMap::new()),
@@ -61,6 +106,7 @@ where
                 continue;
             }
         };
+        mock.recorder.push(message.clone());
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         match (
             message.get("method").and_then(Value::as_str),
@@ -92,6 +138,7 @@ where
 /// Shared state for one connection.
 struct Mock<W> {
     script: Script,
+    recorder: Recorder,
     writer: Mutex<W>,
     next_request_id: AtomicU64,
     /// Agent-to-client requests waiting for the client's answer, by request id.
@@ -196,17 +243,26 @@ where
                     .lock()
                     .await
                     .insert(id.clone(), SessionState::new());
-                to_value(NewSessionResponse::new(id))
+                let mut response = NewSessionResponse::new(id);
+                response.modes = self.script.modes().cloned();
+                response.config_options = self.script.config_options().map(<[_]>::to_vec);
+                to_value(response)
             }
             "session/load" => {
                 let request: LoadSessionRequest = parse(params)?;
                 self.ensure_session(&request.session_id).await;
-                to_value(LoadSessionResponse::new())
+                let mut response = LoadSessionResponse::new();
+                response.modes = self.script.modes().cloned();
+                response.config_options = self.script.config_options().map(<[_]>::to_vec);
+                to_value(response)
             }
             "session/resume" => {
                 let request: ResumeSessionRequest = parse(params)?;
                 self.ensure_session(&request.session_id).await;
-                to_value(ResumeSessionResponse::new())
+                let mut response = ResumeSessionResponse::new();
+                response.modes = self.script.modes().cloned();
+                response.config_options = self.script.config_options().map(<[_]>::to_vec);
+                to_value(response)
             }
             _ => Err(RpcError::new(
                 METHOD_NOT_FOUND,
