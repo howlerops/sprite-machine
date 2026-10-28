@@ -100,3 +100,7 @@ tower-service = "0.3"
 [[test]]
 name = "subscribe_ticket"
 required-features = ["live"]
+
+[[test]]
+name = "oauth"
+required-features = ["live"]

@@ -11,6 +11,7 @@ pub mod dev_fixtures;
 pub mod devices;
 pub mod links;
 pub mod machines;
+pub mod members;
 pub mod notify;
 pub mod router;
 pub mod tasks;

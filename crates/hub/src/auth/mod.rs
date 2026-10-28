@@ -25,6 +25,12 @@ use protocol::tunnel::{Actor, ActorKind};
 use crate::db::{Db, Role};
 use crate::threads::ApiError;
 
+pub mod github;
+#[cfg(target_arch = "wasm32")]
+pub mod github_routes;
+mod github_store;
+#[cfg(test)]
+pub(crate) mod github_tests;
 pub mod policy;
 #[cfg(target_arch = "wasm32")]
 pub mod routes;
