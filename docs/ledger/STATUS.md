@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 26/192 (3 dropped) · in-flight M1A-006a,M1B-004c,M3-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 24/120
+done 27/193 (3 dropped) · in-flight M1A-006a,M1B-004c,M2-008 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 25/120
 
 P1 running.
 
@@ -11,7 +11,7 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 30 | 9 | 3 |
+| P1 | 31 | 10 | 3 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -45,14 +45,15 @@ P1 running.
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
 | M2-016 | worker | rust | todo | hub: D1 schema + migrations (org-wide metadata) |
 | M2-003a | worker | rust | todo | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
-| M2-008 | worker | rust | todo | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
+| M2-008 | worker | rust | assigned | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
 | M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
 | M2B-001a | worker | rust | todo | protocol: strict tunnel frame parsing + unknown command kind helper |
 | M2B-002 | worker | rust | todo | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
 | M2B-003 | worker | rust | todo | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
 | M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
 | M2B-011 | worker | rust | todo | runner: local checkpoints as shadow git commits |
-| M3-001 | worker | rust | assigned | client-core: TurnEvent subscription client, view models, cache, outbound queue |
+| M3-001 | worker | rust | done | client-core: TurnEvent subscription client, view models, cache, outbound queue |
+| M3-001a | worker | rust | todo | client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner |
 
 ## Waiting on the human
 

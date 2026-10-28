@@ -60,3 +60,5 @@
 2026-10-28T02:11Z M1B-004b todo→assigned attempt 1 (haiku, client lane)
 2026-10-28T02:29Z M1B-004b assigned→done merged e3fc24c (haiku); CONVENTIONS.md += Diff component + test-module gotcha
 2026-10-28T02:29Z M1B-004c todo→assigned attempt 1 (haiku, client lane)
+2026-10-28T02:31Z M3-001 assigned→done merged 5a7418f (haiku); added M3-001a; M2-008 context += client-api alignment (spec issues 3-4)
+2026-10-28T02:31Z M2-008 paths += tracer/{thread,state,mod}.rs + router.rs (replaces the tracer thread stub; route registration); assigned attempt 1 (sonnet, risk high)

@@ -1599,6 +1599,9 @@ items:
     title: 'hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel)'
     milestone: M2
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
     size: M
     risk: high
     deps:
@@ -1606,13 +1609,18 @@ items:
       - "SPEC-001"
       - "SPEC-003"
     paths:
-      - 'crates/hub/src/do/thread*'
-      - 'crates/hub/src/threads/**'
-      - 'crates/hub/tests/thread_do.rs'
+      - "crates/hub/src/do/thread*"
+      - "crates/hub/src/threads/**"
+      - "crates/hub/tests/thread_do.rs"
+      - "crates/hub/src/tracer/thread.rs"
+      - "crates/hub/src/tracer/state.rs"
+      - "crates/hub/src/tracer/mod.rs"
+      - "crates/hub/src/router.rs"
     context:
-      - 'docs/PLAN-v2-ade.md §4.2 (Thread DO row), §1.2'
-      - 'docs/specs/turn-event.md'
-      - 'https://developers.cloudflare.com/durable-objects/best-practices/websockets/ (hibernation API)'
+      - "docs/PLAN-v2-ade.md §4.2 (Thread DO row), §1.2"
+      - "docs/specs/turn-event.md"
+      - "https://developers.cloudflare.com/durable-objects/best-practices/websockets/ (hibernation API)"
+      - "docs/ledger/reports/M3-001.md spec issues 3-4: the real hub serves docs/specs/client-api.md exactly (routes under /v1; author/resolved_by come from auth, never from request bodies); the tracer routes may keep their stub shapes until the tracer moves onto the real hub"
     acceptance:
       - 'One SQLite-backed DO per thread: append-only TurnEvent log with a gap-free per-thread seq assigned by the DO; events validated against the schemas'
       - 'Hibernatable WebSocket subscription GET /threads/{id}/subscribe?after=seq: catch-up = snapshot + replay from the last run boundary ≤ after, then live; 3 concurrent clients see identical sequences; uses the hibernation API (no per-connection timers)'
@@ -2229,7 +2237,8 @@ items:
     title: 'client-core: TurnEvent subscription client, view models, cache, outbound queue'
     milestone: M3
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 5a7418f; verify: sync 6 + queue 6 + view_models 7 passed, tracer PASS on the real client, clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     size: M
@@ -2249,6 +2258,26 @@ items:
       - 'SQLite cache; JSON-Patch state apply; persisted outbound queue (messages, approvals) with idempotency keys, 409 surfaced with the resolver; backoff + jitter; connectivity state; replaces the MVP-000 headless client stub'
     verify:
       - 'cargo test -p client-core --test sync --test queue --test view_models'
+
+  - id: M3-001a
+    title: 'client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner'
+    milestone: M3
+    phase: P1
+    priority: 3
+    deps: [M3-001]
+    paths:
+      - crates/client-core/src/cache*
+      - crates/client-core/src/connectivity*
+      - crates/client-core/src/outbox*
+      - crates/client-core/tests/cache_unknown.rs
+    context:
+      - 'docs/ledger/reports/M3-001.md (spec issue 5; discovered M3-001a/b)'
+      - 'docs/specs/turn-event.md §2 (consumers ignore unknown event types)'
+    acceptance:
+      - 'An envelope with an unknown event.type is cached as its original JSON and, after a restart, re-read byte-identically (a newer client build can then interpret it)'
+      - 'Outbox transport failures move the connectivity state to offline (and back on success); unit-tested with an injected clock'
+    verify:
+      - cargo test -p client-core --test cache_unknown
 
   - id: M3-002
     title: 'client (desktop): shell, login (pairing + GitHub OAuth), settings, navigation, theming, i18n'
