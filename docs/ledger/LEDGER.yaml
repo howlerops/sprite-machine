@@ -1517,12 +1517,17 @@ items:
     title: 'hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner'
     milestone: M2
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
+    risk: "high"
     deps: [M2-016]
     paths:
-      - 'crates/hub/src/auth/session*'
-      - 'crates/hub/src/auth/middleware*'
-      - 'crates/hub/src/audit/**'
-      - 'crates/hub/tests/authz.rs'
+      - "crates/hub/src/auth/**"
+      - "crates/hub/src/audit/**"
+      - "crates/hub/tests/authz.rs"
+      - "crates/hub/src/threads/auth.rs"
+      - "crates/hub/migrations/*auth*"
     context:
       - 'docs/PLAN-v2-ade.md §4.2 (Auth)'
       - 'crates/hub/migrations (members, audit_log)'

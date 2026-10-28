@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 33/195 (3 dropped) · in-flight M1A-004,M1A-009 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 30/120
+done 33/195 (3 dropped) · in-flight M1A-004,M1A-009,M2-003a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 31/120
 
 P1 running.
 
@@ -11,7 +11,7 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 32 | 16 | 2 |
+| P1 | 32 | 16 | 3 |
 | P2 | 23 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -45,7 +45,7 @@ P1 running.
 | M1B-008 | worker | rust | todo | Benchmark scripts per gates.yaml |
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
 | M2-016 | worker | rust | done | hub: D1 schema + migrations (org-wide metadata) |
-| M2-003a | worker | rust | todo | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
+| M2-003a | worker | rust | assigned | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
 | M2-008 | worker | rust | done | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
 | M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
 | M2B-001a | worker | rust | todo | protocol: strict tunnel frame parsing + unknown command kind helper |
