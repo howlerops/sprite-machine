@@ -5800,3 +5800,23 @@ items:
       - 'Flags parsed and applied like sm rc; header shows Online/Connecting/Offline from the tunnel; snapshot tests'
     verify:
       - 'cargo test -p runner --test tui'
+
+  - id: M3-017c
+    title: 'client-core: send_prompt and upload_attachment helpers (POST prompts, POST /v1/attachments + PUT); e2e checks use them'
+    milestone: M3
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-017a]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/cli/src/e2e/**'
+    context:
+      - 'docs/ledger/reports/M3-017a.md (Discovered work)'
+    acceptance:
+      - 'Typed helpers with fake-hub tests; e2e attachments uses them and passes'
+    verify:
+      - 'cargo test -p client-core'
+      - 'cargo run -p cli -- e2e attachments'
