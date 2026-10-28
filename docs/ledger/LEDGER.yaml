@@ -895,7 +895,8 @@ items:
     title: 'runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink)'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 11112cd; verify: bridge 10 passed (2 stable runs, exact golden stream), workspace 369, tracer PASS on the real bridge, clippy clean"
     assignee: "worker:sonnet"
     attempt: 1
     deps: [M1A-006a, M1A-004, M2B-001]
@@ -975,6 +976,52 @@ items:
     verify:
       - cargo test -p sidecar --test acp_fs_hardening
       - cargo test -p sidecar --test acp_fs_term
+
+  - id: M1A-006c
+    title: 'runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume, elicitation interrupts'
+    milestone: M1a
+    phase: P2
+    priority: 2
+    risk: high
+    deps: [M1A-006b, SPEC-002a]
+    paths:
+      - crates/sidecar/src/bridge/**
+      - crates/sidecar/src/acp/client*
+      - crates/sidecar/src/acp/reattach*
+      - crates/sidecar/tests/bridge_robust.rs
+    context:
+      - 'docs/ledger/reports/M1A-006b.md (Discovered work 1-7)'
+      - 'docs/specs/tunnel.md §3.5 (approval outcomes incl. submitted/declined after SPEC-002a)'
+    acceptance:
+      - 'When the agent process exits, running tasks end with RunError{error, code:"harness_exited"}, Reattacher::connection_lost is called, and the next prompt respawns the agent and resumes (test kills acp-mock mid-turn)'
+      - 'AcpClient hands session/update to the bridge as raw JSON too; raw.payload is byte-faithful and unparseable updates become Raw events (no warn-and-drop)'
+      - 'session/new and session/resume return their responses so the bridge emits StateSnapshot{session} via on_session_new; MCP servers configured per thread are passed on new and resume'
+      - 'At startup, interrupts stored by a previous process fail their task promptly (RunError expired or harness_exited) instead of waiting for the TTL'
+      - 'elicitation/create (form and url) becomes Interrupt{form|auth}; an approval command with outcome submitted/declined/cancelled answers ACP accordingly'
+    verify:
+      - cargo test -p sidecar --test bridge_robust
+      - cargo test -p sidecar --test bridge
+      - cargo run -p cli -- e2e tracer
+  - id: SPEC-002a
+    title: 'Spec: tunnel approval command carries every interrupt outcome (selected, submitted+data, declined, cancelled)'
+    milestone: M0
+    phase: P1
+    status: "done"
+    evidence: "merged 937a5a2; tunnel.md §3.5 outcome table"
+    assignee: "leader"
+    attempt: 1
+    lane: docs
+    priority: 1
+    owner: leader
+    deps: [SPEC-002]
+    paths:
+      - docs/specs/tunnel.md
+    context:
+      - 'docs/ledger/reports/M2-008.md (spec issue 5) and M1A-006b.md (discovered 3)'
+    acceptance:
+      - 'tunnel.md §3.5 approval.outcome is the same union as InterruptResolved.outcome in turn-event.md §4.5 (selected{option_id} | submitted{data} | declined | cancelled), with a JSON example per form'
+    verify:
+      - grep -q submitted docs/specs/tunnel.md
 
   - id: M1A-009
     title: 'Durable store (SQLite) + ACP session re-attach after restart'
@@ -1344,6 +1391,9 @@ items:
     title: 'gpui spike: approval card + build release'
     milestone: M1b
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     lane: client
     deps: [M1B-004b, M1B-004c]
     paths:
@@ -1547,8 +1597,8 @@ items:
     title: 'hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner'
     milestone: M2
     phase: P1
-    status: "review"
-    evidence: "merged 827a41c; leader clean-rebuild verify running"
+    status: "done"
+    evidence: "merged 827a41c; verify (clean rebuild): hub-test authz 10 live, thread_do, smoke, workspace-dev-test, tracer, 352 workspace tests, wasm32 + no tokio runtime, clippy clean"
     assignee: "worker:sonnet"
     attempt: 1
     risk: "high"
@@ -1897,7 +1947,8 @@ items:
     title: 'protocol: strict tunnel frame parsing + unknown command kind helper'
     milestone: M2b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged a84e6ca; verify: tunnel_strict 10 + tunnel_frames 20, protocol 142, wasm32, clippy clean; workspace + tracer green after merge"
     assignee: "worker:haiku"
     attempt: 1
     priority: 2
@@ -1920,15 +1971,30 @@ items:
     title: 'hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration'
     milestone: M2b
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
     size: M
     risk: high
-    deps: [M2B-001, M2-008, M2-003a, M2-016]
+    deps:
+      - "M2B-001"
+      - "M2-008"
+      - "M2-003a"
+      - "M2-016"
+      - "SPEC-002a"
     paths:
-      - 'crates/hub/src/do/machine*'
-      - 'crates/hub/src/machines/**'
-      - 'crates/hub/migrations/*machines*'
-      - 'crates/hub/migrations/*agents_kind*'
-      - 'crates/hub/tests/machine_do.rs'
+      - "crates/hub/src/do/machine*"
+      - "crates/hub/src/machines/**"
+      - "crates/hub/migrations/*machines*"
+      - "crates/hub/migrations/*agents_kind*"
+      - "crates/hub/tests/machine_do.rs"
+      - "crates/hub/src/tracer/**"
+      - "crates/hub/src/threads/**"
+      - "crates/hub/src/worker.rs"
+      - "crates/hub/src/db/mod.rs"
+      - "crates/protocol/src/tunnel/types.rs"
+      - "crates/protocol/tests/tunnel_frames.rs"
+      - "crates/runner/src/tracer.rs"
     context:
       - "docs/PLAN-v2-ade.md §4.2 (Machine DO row), §4.10 (Connection, Sleep and disconnects)"
       - "docs/specs/tunnel.md"
@@ -2367,6 +2433,9 @@ items:
     title: 'client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner'
     milestone: M3
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 3
     deps: [M3-001]
     paths:

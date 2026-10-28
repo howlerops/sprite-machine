@@ -81,3 +81,6 @@
 2026-10-28T03:28Z added M1A-004a (terminal/fs hardening, sonnet); M2B-004 + M1A-006b context += Store/Workspace/Terminals APIs
 2026-10-28T03:37Z M2-003a merged 827a41c (sonnet; out-of-path edits db/mod.rs MIGRATIONS, threads/routes.rs gate, hub-test.sh random bootstrap var — accepted); leader wiped the shared target (disk 3.8→23 GB) and runs a clean-rebuild verify
 2026-10-28T03:37Z M1A-006b paths += sidecar/src/tracer*.rs (it replaces those stubs); assigned (sonnet); M2B-001a assigned (haiku)
+2026-10-28T04:07Z M1A-006b assigned→done merged 11112cd (sonnet); added M1A-006c (bridge robustness, P2) and SPEC-002a (done by leader: approval outcome union)
+2026-10-28T04:07Z M2B-002 paths += tracer/**, threads/** (push hook), worker.rs, db/mod.rs, protocol tunnel Outcome, runner tracer (tunnel client adapter); deps += SPEC-002a; assigned (sonnet)
+2026-10-28T04:07Z M1B-004d (haiku, client) + M3-001a (haiku) assigned
