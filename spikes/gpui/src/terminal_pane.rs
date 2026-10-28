@@ -144,6 +144,9 @@ impl Render for TerminalPane {
             .p_1()
             .bg(theme.background)
             .font_family(MONO_FONT)
+            // A terminal shows its bottom: when the grid is taller than the pane, the top rows
+            // are clipped, not the newest ones.
+            .justify_end()
             .children(rows)
     }
 }
