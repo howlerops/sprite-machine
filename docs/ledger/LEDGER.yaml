@@ -6008,7 +6008,8 @@ items:
     title: 'client-core: a Subscription that starts Offline when the hub is unreachable (Connection can be built offline; reconnect() retries)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; client-core clippy clean, 44 passed on merged tree"
     assignee: "haiku"
     attempt: 1
     lane: rust
