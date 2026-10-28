@@ -2,9 +2,8 @@
 //!
 //! The tracer wires the bridge to plain channels: `Command`s in, `Envelope`s out, no tunnel
 //! framing. This adapter gives each command a synthetic seq and idempotency key, keeps the
-//! store in a throwaway directory, and sets [`Config::emit_user_message`] because the tracer
-//! hub still expects the runner to emit `UserMessage` (client-api.md §6 says the real hub
-//! does).
+//! store in a throwaway directory. `UserMessage` is the hub's (client-api.md §6), so the
+//! bridge does not emit it for these commands.
 //!
 //! Failures the bridge reports as `command_result` are logged, since the tracer has no
 //! up-stream frame for them.
@@ -52,7 +51,6 @@ where
     let state_dir = scratch_dir();
     let store = Arc::new(Store::open(&state_dir).context("open the bridge store")?);
     let mut bridge_config = Config::new(config.machine_id, config.agent_id, config.cwd);
-    bridge_config.emit_user_message = true;
     bridge_config.approval_ttl = std::time::Duration::from_millis(APPROVAL_TTL_MS);
     let bridge = Bridge::connect(
         bridge_config,

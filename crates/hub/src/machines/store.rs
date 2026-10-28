@@ -7,29 +7,24 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::threads::{StoreError, StoreResult};
 
-/// Where a hosted thread lives: the Thread DO, or (TRACER STUB) the tracer hub object.
+/// Where a hosted thread lives: the Thread DO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostKind {
     #[default]
     Thread,
-    /// TRACER STUB: the in-memory `TracerHub` Durable Object hosts the thread (M2B-002 swaps the
-    /// tunnel only; the tracer's HTTP side keeps its own thread store).
-    Tracer,
 }
 
 impl HostKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Thread => "thread",
-            Self::Tracer => "tracer",
         }
     }
 
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "thread" => Some(Self::Thread),
-            "tracer" => Some(Self::Tracer),
             _ => None,
         }
     }
@@ -92,7 +87,7 @@ pub struct OutboxRow {
     /// Storage order key (never on the wire).
     pub id: u64,
     pub thread_id: String,
-    /// The thread's command id (Thread DO) or the idempotency key (tracer host).
+    /// The thread's command id.
     pub source_id: String,
     pub host: HostKind,
     pub idempotency_key: String,
@@ -113,7 +108,7 @@ pub struct NewOutbox {
     pub command: Command,
 }
 
-/// Life of a command the Thread DO (or tracer) pushed.
+/// Life of a command the Thread DO pushed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForwardState {

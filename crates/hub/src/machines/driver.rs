@@ -622,8 +622,7 @@ async fn ack_at_host<H: ThreadHost>(host: &H, acks: &ThreadAcks) {
 }
 
 /// Publishes a presence change: D1 first, then a thread-scoped `Presence` TurnEvent into every
-/// thread this machine hosts. TRACER STUB threads are skipped (the tracer's stream is asserted
-/// event by event).
+/// thread this machine hosts.
 pub async fn publish_presence<S, H>(
     core: &Core<S>,
     host: &H,
@@ -640,9 +639,6 @@ where
     };
     host.record_presence(&machine_id, change, now_ms).await;
     for (thread_id, kind) in threads {
-        if kind != HostKind::Thread {
-            continue;
-        }
         let envelope = Envelope::new(
             thread_id.clone(),
             None,
@@ -676,9 +672,6 @@ where
 {
     let threads = core.borrow().hosted_threads()?;
     for (thread_id, kind) in threads {
-        if kind != HostKind::Thread {
-            continue;
-        }
         let Ok(commands) = host.list_commands(kind, &thread_id).await else {
             continue;
         };
@@ -702,7 +695,7 @@ where
     Ok(())
 }
 
-/// A thread host pushed commands (Thread DO after it queued one, or the tracer hub).
+/// A thread host pushed commands (Thread DO after it queued one).
 pub async fn push_commands<S, H>(
     core: &Core<S>,
     host: &H,

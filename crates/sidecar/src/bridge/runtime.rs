@@ -120,6 +120,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                     message_id,
                     parts,
                     author,
+                    local: key.starts_with(super::LOCAL_KEY_PREFIX),
                     harness: None,
                     cwd: None,
                 };
@@ -141,6 +142,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                     message_id,
                     parts,
                     author,
+                    local: false,
                     harness: Some(agent),
                     cwd: Some(PathBuf::from(workspace.path)),
                 };
@@ -179,6 +181,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             message_id,
             parts,
             author,
+            local,
             harness,
             cwd,
         } = start;
@@ -227,7 +230,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         // with a RunError and the log stays valid.
         let ts = self.ts();
         let mut events = Vec::new();
-        if self.config.emit_user_message {
+        if local {
             events.push(Envelope::new(
                 thread_id.clone(),
                 Some(task_id.clone()),

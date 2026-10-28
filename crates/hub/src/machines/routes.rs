@@ -14,7 +14,7 @@
 //! The tunnel route forwards the upgrade to the Machine DO named by the machine id, and the DO
 //! authenticates the credential itself (tunnel.md §2). Session-token routes use the auth of
 //! M2-003a (`authenticate`, `Principal::require`, `audit::record` inside `admin`). The dev
-//! routes never touch D1, so the tracer (which runs without migrations) can use them.
+//! routes never touch D1.
 
 use std::collections::HashMap;
 
@@ -210,7 +210,7 @@ async fn tunnel(
 }
 
 /// `POST /v1/dev/machines/{id}/credential`: mints a credential for `machine_id` and gives it to
-/// the Machine DO, without D1 (so the tracer can use it). Replaces an earlier credential.
+/// the Machine DO, without D1. Replaces an earlier credential.
 #[worker::send]
 async fn dev_credential(
     State(env): State<AppState>,

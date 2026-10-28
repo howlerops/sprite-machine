@@ -1231,25 +1231,6 @@ fn a_push_for_another_thread_or_a_revoked_machine_is_refused() {
     assert!(result.is_err());
 }
 
-#[test]
-fn tracer_hosted_threads_get_no_presence_events() {
-    let world = new_world();
-    world
-        .core
-        .borrow_mut()
-        .host_thread("th_tracer", HostKind::Tracer, NOW)
-        .expect("host");
-    let mut runner = Runner::new();
-    world.connect(&mut runner, NOW);
-    let threads: Vec<String> = world
-        .host
-        .presence_events()
-        .into_iter()
-        .map(|e| e.0)
-        .collect();
-    assert_eq!(threads, [THREAD]);
-}
-
 // ---- the admin API and the schema ----------------------------------------------------------
 
 struct Fake {

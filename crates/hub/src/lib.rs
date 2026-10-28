@@ -1,8 +1,7 @@
 //! The hub Cloudflare Worker (wasm32, no tokio): routes and Durable Objects (thread, machine, flow), D1, R2, queues.
 //!
-//! Platform-neutral code (`router`, the tracer's state machines) builds and tests natively. The
-//! Worker glue (`worker`, the Durable Object skeletons, and the tracer's `TracerHub`) is
-//! wasm32 only, so `cargo test -p hub` runs on the host.
+//! Platform-neutral code (`router`, the thread and machine cores) builds and tests natively. The
+//! Worker glue (`worker` and the Durable Objects) is wasm32 only, so `cargo test -p hub` runs on the host.
 
 pub mod attachments;
 pub mod audit;
@@ -11,7 +10,6 @@ pub mod db;
 pub mod machines;
 pub mod router;
 pub mod threads;
-pub mod tracer;
 pub mod workspace_do;
 
 /// The Worker entries: axum router, `fetch` and `queue`.

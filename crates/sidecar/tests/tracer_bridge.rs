@@ -107,7 +107,6 @@ async fn prompt_permission_resume_end_turn() {
     assert_eq!(
         types,
         [
-            "UserMessage",
             "RunStarted",
             "TextMessageStart",
             "TextMessageContent",
@@ -126,18 +125,21 @@ async fn prompt_permission_resume_end_turn() {
     );
     assert!(stream.iter().all(|e| e.seq == 0), "producers send seq 0");
     assert!(
-        matches!(&stream[7].event, Event::RunFinished(f) if matches!(f.outcome, RunOutcome::Interrupt { .. }))
+        matches!(&stream[6].event, Event::RunFinished(f) if matches!(f.outcome, RunOutcome::Interrupt { .. }))
     );
     assert!(
-        matches!(&stream[13].event, Event::RunFinished(f) if matches!(f.outcome, RunOutcome::Success { .. }))
+        matches!(&stream[12].event, Event::RunFinished(f) if matches!(f.outcome, RunOutcome::Success { .. }))
     );
-    let Event::RunStarted(resume) = &stream[8].event else {
+    let Event::RunStarted(resume) = &stream[7].event else {
         panic!("resume RunStarted expected");
     };
     assert_eq!(resume.reason, RunReason::Resume);
-    assert_eq!(resume.parent_run_id, stream[1].run_id);
-    assert_ne!(stream[8].run_id, stream[1].run_id);
-    assert_eq!(stream[0].run_id, None, "UserMessage is task-scoped");
+    assert_eq!(resume.parent_run_id, stream[0].run_id);
+    assert_ne!(stream[7].run_id, stream[0].run_id);
+    assert!(
+        !types.contains(&"UserMessage"),
+        "the hub emits UserMessage, not the bridge"
+    );
 
     // The Thread DO's stamper turns them into a gap-free log.
     let mut seq = ThreadSeq::new();
@@ -145,7 +147,7 @@ async fn prompt_permission_resume_end_turn() {
         .into_iter()
         .map(|e| seq.stamp(e).expect("seq 0").seq)
         .collect();
-    assert_eq!(stamped, (1..=14).collect::<Vec<u64>>());
+    assert_eq!(stamped, (1..=13).collect::<Vec<u64>>());
 
     drop(command_tx);
     timeout(STEP, bridge)
