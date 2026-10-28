@@ -12,8 +12,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use protocol::turn_event::Envelope;
 
-use crate::transcript_model::{Row, ToolStatus};
+use crate::bench::BenchLog;
+use crate::transcript_model::{Row, ToolStatus, TranscriptModel};
 
 /// Height of one transcript row.
 pub const ROW_HEIGHT: Pixels = px(28.);
@@ -23,27 +25,42 @@ pub const PANE_ID: &str = "transcript";
 pub const ROW_ID: &str = "transcript-row";
 
 pub struct TranscriptPane {
-    rows: Vec<Row>,
+    model: TranscriptModel,
     item_sizes: Rc<Vec<Size<Pixels>>>,
     scroll_handle: VirtualListScrollHandle,
+    bench: Option<Rc<BenchLog>>,
 }
 
 impl TranscriptPane {
-    pub fn new(rows: Vec<Row>) -> Self {
+    /// A pane over fixed `rows` (the in-memory fixture).
+    pub fn new(rows: Vec<Row>, bench: Option<Rc<BenchLog>>) -> Self {
         let item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); rows.len()]);
         Self {
-            rows,
+            model: TranscriptModel::from_rows(rows),
             item_sizes,
             scroll_handle: VirtualListScrollHandle::new(),
+            bench,
         }
     }
 
     pub fn rows(&self) -> &[Row] {
-        &self.rows
+        self.model.rows()
+    }
+
+    /// Folds `envelopes` into the rows, in order, and repaints.
+    pub fn apply(&mut self, envelopes: &[Envelope], cx: &mut Context<Self>) {
+        for envelope in envelopes {
+            self.model.apply(envelope);
+        }
+        let len = self.model.rows().len();
+        if self.item_sizes.len() != len {
+            self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); len]);
+        }
+        cx.notify();
     }
 
     fn render_row(&self, ix: usize, cx: &App) -> impl IntoElement + use<> {
-        let row = &self.rows[ix];
+        let row = &self.model.rows()[ix];
         let label = SharedString::from(row.label());
         let theme = cx.theme();
         let color = match row {
@@ -80,7 +97,10 @@ impl TranscriptPane {
 }
 
 impl Render for TranscriptPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(bench) = &self.bench {
+            bench.note_render(window);
+        }
         div()
             .id(PANE_ID)
             .test_support()

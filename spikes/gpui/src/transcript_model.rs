@@ -131,6 +131,15 @@ impl TranscriptModel {
         self.rows
     }
 
+    /// A model that already holds `rows` (the in-memory fixture rows). It has no upsert index,
+    /// so it is not fed envelopes; the fixture feed starts from [`TranscriptModel::new`].
+    pub fn from_rows(rows: Vec<Row>) -> Self {
+        Self {
+            rows,
+            ..Self::default()
+        }
+    }
+
     /// Applies one envelope.
     pub fn apply(&mut self, envelope: &Envelope) {
         match &envelope.event {

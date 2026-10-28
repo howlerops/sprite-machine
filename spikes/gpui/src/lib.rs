@@ -4,12 +4,17 @@
 //! `terminal` fixture.
 //! M1B-004d spike: the approval card (`Interrupt{approval}`, answers over HTTP to the `approval`
 //! fixture).
+//! M1B-008a spike: bench hooks (fixture feed over WebSocket, `BENCH_MARKER`, frame and
+//! key-to-glyph JSON lines) and the composer.
 
 pub mod approval_model;
 pub mod approval_pane;
 pub mod approval_sink;
+pub mod bench;
+pub mod composer;
 pub mod diff_model;
 pub mod diff_pane;
+pub mod feed;
 pub mod terminal_input;
 pub mod terminal_model;
 pub mod terminal_pane;
