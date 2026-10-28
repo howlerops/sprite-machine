@@ -2045,7 +2045,8 @@ items:
     title: 'Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 906be80; tunnel_client 37 + durability 15 passed on merged tree, protocol ok, clippy clean, tracer PASS. Client side is correct; leader review found the bridge still calls store.commit_down_frame on receipt (runtime.rs on_incoming), so with a shared Store the crash window remains end to end -> M1A-006d"
     attempt: 1
     assignee: "worker:sonnet"
     lane: rust
@@ -2109,6 +2110,32 @@ items:
       - 'A sleep hint API sends presence{asleep} or close{going_to_sleep}; close{normal} on clean shutdown (tests against the fake hub)'
     verify:
       - 'cargo test -p runner --test tunnel_client'
+
+  - id: M1A-006d
+    title: 'Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key'
+    milestone: M1a
+    phase: P2
+    lane: rust
+    size: S
+    risk: high
+    deps: [M2B-004a, M1A-006c]
+    paths:
+      - 'crates/sidecar/src/bridge/**'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/tests/tunnel_client.rs'
+      - 'crates/sidecar/tests/bridge_durable_commands.rs'
+    context:
+      - 'docs/ledger/reports/M2B-004a.md (Design notes, Discovered work)'
+      - 'crates/sidecar/src/bridge/runtime.rs on_incoming (commits before apply)'
+      - 'docs/specs/tunnel.md §4 (hello.last_down_seq = highest durably processed)'
+    acceptance:
+      - 'With ONE Store shared by the bridge and the tunnel client (as the real runner wires them), a command received but not applied when the process dies is redelivered after restart and applied exactly once (end-to-end test: acp-mock + bridge + tunnel client + fake hub, kill between receive and apply)'
+      - 'The bridge dedupes with Store::seen_key and never advances last_down_seq; CommandSource::processed carries the idempotency key and TunnelCommands no longer relies on FIFO order (test: out-of-order processed reports)'
+    verify:
+      - 'cargo test -p sidecar --test bridge_durable_commands'
+      - 'cargo test -p runner --test tunnel_client'
+      - 'cargo test -p sidecar'
+      - 'cargo run -p cli -- e2e tracer'
 
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
