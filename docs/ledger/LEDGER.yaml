@@ -6054,3 +6054,24 @@ items:
       - 'e2e rc asserts the rendered screen shows the phone message, the approval resolved by the phone and remote: on after the restore; /rc typed by hand registers the session'
     verify:
       - 'cargo run -p cli -- e2e rc'
+
+  - id: WEB-006a
+    title: 'web cleanup: GitHub sign-in and members code in their own modules (added to the sw.js shell list); route() idempotent for the #/auth/github return; handle 503 not_configured before redirecting to authorize; refresh the role from the hub after a role change'
+    milestone: M2b
+    phase: P4
+    lane: client
+    size: S
+    risk: low
+    deps: [WEB-006]
+    paths:
+      - 'web/src/**'
+      - 'web/sw.js'
+      - 'web/tests/signin_github.spec.js'
+      - 'web/tests/members.spec.js'
+      - 'web/tests/pwa.spec.js'
+    context:
+      - 'docs/ledger/reports/WEB-006.md (Discovered work)'
+    acceptance:
+      - 'Each listed point has a Playwright test; the full suite passes'
+    verify:
+      - 'cd web && npx playwright test'

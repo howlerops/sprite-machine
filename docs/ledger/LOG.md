@@ -248,3 +248,4 @@
 2026-10-28T19:54Z M2-003e verify green → done
 2026-10-28T20:09Z M2B-019 back (sonnet): e2e rc (sm --rc session + headless phone, tunnel cut via TCP proxy: seq 1..51 gap-free, no dups), rc.spec.js 4/4, docs/remote-control-parity.md → merged; merged-tree run going. Finding: a TUI line typed during a running task is dropped → M2B-019a (P2). M2B-010b dropped (covered); M2B-019b (P4) for the rendered screen
 2026-10-28T20:14Z M2B-019 verify green → done
+2026-10-28T20:18Z WEB-006 back (sonnet): PKCE sign-in (verifier only in sessionStorage, fragment cleaned before use), members screen with role caps; full playwright 46/46 → merged; merged-tree playwright next. Added WEB-006a (P4)
