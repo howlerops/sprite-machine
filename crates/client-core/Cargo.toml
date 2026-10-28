@@ -21,3 +21,4 @@ serde.workspace = true
 
 [dev-dependencies]
 agui-fixture = { path = "../agui-fixture" }
+axum = "0.8"

@@ -18,6 +18,7 @@ pub mod connectivity;
 pub mod outbox;
 pub mod patch;
 pub mod sync;
+pub mod threads;
 pub mod tracer;
 pub mod view;
 
@@ -29,6 +30,7 @@ pub use outbox::{
     Transport, TransportError,
 };
 pub use sync::{Applied, Subscription, SubscriptionError, SyncError, ThreadSync};
+pub use threads::{CreateThread, CreateThreadError, FirstPrompt, ThreadCreated, create_thread};
 pub use view::inbox::InboxStatus;
 pub use view::machines::MachineRow;
 pub use view::{TaskStatus, ThreadView};

@@ -1145,6 +1145,7 @@ version = "0.1.0"
 dependencies = [
  "agui-fixture",
  "anyhow",
+ "axum",
  "futures-util",
  "protocol",
  "rand 0.9.5",
