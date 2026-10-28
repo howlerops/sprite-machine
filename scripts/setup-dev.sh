@@ -24,23 +24,25 @@ WORKER_BUILD_VERSION=0.8.7
 APT_PKGS=(
   musl-tools lld clang
   mesa-vulkan-drivers libvulkan1 vulkan-tools
-  xvfb xauth imagemagick
+  xvfb xauth imagemagick xdotool
   libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
   libfontconfig-dev libssl-dev pkg-config
   curl ca-certificates
 )
 
-echo "==> apt packages (Vulkan/lavapipe, Xvfb, ImageMagick, X/Wayland libs, musl, lld)"
+echo "==> apt packages (Vulkan/lavapipe, Xvfb, xdotool, ImageMagick, X/Wayland libs, musl, lld)"
 missing=()
 for p in "${APT_PKGS[@]}"; do
-  dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
+  if dpkg -s "$p" >/dev/null 2>&1; then
+    echo "    $p present"
+  else
+    missing+=("$p")
+  fi
 done
 if [ "${#missing[@]}" -gt 0 ]; then
   export DEBIAN_FRONTEND=noninteractive
   $SUDO apt-get update -qq
   $SUDO apt-get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
-else
-  echo "    all present"
 fi
 
 echo "==> rust toolchain + targets"
