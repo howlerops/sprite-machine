@@ -3433,6 +3433,7 @@ items:
       - 'crates/client-core (subscription client)'
     acceptance:
       - 'Terminal chat UI over client-core; messages typed locally and from the phone (mobile web page) both appear in order; approvals answerable on either side, first answer wins; `/rc` toggles remote and shows the link; snapshot tests of the rendered buffer'
+      - 'The autoConnect setting (runner::settings, M2B-009) is honoured: with it true every TUI session registers on start, false (default) only after /rc; test'
     verify:
       - 'cargo test -p runner --test tui'
 
@@ -5398,3 +5399,26 @@ items:
     verify:
       - 'cargo test -p runner'
       - 'cargo test -p hub'
+
+  - id: M2B-009a
+    title: 'runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode)'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-009]
+    paths:
+      - 'crates/runner/src/main.rs'
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/src/qr/**'
+      - 'crates/runner/tests/qr.rs'
+      - 'crates/runner/tests/server_mode.rs'
+    context:
+      - 'docs/ledger/reports/M2B-009.md'
+      - 'docs/PLAN-v2-ade.md §4.10 (Runner table, sm rc row)'
+    acceptance:
+      - 'sm rc prints https://<hub>/t/<thread_id> when a session starts (server-mode test with the fake hub asserts the line)'
+      - 'When stdin is a TTY, sm rc reads keys in raw mode and space shows/hides the QR of the latest session URL; with no TTY nothing changes (test drives the key handler through an injected reader)'
+    verify:
+      - 'cargo test -p runner'
