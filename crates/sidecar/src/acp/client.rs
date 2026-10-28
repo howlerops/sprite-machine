@@ -272,6 +272,36 @@ impl<H: ClientHandler> AcpClient<H> {
         Ok(response.session_id)
     }
 
+    /// Sends `session/resume` for a session this agent process does not know yet (after a
+    /// restart) and adds it to the table. Used by `acp::reattach`.
+    pub async fn resume_session(
+        &self,
+        session: &SessionId,
+        cwd: impl Into<PathBuf>,
+    ) -> Result<(), ClientError> {
+        let request = protocol::acp::ResumeSessionRequest::new(session.clone(), cwd);
+        self.inner
+            .call("session/resume", serde_json::to_value(request)?)
+            .await?;
+        self.inner.sessions.insert(session);
+        Ok(())
+    }
+
+    /// Sends `session/load` (the fallback when `session/resume` is unsupported or fails) and
+    /// adds the session to the table. Used by `acp::reattach`.
+    pub async fn load_session(
+        &self,
+        session: &SessionId,
+        cwd: impl Into<PathBuf>,
+    ) -> Result<(), ClientError> {
+        let request = protocol::acp::LoadSessionRequest::new(session.clone(), cwd);
+        self.inner
+            .call("session/load", serde_json::to_value(request)?)
+            .await?;
+        self.inner.sessions.insert(session);
+        Ok(())
+    }
+
     /// Queues a prompt for `session`. It runs at once when the session is idle, and after
     /// the prompt in flight otherwise.
     pub fn submit(

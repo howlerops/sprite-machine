@@ -2,5 +2,6 @@
 
 pub mod client;
 pub mod fs;
+pub mod reattach;
 pub mod sessions;
 pub mod terminal;

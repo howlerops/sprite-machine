@@ -7068,6 +7068,7 @@ dependencies = [
  "jsonschema",
  "portable-pty",
  "protocol",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
