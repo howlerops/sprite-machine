@@ -7,6 +7,8 @@
 //! events of the thread, so they show in the one order the hub gave them. This module does not
 //! add a typed message to the transcript itself.
 
+use std::collections::VecDeque;
+
 use client_core::sync::Incoming;
 use client_core::view::{InterruptView, LocalAnswer, TaskView};
 use client_core::{Applied, Connectivity, IntentState, TaskStatus, ThreadSync, ThreadView};
@@ -79,6 +81,14 @@ impl AnswerResult {
     }
 }
 
+/// A prompt typed here that is waiting to run (or was sent and has not shown up yet).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Queued {
+    pub task_id: String,
+    pub message_id: String,
+    pub text: String,
+}
+
 /// What the TUI asks the outside world to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -119,6 +129,11 @@ pub struct App {
     seed: String,
     counter: u64,
     quit: bool,
+    /// Prompts typed while a task runs, in the order they were typed. They run one at a time,
+    /// each after the one before has ended (the bridge runs one task per thread).
+    queue: VecDeque<Queued>,
+    /// The prompt sent last, while its task has not appeared in the thread yet.
+    sent: Option<Queued>,
 }
 
 impl App {
@@ -138,6 +153,8 @@ impl App {
             seed: seed.to_owned(),
             counter: 0,
             quit: false,
+            queue: VecDeque::new(),
+            sent: None,
         }
     }
 
@@ -181,6 +198,11 @@ impl App {
         self.scroll
     }
 
+    /// The prompts typed while a task runs and not sent yet, oldest first (shown as pending).
+    pub fn queued(&self) -> impl Iterator<Item = &Queued> {
+        self.queue.iter()
+    }
+
     pub fn should_quit(&self) -> bool {
         self.quit
     }
@@ -216,7 +238,8 @@ impl App {
     // ---- events in --------------------------------------------------------------------------
 
     /// One message of the thread subscription (or of the local host before the session is shared).
-    pub fn incoming(&mut self, incoming: Incoming) {
+    /// Returns the actions it leaves: a queued prompt that can run now once the task ended.
+    pub fn incoming(&mut self, incoming: Incoming) -> Vec<Action> {
         match self.sync.feed(incoming) {
             Ok(Applied::Event(_)) => {
                 // A new answer to the highlighted approval can leave the selection out of range.
@@ -225,6 +248,45 @@ impl App {
             Ok(_) => {}
             Err(error) => self.notice = Some(format!("hub message refused: {error}")),
         }
+        self.dispatch()
+    }
+
+    /// The bridge refused a prompt this TUI sent (`task_id`) because a task was running. The
+    /// prompt goes back to the front of the queue and runs when the running task has ended.
+    pub fn refused(&mut self, task_id: &str, message: &str) {
+        if self
+            .sent
+            .as_ref()
+            .is_some_and(|sent| sent.task_id == task_id)
+        {
+            if let Some(sent) = self.sent.take() {
+                self.queue.push_front(sent);
+            }
+            self.notice = Some(format!("waiting for the running task: {message}"));
+        }
+    }
+
+    /// Sends the oldest queued prompt when nothing runs and the last one sent has shown up.
+    fn dispatch(&mut self) -> Vec<Action> {
+        if let Some(sent) = &self.sent {
+            if self.sync.view().task(&sent.task_id).is_none() {
+                return Vec::new();
+            }
+            self.sent = None;
+        }
+        if self.busy() {
+            return Vec::new();
+        }
+        let Some(next) = self.queue.pop_front() else {
+            return Vec::new();
+        };
+        let action = Action::Prompt {
+            task_id: next.task_id.clone(),
+            message_id: next.message_id.clone(),
+            text: next.text.clone(),
+        };
+        self.sent = Some(next);
+        vec![action]
     }
 
     pub fn set_notice(&mut self, notice: String) {
@@ -241,6 +303,7 @@ impl App {
     pub fn replace_sync(&mut self, sync: ThreadSync) {
         self.sync = sync;
         self.selected = 0;
+        self.sent = None;
     }
 
     /// The answer to [`Action::Register`].
@@ -312,7 +375,7 @@ impl App {
             Key::Enter => return self.enter(),
             Key::Ctrl(_) => {}
         }
-        Vec::new()
+        self.dispatch()
     }
 
     fn quit_now(&mut self) -> Vec<Action> {
@@ -362,15 +425,18 @@ impl App {
         }]
     }
 
+    /// A typed prompt joins the queue; it is sent now when nothing runs, else when the running
+    /// task has ended (and the prompts typed before it have run).
     fn prompt(&mut self, text: &str) -> Vec<Action> {
         self.counter += 1;
         let n = self.counter;
         let seed = &self.seed;
-        vec![Action::Prompt {
+        self.queue.push_back(Queued {
             task_id: format!("tk_{seed}{n}"),
             message_id: format!("msg_{seed}{n}"),
             text: text.to_owned(),
-        }]
+        });
+        self.dispatch()
     }
 
     fn command(&mut self, command: &str) -> Vec<Action> {

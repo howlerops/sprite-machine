@@ -20,6 +20,12 @@ pub enum Feed {
     /// messages that follow rebuild the thread from `seq` 1.
     Reset,
     Connectivity(Connectivity),
+    /// The host refused a prompt the UI sent (for example because a task was running). It is
+    /// queued again, not lost.
+    Refused {
+        task_id: String,
+        message: String,
+    },
 }
 
 /// The session's host: what the UI asks of it, and what it reports back. The production one is
@@ -77,9 +83,15 @@ where
             feed = backend.next() => {
                 let Some(feed) = feed else { return Ok(()) };
                 match feed {
-                    Feed::Thread(incoming) => app.incoming(incoming),
+                    Feed::Thread(incoming) => {
+                        let actions = app.incoming(incoming);
+                        if !execute(actions, app, backend).await {
+                            return Ok(());
+                        }
+                    }
                     Feed::Reset => app.replace_sync(ThreadSync::new(thread_id.clone())),
                     Feed::Connectivity(state) => app.set_connectivity(state),
+                    Feed::Refused { task_id, message } => app.refused(&task_id, &message),
                 }
             }
         }

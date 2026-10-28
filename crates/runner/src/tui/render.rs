@@ -55,6 +55,17 @@ pub fn render(app: &App, area: Rect, buf: &mut Buffer) {
         let line = Line::styled(clip(notice, width), Style::new().fg(Color::Yellow));
         draw_line(line, Rect::new(area.x, bottom, area.width, 1), buf);
     }
+    // Prompts typed while a task runs, oldest first, above the notice; they run after it.
+    let pending: Vec<&str> = app.queued().map(|queued| queued.text.as_str()).collect();
+    let room = usize::from(bottom.saturating_sub(top)).saturating_sub(2);
+    let shown = &pending[pending.len().saturating_sub(room)..];
+    let rows = u16::try_from(shown.len()).unwrap_or(u16::MAX);
+    bottom -= rows;
+    for (row, text) in shown.iter().enumerate() {
+        let line = Line::styled(clip(&format!("pending: {text}"), width), DIM);
+        let y = bottom + u16::try_from(row).unwrap_or(u16::MAX);
+        draw_line(line, Rect::new(area.x, y, area.width, 1), buf);
+    }
 
     // The approval panel takes what it needs, but leaves the transcript one line.
     if let Some(approval) = app.pending_approval() {
