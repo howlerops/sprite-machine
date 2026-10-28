@@ -920,11 +920,19 @@ items:
     title: 'Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms)'
     milestone: M1a
     phase: P1
-    deps: [M1A-006b]
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
+    deps:
+      - "M1A-006b"
+      - "SPEC-002a"
     paths:
-      - 'crates/sidecar/src/bridge/permission*'
-      - 'crates/sidecar/src/bridge/elicitation*'
-      - 'crates/sidecar/tests/permission.rs'
+      - "crates/sidecar/src/bridge/permission*"
+      - "crates/sidecar/src/bridge/elicitation*"
+      - "crates/sidecar/src/bridge/handler.rs"
+      - "crates/sidecar/src/bridge/runtime.rs"
+      - "crates/sidecar/tests/permission.rs"
+      - "crates/protocol/src/tunnel/types.rs"
     context:
       - 'https://agentclientprotocol.com/protocol/cancellation'
       - 'https://agentclientprotocol.com/protocol/elicitation'
@@ -978,12 +986,14 @@ items:
       - cargo test -p sidecar --test acp_fs_term
 
   - id: M1A-006c
-    title: 'runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume, elicitation interrupts'
+    title: "runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume"
     milestone: M1a
     phase: P2
     priority: 2
     risk: high
-    deps: [M1A-006b, SPEC-002a]
+    deps:
+      - "M1A-006b"
+      - "M1A-007"
     paths:
       - crates/sidecar/src/bridge/**
       - crates/sidecar/src/acp/client*
@@ -993,11 +1003,10 @@ items:
       - 'docs/ledger/reports/M1A-006b.md (Discovered work 1-7)'
       - 'docs/specs/tunnel.md §3.5 (approval outcomes incl. submitted/declined after SPEC-002a)'
     acceptance:
-      - 'When the agent process exits, running tasks end with RunError{error, code:"harness_exited"}, Reattacher::connection_lost is called, and the next prompt respawns the agent and resumes (test kills acp-mock mid-turn)'
-      - 'AcpClient hands session/update to the bridge as raw JSON too; raw.payload is byte-faithful and unparseable updates become Raw events (no warn-and-drop)'
-      - 'session/new and session/resume return their responses so the bridge emits StateSnapshot{session} via on_session_new; MCP servers configured per thread are passed on new and resume'
-      - 'At startup, interrupts stored by a previous process fail their task promptly (RunError expired or harness_exited) instead of waiting for the TTL'
-      - 'elicitation/create (form and url) becomes Interrupt{form|auth}; an approval command with outcome submitted/declined/cancelled answers ACP accordingly'
+      - "When the agent process exits, running tasks end with RunError{error, code:\"harness_exited\"}, Reattacher::connection_lost is called, and the next prompt respawns the agent and resumes (test kills acp-mock mid-turn)"
+      - "AcpClient hands session/update to the bridge as raw JSON too; raw.payload is byte-faithful and unparseable updates become Raw events (no warn-and-drop)"
+      - "session/new and session/resume return their responses so the bridge emits StateSnapshot{session} via on_session_new; MCP servers configured per thread are passed on new and resume"
+      - "At startup, interrupts stored by a previous process fail their task promptly (RunError expired or harness_exited) instead of waiting for the TTL"
     verify:
       - cargo test -p sidecar --test bridge_robust
       - cargo test -p sidecar --test bridge
@@ -2011,6 +2020,9 @@ items:
     title: 'sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library'
     milestone: M2b
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 1
     size: M
     deps: [M1A-006b, M1A-009]
