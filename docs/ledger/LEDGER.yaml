@@ -1216,10 +1216,14 @@ items:
     title: 'Attachments: user FilePart → ACP image/resource blocks'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     deps: [M1A-006b]
     paths:
-      - 'crates/sidecar/src/bridge/files*'
-      - 'crates/sidecar/tests/files.rs'
+      - "crates/sidecar/src/bridge/files*"
+      - "crates/sidecar/src/bridge/runtime.rs"
+      - "crates/sidecar/tests/files.rs"
     context:
       - 'https://agentclientprotocol.com/protocol/content'
       - 'docs/specs/turn-event.md (user FilePart)'
@@ -1537,6 +1541,10 @@ items:
     title: 'Benchmark scripts per gates.yaml'
     milestone: M1b
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
+    lane: docs
     deps: [M1B-003, M1B-002]
     paths:
       - 'spikes/bench/**'

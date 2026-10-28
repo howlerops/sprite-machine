@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 45/202 (3 dropped) · in-flight M1A-004a,M1B-004d,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 43/120
+done 45/202 (3 dropped) · in-flight M1A-004a,M1A-014,M1B-004d,M1B-008,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 45/120
 
 P1 running.
 
@@ -11,7 +11,7 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 34 | 28 | 2 |
+| P1 | 34 | 28 | 4 |
 | P2 | 27 | 1 | 1 |
 | P3 | 20 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -40,11 +40,11 @@ P1 running.
 | SPEC-002a | leader | docs | done | Spec: tunnel approval command carries every interrupt outcome (selected, submitted+data, declined, cancelled) |
 | M1A-009 | worker | rust | done | Durable store (SQLite) + ACP session re-attach after restart |
 | M1A-013 | worker | rust | done | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
-| M1A-014 | worker | rust | todo | Attachments: user FilePart → ACP image/resource blocks |
+| M1A-014 | worker | rust | assigned | Attachments: user FilePart → ACP image/resource blocks |
 | M1B-004b | worker | client | done | gpui spike: diff pane (gpui-kit editor) |
 | M1B-004c | worker | client | done | gpui spike: terminal pane (alacritty_terminal) |
 | M1B-004d | worker | client | review | gpui spike: approval card + build release |
-| M1B-008 | worker | rust | todo | Benchmark scripts per gates.yaml |
+| M1B-008 | worker | docs | assigned | Benchmark scripts per gates.yaml |
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
 | M2-016 | worker | rust | done | hub: D1 schema + migrations (org-wide metadata) |
 | M2-003a | worker | rust | done | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
