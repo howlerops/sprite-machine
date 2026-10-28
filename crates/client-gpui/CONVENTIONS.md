@@ -161,6 +161,12 @@ fn clicking_the_button_updates_the_status(cx: &mut TestAppContext) {
   virtualized list; tests find visible lines by the `"source"` row ids.
 - In test modules, don't `use super::*;` when the parent imports gpui: gpui's `test` macro
   shadows `#[test]` ("recursion limit reached"). Import items explicitly.
+- **Keyboard in tests** (verified in `spikes/gpui/tests/terminal_headless.rs`): there is no
+  `window.key`; use `window.press("ctrl-c", cx)` (down + up) and `window.input("ls", cx)`.
+  `window.focus(&handle, cx)` takes `cx`; put `.track_focus(&handle)` and `.on_key_down(…)` on the
+  same `div().id(…)`, before `.test_support()`.
+- Rust 2024 `impl IntoElement` return types capture borrowed arguments; row builders should take
+  their data by value (or clone) to avoid E0515.
 - Drive views from `client-core` fixtures (TurnEvent examples in
   `crates/protocol/schemas/turn-event/examples/`), not from a live hub.
 - Tests run on the GPUI test platform (no display, no GPU). Pixel output is checked only by

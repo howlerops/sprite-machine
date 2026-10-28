@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 29/194 (3 dropped) · in-flight M1B-004c,M2-016,M2-008 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 27/120
+done 30/194 (3 dropped) · in-flight M2-016,M2-008 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 27/120
 
 P1 running.
 
@@ -11,7 +11,7 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 32 | 12 | 3 |
+| P1 | 32 | 13 | 2 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -40,7 +40,7 @@ P1 running.
 | M1A-013 | worker | rust | todo | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
 | M1A-014 | worker | rust | todo | Attachments: user FilePart → ACP image/resource blocks |
 | M1B-004b | worker | client | done | gpui spike: diff pane (gpui-kit editor) |
-| M1B-004c | worker | client | assigned | gpui spike: terminal pane (alacritty_terminal) |
+| M1B-004c | worker | client | done | gpui spike: terminal pane (alacritty_terminal) |
 | M1B-004d | worker | client | todo | gpui spike: approval card + build release |
 | M1B-008 | worker | rust | todo | Benchmark scripts per gates.yaml |
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |

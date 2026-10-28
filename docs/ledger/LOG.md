@@ -65,3 +65,5 @@
 2026-10-28T02:34Z M1A-006a assigned→done merged a41219c (sonnet); post-merge: 233 workspace tests, tracer PASS; added SPEC-001a (leader) for the mapper's spec issues
 2026-10-28T02:35Z M2-016 todo→assigned attempt 1 (haiku); M2-008 spawned from v2 @307667b (has the sequence validator)
 2026-10-28T02:35Z SPEC-001a todo→done merged 1ecc2b9
+2026-10-28T02:52Z M1B-004c assigned→done merged bf85e18 (haiku); CONVENTIONS.md += keyboard test helpers, Rust 2024 capture note
+2026-10-28T02:52Z leader: M1B-004d (release gpui build ~5 GB) held until disk is cleaned (6.8 GB free)

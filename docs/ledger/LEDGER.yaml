@@ -1282,7 +1282,8 @@ items:
     title: 'gpui spike: terminal pane (alacritty_terminal)'
     milestone: M1b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged bf85e18; verify: spike 42 tests (20 terminal), headless: ANSI red span + key forwarding to sink; clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     lane: client
