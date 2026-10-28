@@ -191,7 +191,8 @@ items:
     title: 'Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip)'
     milestone: M0
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged e3cad67; docs/spikes/hub-size.md: twiggy shows name section 692 KB (34%), ACP schema+mapper ~0 bytes; criterion 2 re-planned (gating ACP saves nothing) → MVP-000f; bundle now 587,905 B gzip"
     assignee: "worker:haiku"
     attempt: 1
     priority: 3
@@ -210,6 +211,27 @@ items:
     verify:
       - cargo run -p cli -- e2e tracer
       - test -s docs/spikes/hub-size.md
+
+  - id: MVP-000f
+    title: 'Hub wasm: drop the name section (34% of the binary) without strip'
+    milestone: M0
+    phase: P2
+    priority: 2
+    deps: [MVP-000c]
+    paths:
+      - Cargo.toml
+      - crates/hub/wrangler.toml
+      - crates/hub/Cargo.toml
+      - crates/cli/src/e2e/tracer*
+      - docs/spikes/hub-size.md
+    context:
+      - 'docs/spikes/hub-size.md (twiggy: function names + data names = 692 KB of 2,048,503 B; strip=true breaks worker-build 0.8.7 with "failed to generate catch wrappers")'
+    acceptance:
+      - 'The deployed hub wasm has no name section (e.g. a wasm-opt --strip-debug/--strip-producers pass after worker-build, `[package.metadata.wasm-pack.profile.release] wasm-opt` flags, or a worker-build/wasm-bindgen version that supports strip); the tracer prints the new gzip bundle and it is at least 25% smaller than 587,905 B'
+      - 'The hub still builds via the wrangler [build] command, thread_do and the tracer pass, and docs/spikes/hub-size.md has the after numbers'
+    verify:
+      - cargo run -p cli -- e2e tracer
+      - bash scripts/hub-test.sh thread_do
 
   - id: MVP-000b
     title: 'CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2'

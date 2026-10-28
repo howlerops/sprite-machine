@@ -96,3 +96,4 @@
 2026-10-28T04:33Z leader: a worker in this batch called the Claude Docs batch tool (not in any brief); no new artifact visible in the artifact list
 2026-10-28T04:33Z SPEC-002b done 98ee8f9 (leader): tunnel session_config + client-api §5.5a
 2026-10-28T04:33Z M1A-013 re-scoped (pending tasks are hub-owned; session_config command), paths += runtime/handler/client + protocol command; assigned (haiku)
+2026-10-28T04:38Z MVP-000c assigned→done merged e3cad67 (haiku; measurement: ACP contributes 0 bytes, name section 34%; one denied send_message call). Added MVP-000f (strip name section). MVP-000e (move validator, gate ACP) not added: no size win

@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 43/200 (3 dropped) · in-flight MVP-000c,M1A-013,M1B-004d,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 42/120
+done 44/201 (3 dropped) · in-flight M1A-013,M1B-004d,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 42/120
 
 P1 running.
 
@@ -11,8 +11,8 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 34 | 26 | 4 |
-| P2 | 25 | 1 | 0 |
+| P1 | 34 | 27 | 3 |
+| P2 | 26 | 1 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -24,7 +24,7 @@ P1 running.
 | Item | Owner | Lane | Status | Title |
 | ---- | ----- | ---- | ------ | ----- |
 | MVP-000a | worker | rust | done | Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile |
-| MVP-000c | worker | rust | assigned | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
+| MVP-000c | worker | rust | done | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
 | MVP-000b | worker | rust | done | CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2 |
 | SPEC-001a | leader | docs | done | Spec: settle the open points found by the ACP→TurnEvent mapper (turn-event.md) |
 | SPEC-003 | leader | docs | done | Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage |
