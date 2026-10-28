@@ -47,3 +47,5 @@
 2026-10-28T00:45Z leader: post-merge tracer failed once on a stale cli binary (compile-time CARGO_MANIFEST_DIR from a deleted review worktree via shared target); rebuilt → PASS; runtime hub lookup added to MVP-000a acceptance
 2026-10-28T00:45Z M1B-004a todo→assigned attempt 1 (opus: first GPUI screen, plan §7.4)
 2026-10-28T00:45Z MVP-000a todo→assigned attempt 1 (haiku)
+2026-10-28T00:57Z MVP-000a assigned→done merged f75bb81 (wasm-release profile; 507→412 KB gzip; runtime hub lookup)
+2026-10-28T00:57Z leader: disk at 2.4 GB during M1B-004a build; removed stale release/ and wasm32 release/ outputs (→2.9 GB); full shared-target rebuild planned at P0 review

@@ -164,7 +164,8 @@ items:
     title: 'Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile'
     milestone: M0
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged f75bb81; verify: tracer PASS (bundle gzip 412,371 B < 1 MiB), git status clean after run, cli 4 tests, clippy clean, no workerd"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
@@ -184,6 +185,27 @@ items:
     verify:
       - cargo run -p cli -- e2e tracer
       - test -z "$(git status --porcelain)"
+
+  - id: MVP-000c
+    title: 'Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip)'
+    milestone: M0
+    phase: P1
+    priority: 3
+    deps: [MVP-000a]
+    paths:
+      - crates/protocol/Cargo.toml
+      - crates/protocol/src/lib.rs
+      - crates/hub/Cargo.toml
+      - docs/spikes/hub-size.md
+    context:
+      - 'docs/ledger/reports/MVP-000a.md (suspects agent-client-protocol-schema via protocol; unmeasured)'
+      - 'docs/spikes/cloudflare.md (spike bundle 147,705 B gzip)'
+    acceptance:
+      - 'docs/spikes/hub-size.md records a twiggy (or cargo-bloat --target wasm32) breakdown of the hub wasm, before and after'
+      - 'Whatever dominates and is unused by the hub is gated out of wasm32 (e.g. protocol''s acp module behind a default-on `acp` feature the hub disables); the tracer stays green and prints a smaller gzip bundle'
+    verify:
+      - cargo run -p cli -- e2e tracer
+      - test -s docs/spikes/hub-size.md
 
   - id: MVP-000b
     title: 'CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2'
