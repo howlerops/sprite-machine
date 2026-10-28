@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use protocol::tunnel::{Actor, ContentPart};
 use protocol::turn_event::{
     Activity, ActivityMode, ActivityType, Checkpoint, DiffContent, Event, Interrupt, InterruptKind,
-    InterruptOption, InterruptResolved, Location, PlanContent, PolicyContent, TerminalContent,
-    ToolCallEndStatus, ToolKind,
+    InterruptOption, InterruptResolved, Location, PlanContent, PolicyContent, RawEventSource,
+    StepOutcome, TerminalContent, ToolCallEndStatus, ToolKind,
 };
 use serde_json::{Map, Value};
 
@@ -36,6 +36,70 @@ pub enum Item {
         code: Option<String>,
         message: String,
     },
+    /// A flow step, upserted by `step_id` and `iteration`.
+    Step(StepView),
+    /// A subagent run, upserted by `subagent_run_id`.
+    Subagent(Box<SubagentView>),
+    /// A `Raw` event. Not keyed: each event is one item.
+    Raw(Box<RawView>),
+}
+
+/// A flow step: running until its `StepFinished`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepView {
+    pub step_id: String,
+    pub step_name: String,
+    pub iteration: Option<u64>,
+    /// `None` while the step runs.
+    pub outcome: Option<StepOutcome>,
+}
+
+/// Where a subagent run stands.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubagentStatus {
+    Running,
+    /// `SubagentFinished`; `result` is what the child returned, if anything.
+    Finished {
+        result: Option<Value>,
+    },
+    /// `SubagentError`: the child failed or was cancelled.
+    Failed {
+        message: String,
+        code: Option<String>,
+    },
+}
+
+/// A subagent run, from `SubagentStarted` until `SubagentFinished` or `SubagentError`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubagentView {
+    pub subagent_run_id: String,
+    /// Empty when only its `SubagentFinished` or `SubagentError` arrived.
+    pub name: String,
+    pub description: Option<String>,
+    pub child_thread_id: Option<String>,
+    pub child_task_id: Option<String>,
+    pub agent_id: Option<String>,
+    /// The parent tool call that delegated to this subagent, if any.
+    pub parent_tool_call_id: Option<String>,
+    /// The parent subagent run, when this one runs inside another.
+    pub parent_subagent_run_id: Option<String>,
+    pub status: SubagentStatus,
+}
+
+impl SubagentView {
+    /// `true` until the subagent's `SubagentFinished` or `SubagentError`.
+    pub fn is_open(&self) -> bool {
+        matches!(self.status, SubagentStatus::Running)
+    }
+}
+
+/// A `Raw` event: a child thread's event nested in its parent, or an unmapped source event.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawView {
+    pub source: RawEventSource,
+    pub child_thread_id: Option<String>,
+    /// The nested child envelope for `Child`, else the source event, kept verbatim.
+    pub event: Map<String, Value>,
 }
 
 /// The prompt that opened the task.
@@ -176,6 +240,8 @@ enum Key {
     Activity(String),
     Interrupt(String),
     Checkpoint(String),
+    Step(String, Option<u64>),
+    Subagent(String),
 }
 
 /// The transcript of one task. Items keep first-appearance order.
@@ -331,6 +397,74 @@ impl Transcript {
                     message: error.message.clone(),
                 });
             }
+            Event::StepStarted(started) => {
+                let slot = self.step_slot(&started.step_id, started.iteration);
+                if let Item::Step(step) = &mut self.items[slot] {
+                    step.step_name = started.step_name.clone();
+                }
+            }
+            Event::StepFinished(finished) => {
+                let slot = self.step_slot(&finished.step_id, finished.iteration);
+                if let Item::Step(step) = &mut self.items[slot] {
+                    step.step_name = finished.step_name.clone();
+                    // The first outcome counts, as for an interrupt's resolution.
+                    if step.outcome.is_none() {
+                        step.outcome = Some(finished.outcome);
+                    }
+                }
+            }
+            Event::SubagentStarted(started) => {
+                let slot = self.subagent_slot(&started.subagent_run_id);
+                if let Item::Subagent(view) = &mut self.items[slot] {
+                    view.name = started.name.clone();
+                    if let Some(description) = &started.description {
+                        view.description = Some(description.clone());
+                    }
+                    if let Some(child) = &started.child_thread_id {
+                        view.child_thread_id = Some(child.clone());
+                    }
+                    if let Some(task) = &started.child_task_id {
+                        view.child_task_id = Some(task.clone());
+                    }
+                    if let Some(agent) = &started.agent_id {
+                        view.agent_id = Some(agent.clone());
+                    }
+                    if let Some(tool_call) = &started.parent_tool_call_id {
+                        view.parent_tool_call_id = Some(tool_call.clone());
+                    }
+                    if let Some(parent) = &started.parent_subagent_run_id {
+                        view.parent_subagent_run_id = Some(parent.clone());
+                    }
+                }
+            }
+            Event::SubagentFinished(finished) => {
+                let slot = self.subagent_slot(&finished.subagent_run_id);
+                if let Item::Subagent(view) = &mut self.items[slot]
+                    && view.is_open()
+                {
+                    view.status = SubagentStatus::Finished {
+                        result: finished.result.clone(),
+                    };
+                }
+            }
+            Event::SubagentError(error) => {
+                let slot = self.subagent_slot(&error.subagent_run_id);
+                if let Item::Subagent(view) = &mut self.items[slot]
+                    && view.is_open()
+                {
+                    view.status = SubagentStatus::Failed {
+                        message: error.message.clone(),
+                        code: error.code.clone(),
+                    };
+                }
+            }
+            Event::Raw(raw) => {
+                self.items.push(Item::Raw(Box::new(RawView {
+                    source: raw.source,
+                    child_thread_id: raw.child_thread_id.clone(),
+                    event: raw.event.clone(),
+                })));
+            }
             _ => {}
         }
         Ok(())
@@ -437,6 +571,45 @@ impl Transcript {
                 raw_input: None,
                 content: Vec::new(),
                 raw_output: None,
+            })),
+        )
+    }
+
+    /// The slot of a step, created when it has none yet.
+    fn step_slot(&mut self, step_id: &str, iteration: Option<u64>) -> usize {
+        let key = Key::Step(step_id.to_owned(), iteration);
+        if let Some(&slot) = self.index.get(&key) {
+            return slot;
+        }
+        self.push(
+            key,
+            Item::Step(StepView {
+                step_id: step_id.to_owned(),
+                step_name: String::new(),
+                iteration,
+                outcome: None,
+            }),
+        )
+    }
+
+    /// The slot of a subagent run, created when it has none yet.
+    fn subagent_slot(&mut self, subagent_run_id: &str) -> usize {
+        let key = Key::Subagent(subagent_run_id.to_owned());
+        if let Some(&slot) = self.index.get(&key) {
+            return slot;
+        }
+        self.push(
+            key,
+            Item::Subagent(Box::new(SubagentView {
+                subagent_run_id: subagent_run_id.to_owned(),
+                name: String::new(),
+                description: None,
+                child_thread_id: None,
+                child_task_id: None,
+                agent_id: None,
+                parent_tool_call_id: None,
+                parent_subagent_run_id: None,
+                status: SubagentStatus::Running,
             })),
         )
     }

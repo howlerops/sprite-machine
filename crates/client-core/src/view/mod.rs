@@ -3,7 +3,8 @@
 //! - [`ThreadView`]: one thread's state (`session`/`usage`/`thread`/`flow` JSON documents),
 //!   its tasks and their transcripts, and the host machine's presence. It is a reducer: feed
 //!   it the envelopes in `seq` order with [`ThreadView::apply`].
-//! - [`transcript`]: a task's ordered items (messages, tool calls, activities, interrupts).
+//! - [`transcript`]: a task's ordered items (messages, tool calls, activities, interrupts,
+//!   steps, subagents and raw events).
 //! - [`inbox`]: the thread list with `idle` / `running` / `needs_you` / `done`.
 //! - [`machines`]: machines and their presence, from `Presence` events.
 
@@ -22,8 +23,8 @@ use serde_json::{Map, Value};
 use crate::patch::{self, PatchError};
 
 pub use transcript::{
-    ActivityView, InterruptView, Item, LocalAnswer, TextView, ToolStatus, ToolView, Transcript,
-    UserView,
+    ActivityView, InterruptView, Item, LocalAnswer, RawView, StepView, SubagentStatus,
+    SubagentView, TextView, ToolStatus, ToolView, Transcript, UserView,
 };
 
 /// A state or view update that cannot be applied.
