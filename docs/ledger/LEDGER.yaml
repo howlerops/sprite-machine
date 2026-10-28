@@ -2811,6 +2811,9 @@ items:
     title: 'hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: low
@@ -3399,10 +3402,14 @@ items:
     title: 'Attachments from phone → local files / image blocks'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [M2B-004, M1A-014, M2-009]
     paths:
-      - 'crates/runner/src/files/**'
-      - 'crates/runner/tests/files.rs'
+      - "crates/cli/src/e2e/attachments*"
+      - "crates/runner/tests/attachments_e2e.rs"
+      - "crates/runner/src/server/** (FilePolicy option, test-only)"
     context:
       - 'docs/PLAN-v2-ade.md §4.10 (Local environment)'
       - 'https://code.claude.com/docs/en/remote-control (attachments)'
