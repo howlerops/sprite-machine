@@ -204,6 +204,34 @@ fn prompt(thread: &str, token: &str, request_id: &str) -> Reply {
     )
 }
 
+fn prompt_task(thread: &str, token: &str, request_id: &str, task: &str) -> Reply {
+    http(
+        "POST",
+        &format!("/v1/threads/{thread}/prompts"),
+        Some(token),
+        &[
+            ("Idempotency-Key", &unique("idk")),
+            ("x-request-id", request_id),
+        ],
+        Some(&json!({
+            "task_id": task,
+            "parts": [{ "type": "text", "text": "queued" }],
+        })),
+    )
+}
+
+fn pending_tasks(thread: &str, token: &str) -> Vec<Value> {
+    let reply = http(
+        "GET",
+        &format!("/v1/threads/{thread}/pending"),
+        Some(token),
+        &[],
+        None,
+    );
+    assert_eq!(reply.status, 200, "pending read: {}", reply.body);
+    reply.json()["pending"].as_array().expect("pending").clone()
+}
+
 fn approve(thread: &str, token: &str, request_id: &str) -> Reply {
     http(
         "POST",
@@ -230,12 +258,15 @@ fn cancel(thread: &str, token: &str, request_id: &str) -> Reply {
     )
 }
 
-fn delete_pending(thread: &str, token: &str, request_id: &str) -> Reply {
+fn delete_pending(thread: &str, task: &str, token: &str, request_id: &str) -> Reply {
     http(
         "DELETE",
-        &format!("/v1/threads/{thread}/pending/tk_authz"),
+        &format!("/v1/threads/{thread}/pending/{task}"),
         Some(token),
-        &[("x-request-id", request_id)],
+        &[
+            ("Idempotency-Key", &unique("idk")),
+            ("x-request-id", request_id),
+        ],
         None,
     )
 }
@@ -436,7 +467,10 @@ fn a_viewer_cannot_send_prompts_approve_cancel_or_delete() {
         ("prompt", prompt(&thread, &viewer, &request)),
         ("approve", approve(&thread, &viewer, &request)),
         ("cancel", cancel(&thread, &viewer, &request)),
-        ("delete", delete_pending(&thread, &viewer, &request)),
+        (
+            "delete",
+            delete_pending(&thread, "tk_authz", &viewer, &request),
+        ),
         (
             "create thread",
             http(
@@ -475,7 +509,7 @@ fn a_viewer_cannot_send_prompts_approve_cancel_or_delete() {
 }
 
 #[test]
-fn a_member_can_send_approve_and_cancel_but_not_delete() {
+fn a_member_can_send_approve_cancel_and_remove_a_queued_task() {
     let (member, _, user_id) = issue("member", None);
     let thread = hosted_thread();
     let sent = prompt(&thread, &member, "authz-member");
@@ -485,14 +519,25 @@ fn a_member_can_send_approve_and_cancel_but_not_delete() {
         sent.status,
         sent.body
     );
+    // A second prompt queues behind the running one; the member removes it (client-api §5.3).
+    let queued = unique("tk_queued");
+    let waiting = prompt_task(&thread, &member, "authz-member-delete", &queued);
+    assert_eq!(waiting.status, 202, "queued prompt: {}", waiting.body);
+    assert_eq!(waiting.json()["status"], "pending");
+    let deleted = delete_pending(&thread, &queued, &member, "authz-member-delete");
+    assert_eq!(deleted.status, 204, "member delete: {}", deleted.body);
+    let gone = pending_tasks(&thread, &member);
+    assert!(
+        gone.iter().all(|task| task["task_id"] != queued.as_str()),
+        "still queued: {gone:?}"
+    );
+
     let approved = approve(&thread, &member, "authz-member");
     assert_ne!(approved.status, 403, "member approve: {}", approved.body);
     assert_ne!(approved.status, 401);
     let cancelled = cancel(&thread, &member, "authz-member");
     assert_ne!(cancelled.status, 403, "member cancel: {}", cancelled.body);
     assert_ne!(cancelled.status, 401);
-    let deleted = delete_pending(&thread, &member, "authz-member");
-    assert_eq!(deleted.status, 403, "member delete: {}", deleted.body);
 
     // The actor is the session's user, not the forged one in the prompt body.
     let rows = audit_rows();
@@ -503,6 +548,11 @@ fn a_member_can_send_approve_and_cancel_but_not_delete() {
         .collect();
     assert_eq!(mine.len(), 1, "audit: {rows:?}");
     assert_eq!(mine[0]["actor_user_id"], user_id);
+    // The removal keeps its audit action and names the member as the actor.
+    let removed = rows_for(&rows, "thread.pending.delete", "authz-member-delete");
+    assert_eq!(removed.len(), 1, "audit: {rows:?}");
+    assert_eq!(removed[0]["actor_user_id"], user_id);
+    assert_eq!(removed[0]["target_id"], thread.as_str());
 }
 
 #[test]
@@ -515,7 +565,7 @@ fn an_admin_may_delete_pending_and_every_mutation_is_audited() {
     prompt(&thread, &member, &request);
     approve(&thread, &member, &request);
     cancel(&thread, &member, &request);
-    let deleted = delete_pending(&thread, &admin, &request);
+    let deleted = delete_pending(&thread, "tk_authz", &admin, &request);
     assert_ne!(deleted.status, 403, "admin delete: {}", deleted.body);
     assert_ne!(deleted.status, 401);
     let revoked = http(

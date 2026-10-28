@@ -79,7 +79,14 @@ test.describe('composer', () => {
     // It is queued, not started: only the first prompt is in the transcript.
     await expect(users(page)).toHaveCount(1);
 
-    await chip.getByRole('button', { name: /Remove queued message: second prompt/ }).click();
+    const taskId = await chip.getAttribute('data-task');
+    const [removal] = await Promise.all([
+      page.waitForRequest((request) => request.url().includes('/pending/')),
+      chip.getByRole('button', { name: /Remove queued message: second prompt/ }).click(),
+    ]);
+    // Removing a queued task is DELETE .../pending/{task_id} (client-api §5.3), not a cancel.
+    expect(removal.method()).toBe('DELETE');
+    expect(new URL(removal.url()).pathname).toBe(`/v1/threads/${thread}/pending/${taskId}`);
     await expect(page.locator('#pending-chips [data-task]')).toHaveCount(0);
     expect(await pending(thread)).toEqual([]);
   });

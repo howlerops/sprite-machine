@@ -3,7 +3,7 @@
 //
 // - A prompt goes to the outbox first (outbox.js) and is sent from there, so it survives going
 //   offline and a reload. While a task runs the hub queues it: the queued prompts show as chips
-//   that can be removed (cancel of the queued task). Prompts still waiting in the outbox show
+//   that can be removed (DELETE .../pending/{task_id}). Prompts still waiting in the outbox show
 //   as chips too.
 // - A file is uploaded as soon as it is picked: POST /v1/attachments, then PUT the bytes to the
 //   signed URL (at most 20 MB); the hub's FilePart goes into the prompt.
@@ -167,13 +167,13 @@ export function mountComposer(threadId) {
     send.disabled = uploading;
   }
 
-  // A web session is at most `member`, and DELETE .../pending/{task_id} needs `admin` (policy.rs);
-  // cancelling a task that is still queued removes it from the queue the same way (client-api §5.5,
-  // threads/core.rs `cancel`) and needs only `member`.
   async function removePending(taskId) {
     note = '';
     try {
-      await keyedRequest('POST', `/v1/threads/${encodeURIComponent(threadId)}/cancel`, { body: { task_id: taskId } });
+      await keyedRequest(
+        'DELETE',
+        `/v1/threads/${encodeURIComponent(threadId)}/pending/${encodeURIComponent(taskId)}`,
+      );
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) {
         note = `Could not remove it${error instanceof ApiError ? ` (${error.status} ${error.code})` : ''}. Try again.`;
