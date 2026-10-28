@@ -7,6 +7,7 @@ pub mod attachments;
 pub mod audit;
 pub mod auth;
 pub mod db;
+pub mod dev_fixtures;
 pub mod devices;
 pub mod links;
 pub mod machines;

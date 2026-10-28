@@ -1,0 +1,13 @@
+{
+  "name": "sm-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The mobile web page served by the hub (Workers Static Assets). No build step; npm is for the browser tests only.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

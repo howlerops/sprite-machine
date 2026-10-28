@@ -100,6 +100,12 @@ retry_delay = 5
 [assets]
 directory = "../../web"
 binding = "ASSETS"
+# WEB-001: /pair, /pair/device and /#/... are one page (index.html, absolute asset paths): a
+# navigation to /pair falls back to index.html. Everything else goes to the Worker first, except
+# the page's own files, so the API (/v1), the /t/<id> deep-link redirect, the association documents,
+# /healthz and any unknown path keep the Worker's answers (JSON 404), never the page.
+not_found_handling = "single-page-application"
+run_worker_first = ["/*", "!/", "!/index.html", "!/styles.css", "!/src/*", "!/pair", "!/pair/*"]
 
 # ---- Dev only -----------------------------------------------------------------------------
 
