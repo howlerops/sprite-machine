@@ -243,3 +243,4 @@
 2026-10-28T19:24Z verify20 green → M2B-014d, M3-017a, M2B-010a, M2-003b done
 2026-10-28T19:26Z verify20 attachments re-run PASS (cold-start timeout), thread_create PASS. Assign M2B-019 (sonnet, high), M2-003e (sonnet), M3-001h (haiku), WEB-006 (sonnet), M1B-008e (haiku, bench prep split from M1B-008c; the leader runs the real bench after, on an idle machine)
 2026-10-28T19:32Z M3-001h back (haiku) → merged, client-core 43/0 → done. Note: its worktree started from an old commit (d41a22d) and was fast-forwarded to v2 by the worker; check bases of later worktrees. Added M3-001k
+2026-10-28T19:46Z M2-003e back (sonnet): authorize 10/min per IP, cron purge of oauth rows, 7-day login-link rule (native tests; no live test possible: no route creates a login-only user) → accepted, merged; verify running. Worker reported its worktree began on a commit without crates/ and reset to v2 (second such report): briefs will say to check 'git log -1' is on v2 first
