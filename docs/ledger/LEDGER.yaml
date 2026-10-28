@@ -6293,3 +6293,34 @@ items:
       - 'Applying one event updates only the affected rows (test counts rebuilt rows); streaming the 10k fixture at 200 ev/s keeps per-frame layout under budget headlessly'
     verify:
       - 'cargo test -p client-gpui --test transcript'
+
+  - id: M2B-019d
+    title: 'tunnel/hub: a runner-typed prompt in a shared session is enqueued at the hub (up frame) and comes back as a prompt command, so the hub alone orders local and phone prompts; remove the TUI settle window'
+    milestone: M2b
+    phase: P3
+    lane: rust
+    size: M
+    risk: high
+    deps: [M2B-019c, M2B-010a]
+    paths:
+      - 'docs/specs/tunnel.md'
+      - 'crates/protocol/src/tunnel/**'
+      - 'crates/protocol/tests/**'
+      - 'crates/hub/src/machines/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/do/thread.rs'
+      - 'crates/hub/tests/machine_do.rs'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/src/tui/**'
+      - 'crates/runner/tests/tui.rs'
+      - 'crates/cli/src/e2e/rc.rs'
+    context:
+      - 'docs/ledger/reports/M2B-019c.md (Ordering rule, Known limit, Discovered work)'
+      - 'docs/ledger/reports/M2B-010a.md (the interrupt_answer up frame: same pattern)'
+    acceptance:
+      - 'tunnel.md: a runner-local prompt goes up on the exactly-once stream; the Thread DO queues it like a phone prompt (author = the local user) and sends it down as a prompt command in queue order'
+      - 'The TUI settle window is gone; a slow-link test (hub prompt delayed past 1.5 s) still runs both prompts once in hub order; live test with a fake runner + phone'
+    verify:
+      - 'cargo test -p protocol -p hub -p runner'
+      - 'bash scripts/hub-test.sh machine_do'
+      - 'cargo run -p cli -- e2e rc'
