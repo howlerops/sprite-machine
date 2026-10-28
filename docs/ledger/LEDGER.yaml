@@ -164,6 +164,9 @@ items:
     title: 'Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile'
     milestone: M0
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 1
     deps: [MVP-000]
     paths:
@@ -174,9 +177,10 @@ items:
       - 'docs/ledger/reports/MVP-000.md (spec issue 7: 1.49 MB wasm vs 0.49 MB in the spike; .wrangler deleted by hand; CARGO_PROFILE_RELEASE_STRIP env var)'
       - 'docs/spikes/cloudflare.md (release profile: opt-level z, lto, codegen-units 1, strip off)'
     acceptance:
-      - 'crates/hub/.gitignore ignores /.wrangler and /build; the tracer no longer deletes crates/hub/.wrangler itself, and `git status --porcelain` is empty after `cargo run -p cli -- e2e tracer`'
-      - 'The hub wasm is built with the spike''s size settings (opt-level "z", lto, codegen-units 1, strip off) without changing native release builds of other crates (per-package profile override for hub, or a dedicated profile); the CARGO_PROFILE_RELEASE_STRIP env var is gone'
-      - 'The tracer prints the gzip bundle size, and it is < 1 MiB'
+      - "crates/hub/.gitignore ignores /.wrangler and /build; the tracer no longer deletes crates/hub/.wrangler itself, and `git status --porcelain` is empty after `cargo run -p cli -- e2e tracer`"
+      - "The hub wasm is built with the spike's size settings (opt-level \"z\", lto, codegen-units 1, strip off) without changing native release builds of other crates (per-package profile override for hub, or a dedicated profile); the CARGO_PROFILE_RELEASE_STRIP env var is gone"
+      - "The tracer prints the gzip bundle size, and it is < 1 MiB"
+      - "The tracer locates crates/hub at runtime (walk up from the current directory to the workspace root, or an explicit --hub-dir), not via a compile-time CARGO_MANIFEST_DIR path: with a CARGO_TARGET_DIR shared across worktrees a cached cli binary can point at a deleted checkout (seen 2026-10-28)"
     verify:
       - cargo run -p cli -- e2e tracer
       - test -z "$(git status --porcelain)"
@@ -1136,7 +1140,8 @@ items:
     title: 'agui-fixture: synthetic TurnEvent stream server (crate name kept)'
     milestone: M1b
     phase: P0
-    status: "assigned"
+    status: "done"
+    evidence: "merged b2948e1; verify: scenarios 7 passed (7 listed, 2 stable runs), clippy clean; workspace 126 tests; tracer PASS after merge"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
@@ -1178,6 +1183,9 @@ items:
     title: 'gpui spike: app shell + virtualized transcript pane'
     milestone: M1b
     phase: P0
+    status: "assigned"
+    assignee: "worker:opus"
+    attempt: 1
     lane: client
     deps: [M1B-002, M0-003, GPUI-000]
     paths:

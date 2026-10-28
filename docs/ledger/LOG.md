@@ -43,3 +43,7 @@
 2026-10-28T00:28Z MVP-000b todo→assigned attempt 1 (haiku, CI only)
 2026-10-28T00:28Z M1B-002 resumed (same attempt) after M2-001
 2026-10-28T00:29Z MVP-000b assigned→review merged 55a802f; done when the CI tracer job is green
+2026-10-28T00:45Z M1B-002 review→done merged b2948e1 (resumed after disk incident, same attempt); discovered: validate_sequence folds into M1A-006a; terminal closing snapshot clarified in turn-event.md §4.4
+2026-10-28T00:45Z leader: post-merge tracer failed once on a stale cli binary (compile-time CARGO_MANIFEST_DIR from a deleted review worktree via shared target); rebuilt → PASS; runtime hub lookup added to MVP-000a acceptance
+2026-10-28T00:45Z M1B-004a todo→assigned attempt 1 (opus: first GPUI screen, plan §7.4)
+2026-10-28T00:45Z MVP-000a todo→assigned attempt 1 (haiku)

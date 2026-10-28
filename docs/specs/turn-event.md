@@ -195,7 +195,9 @@ One variant, keyed by `activity_id`, scope: run.
 | `policy`        | — (runner auto-allow presets, M4-008)                                                  | `{tool_call_id ✓, decision ✓: allow\|deny, rule ✓}`                                               |
 
 A terminal starts with a `snapshot` (command, cwd), continues with `append` (`output`
-chunks, UTF-8 lossy), and ends with a `snapshot` carrying `exit`.
+chunks, UTF-8 lossy), and ends with a `snapshot` carrying `exit`. Because a snapshot replaces
+the whole content, the closing snapshot repeats `terminal_id`, `command`, `cwd` and the full
+`output` accumulated so far; it must still fit the 256 KiB envelope limit (§2).
 
 ### 4.5 Interrupts
 

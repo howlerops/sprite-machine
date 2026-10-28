@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 20/191 (3 dropped) · in-flight MVP-000b,M1B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 17/120
+done 21/191 (3 dropped) · in-flight MVP-000a,MVP-000b,M1B-004a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 19/120
 
-MVP-000b merged, waiting for its first CI run; M1B-002 in flight.
+Batch 9: M1B-004a (last P0 item) + MVP-000a assigned; MVP-000b awaiting CI.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
-| P0 | 12 | 10 | 1 |
-| P1 | 29 | 5 | 1 |
+| P0 | 12 | 11 | 1 |
+| P1 | 29 | 5 | 2 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -32,9 +32,9 @@ MVP-000b merged, waiting for its first CI run; M1B-002 in flight.
 | M0-017 | worker | rust | done | Spike: Cloudflare Workers (workers-rs + axum, SQLite DO + hibernatable WebSocket, D1, R2) under wrangler dev |
 | M1A-002 | worker | rust | done | acp-mock: scriptable ACP v1 agent |
 | GPUI-000 | leader | client | done | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |
-| M1B-002 | worker | rust | assigned | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
+| M1B-002 | worker | rust | done | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
 | M1B-003 | leader | docs | done | Client-stack gates written before prototypes |
-| M1B-004a | worker | client | todo | gpui spike: app shell + virtualized transcript pane |
+| M1B-004a | worker | client | assigned | gpui spike: app shell + virtualized transcript pane |
 
 ## Waiting on the human
 
