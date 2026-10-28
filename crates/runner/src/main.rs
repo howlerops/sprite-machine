@@ -7,6 +7,7 @@ use runner::login::flow::normalize_hub;
 use runner::login::{
     Confirm, CredentialStore, login, logout, real_sleeper, status, terminal_prompter,
 };
+use runner::qr;
 use runner::server::{self, Options, RcArgs};
 use runner::trust::{self, Audit, TrustStore};
 use runner::tunnel::Timing;
@@ -15,7 +16,8 @@ use runner::tunnel::Timing;
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
 const USAGE: &str = "usage: sm login --hub <url> | sm logout | sm status | sm rc [flags] | \
-sm rc close <thread id> | sm trust <dir> | sm untrust <dir>";
+sm rc close <thread id> | sm trust <dir> | sm untrust <dir> | sm mobile [--hub <url>]";
+const MOBILE_USAGE: &str = "usage: sm mobile [--hub <url>]";
 const LOGIN_USAGE: &str = "usage: sm login --hub <url> [--yes]";
 const LOGOUT_USAGE: &str = "usage: sm logout";
 const STATUS_USAGE: &str = "usage: sm status";
@@ -35,6 +37,7 @@ async fn main() -> Result<()> {
         Some("rc" | "run") => run_rc(&args[1..]).await,
         Some("trust") => run_trust(&args[1..], true),
         Some("untrust") => run_trust(&args[1..], false),
+        Some("mobile") => run_mobile(&args[1..]),
         Some(other) => bail!("unknown command {other:?}\n{USAGE}"),
         None => {
             println!("{CRATE} {}", env!("CARGO_PKG_VERSION"));
@@ -133,6 +136,21 @@ async fn run_rc(args: &[String]) -> Result<()> {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await
+}
+
+/// `sm mobile [--hub <url>]`: a QR code for the phone, which opens the hub's mobile web page (and
+/// installs the app once it ships). The hub is the stored login's, unless `--hub` names one.
+fn run_mobile(args: &[String]) -> Result<()> {
+    let hub = match args {
+        [] => CredentialStore::from_env()?
+            .load()?
+            .map(|login| login.hub)
+            .ok_or_else(|| anyhow!("not logged in: run `sm login --hub <url>`"))?,
+        [flag, url] if flag == "--hub" => url.clone(),
+        _ => bail!("{MOBILE_USAGE}"),
+    };
+    print!("{}", qr::block(&qr::mobile_url(&hub)?));
+    Ok(())
 }
 
 /// `sm trust <dir>` / `sm untrust <dir>`: stores or forgets a trusted directory of this machine.

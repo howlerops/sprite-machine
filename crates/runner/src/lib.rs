@@ -4,7 +4,9 @@
 pub mod checkpoint;
 pub mod harness;
 pub mod login;
+pub mod qr;
 pub mod server;
+pub mod settings;
 pub mod sleep;
 pub mod tracer;
 pub mod trust;
