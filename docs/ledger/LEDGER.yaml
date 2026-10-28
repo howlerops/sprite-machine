@@ -2148,6 +2148,8 @@ items:
     title: 'Spec: dispatch/session carry per-thread MCP servers; an interrupt outcome / RunError code for "agent gone" (harness_exited) instead of expired'
     milestone: M1a
     phase: P2
+    status: "done"
+    evidence: "948fc84 (leader): turn-event.md §4.9 harness exit -> InterruptResolved{cancelled} + RunError{harness_exited}; tunnel.md §3.5 MCP servers from runner local config until loadouts; no wire/schema change; validate.py 32 examples OK"
     lane: docs
     owner: leader
     deps: [M1A-006c]
@@ -2169,7 +2171,10 @@ items:
     lane: rust
     size: M
     risk: medium
-    deps: [M1A-006c, M1A-006d]
+    deps:
+      - "M1A-006c"
+      - "M1A-006d"
+      - "SPEC-004"
     paths:
       - 'crates/runner/src/tracer.rs'
       - 'crates/sidecar/src/bridge/**'
@@ -2178,9 +2183,10 @@ items:
     context:
       - 'docs/ledger/reports/M1A-006c.md (Discovered work 2, 3, 5)'
     acceptance:
-      - 'The runner path used by the tracer (and later sm rc) builds the bridge with spawn_with, so killing the agent mid-run fails the task and the next prompt respawns and resumes (test)'
-      - 'An approval for an interrupt stored by a previous process for a thread this process has not loaded answers unknown_interrupt (hub maps to 409) (test)'
-      - 'acp-mock can record received requests (opt-in) and advertise modes/config_options in session/new; bridge_robust drops its hand-played agent where acp-mock now suffices'
+      - "The runner path used by the tracer (and later sm rc) builds the bridge with spawn_with, so killing the agent mid-run fails the task and the next prompt respawns and resumes (test)"
+      - "Per SPEC-004 (turn-event.md §4.9): interrupts open when the harness exits, and interrupts stored by a previous process at startup, end with InterruptResolved{cancelled} + RunError{error, code:\"harness_exited\"} (not expired) (test)"
+      - "An approval for an interrupt stored by a previous process for a thread this process has not loaded answers unknown_interrupt (hub maps to 409) (test)"
+      - "acp-mock can record received requests (opt-in) and advertise modes/config_options in session/new; bridge_robust drops its hand-played agent where acp-mock now suffices"
     verify:
       - 'cargo test -p sidecar --test bridge_robust'
       - 'cargo test -p acp-mock'

@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 57/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 55/120
+done 58/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 55/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 57/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (hu
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 40 | 4 | 3 |
+| P2 | 40 | 5 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -36,7 +36,7 @@ done 57/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (hu
 | M2B-004b | worker | rust | assigned | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
 | M2B-004c | worker | rust | todo | runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads |
 | M1A-006d | worker | rust | assigned | Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key |
-| SPEC-004 | leader | docs | todo | Spec: dispatch/session carry per-thread MCP servers; an interrupt outcome / RunError code for "agent gone" (harness_exited) instead of expired |
+| SPEC-004 | leader | docs | done | Spec: dispatch/session carry per-thread MCP servers; an interrupt outcome / RunError code for "agent gone" (harness_exited) instead of expired |
 | M1A-006e | worker | rust | todo | Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | todo | hub: attachments in R2 + signed URLs |

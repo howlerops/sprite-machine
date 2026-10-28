@@ -126,3 +126,4 @@
 2026-10-28T07:30Z M2B-004b assigned (haiku)
 2026-10-28T07:36Z M1A-006c assigned→done merged cbc26b7 (sonnet); added SPEC-004 (leader: MCP servers source, harness-gone outcome) and M1A-006e (spawn_with in runner, unknown_interrupt mapping, acp-mock recording)
 2026-10-28T07:37Z M1A-006d assigned (sonnet, high)
+2026-10-28T07:37Z SPEC-004 done 948fc84 (leader): harness exit → cancelled + harness_exited; MCP servers from runner config until loadouts. M1A-006e acceptance updated to follow it
