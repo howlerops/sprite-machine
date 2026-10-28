@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 40/199 (3 dropped) · in-flight M1A-007,M1B-004d,M2B-002,M2B-003 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 39/120
+done 41/199 (3 dropped) · in-flight M1A-007,M1B-004d,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 39/120
 
 P1 running.
 
@@ -11,7 +11,7 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 33 | 23 | 4 |
+| P1 | 33 | 24 | 3 |
 | P2 | 25 | 1 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -51,7 +51,7 @@ P1 running.
 | M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
 | M2B-001a | worker | rust | done | protocol: strict tunnel frame parsing + unknown command kind helper |
 | M2B-002 | worker | rust | assigned | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
-| M2B-003 | worker | rust | assigned | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
+| M2B-003 | worker | rust | done | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
 | M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
 | M2B-011 | worker | rust | todo | runner: local checkpoints as shadow git commits |
 | M3-001 | worker | rust | done | client-core: TurnEvent subscription client, view models, cache, outbound queue |

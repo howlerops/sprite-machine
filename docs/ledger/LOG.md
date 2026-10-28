@@ -88,3 +88,5 @@
 2026-10-28T04:13Z M1A-006c: elicitation moved to M1A-007 (dedupe); deps += M1A-007
 2026-10-28T04:13Z M1A-007 paths += bridge/handler.rs, runtime.rs, protocol tunnel types (Outcome union; M2B-002 may land it first); assigned (sonnet)
 2026-10-28T04:13Z M2B-003 assigned (haiku)
+2026-10-28T04:25Z M2B-003 assigned→done merged 99b65cc (haiku; one denied archive_session call)
+2026-10-28T04:25Z leader: shared CARGO_TARGET_DIR gives workspace members the same metadata in every worktree, so parallel worktrees overwrite each other's member artifacts (seen: sidecar compiled against another branch's protocol). Verifies now touch crates/*/src/{lib,main}.rs first; briefs say the same

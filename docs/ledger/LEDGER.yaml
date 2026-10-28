@@ -2020,7 +2020,8 @@ items:
     title: 'sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library'
     milestone: M2b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 99b65cc; verify (forced recompile): host_modes 14, sidecar 81, runner depends on sidecar, clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
