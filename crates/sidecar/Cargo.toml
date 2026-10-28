@@ -17,6 +17,10 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest.workspace = true
+# Attachments (bridge::files): base64 for image blocks, sha256 for the optional file digest.
+base64 = "=0.22.1"
+sha2 = "0.10"
 # Client terminals (ACP terminal/*) run on a PTY. Sync API; the reader and waiter run on
 # std threads so the tokio runtime never blocks.
 portable-pty = "=0.9.0"

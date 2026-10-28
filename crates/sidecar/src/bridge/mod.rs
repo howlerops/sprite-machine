@@ -35,6 +35,7 @@
 //! events keep the order the agent produced them in.
 
 mod elicitation;
+pub mod files;
 mod handler;
 mod ids;
 mod io;

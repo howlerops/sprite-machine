@@ -3,14 +3,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use protocol::acp::{ContentBlock, SessionNotification};
+use protocol::acp::SessionNotification;
 use protocol::mapping::acp_turn::{
     AcpTurnMapper, IdSource, SequentialIds, StartTask, runner_actor,
 };
-use protocol::tunnel::{Command, CommandErrorCode, ContentPart, Disposition};
+use protocol::tunnel::{Command, CommandErrorCode, Disposition};
 use protocol::turn_event::{Envelope, Event, RunErrorReason, RunOutcome, UserMessage};
-use serde_json::{Value, json};
 
+use super::files::{self, FilePolicy};
 use super::handler::{Internal, Resources};
 use super::ids::SharedIds;
 use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand};
@@ -296,20 +296,18 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         self.handler.register(
             &session_key,
             Resources {
-                workspace,
+                workspace: workspace.clone(),
                 terminals,
             },
         );
 
-        let blocks = match content_blocks(&parts) {
+        // Files are fetched and stored before the prompt is sent; a failure ends the task
+        // without the agent seeing the prompt.
+        let blocks = match files::prompt_blocks(&parts, &workspace, &FilePolicy::default()).await {
             Ok(blocks) => blocks,
             Err(error) => {
                 return self
-                    .fail_task(
-                        &thread_id,
-                        "protocol",
-                        &format!("bad prompt content: {error}"),
-                    )
+                    .fail_task(&thread_id, error.code(), &error.to_string())
                     .await;
             }
         };
@@ -681,31 +679,4 @@ fn prompt_error_code(error: &ClientError) -> &'static str {
         ClientError::Closed | ClientError::Io(_) => "harness_exited",
         _ => "protocol",
     }
-}
-
-/// ACP content blocks for a prompt: text as is, files as resource links (the agent fetches
-/// the https URL itself).
-fn content_blocks(parts: &[ContentPart]) -> Result<Vec<ContentBlock>, serde_json::Error> {
-    parts
-        .iter()
-        .map(|part| {
-            let block: Value = match part {
-                ContentPart::Text { text } => json!({ "type": "text", "text": text }),
-                ContentPart::File {
-                    name,
-                    mime_type,
-                    url,
-                    size,
-                    ..
-                } => json!({
-                    "type": "resource_link",
-                    "name": name,
-                    "uri": url,
-                    "mimeType": mime_type,
-                    "size": size,
-                }),
-            };
-            serde_json::from_value(block)
-        })
-        .collect()
 }
