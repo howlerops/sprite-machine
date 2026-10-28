@@ -2589,7 +2589,8 @@ items:
     title: 'sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout)'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged f0529f2; runner+sidecar 274 passed (server_mode 18: set_mode before first prompt, unadvertised mode fails without a prompt, http/sse MCP by caps, sweep, cancel/idle close), clippy clean, tracer PASS; leader checked worktree removal never forces (dirty trees kept)"
     attempt: 1
     assignee: "worker:sonnet"
     priority: 1
@@ -2680,6 +2681,28 @@ items:
       - 'bash scripts/hub-test.sh signin'
       - 'cargo test -p runner --test server_mode'
 
+  - id: M2B-007b
+    title: 'sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-007a]
+    paths:
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/tests/server_mode.rs'
+      - 'crates/acp-mock/**'
+    context:
+      - 'docs/ledger/reports/M2B-007a.md (Notes, Discovered work)'
+    acceptance:
+      - 'After an idle close, a new prompt for the thread recreates its worktree on the same branch (git worktree add of the existing branch) and resumes; no "workspace is gone" (test)'
+      - 'acp-mock scripts set initialize mcp_capabilities; the M2B-007a relay patches in server_mode.rs and session_config.rs tests are replaced'
+      - '`sm rc close <thread>` (or a control socket command) ends a session locally (test)'
+    verify:
+      - 'cargo test -p runner --test server_mode'
+      - 'cargo test -p acp-mock'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -2755,6 +2778,9 @@ items:
     title: 'hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     deps: [M2-008, M2-016]
     paths:
       - 'crates/hub/src/notify/**'

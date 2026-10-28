@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 79/237 (3 dropped) · in-flight M2B-005a,M2B-007a,M2-010 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 75/120
+done 80/238 (3 dropped) · in-flight M2B-005a,M2-010,M2-011 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 76/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 79/237 (3 dropped) · in-flight M2B-005a,M2B-007a,M2-010 · blocked 12 (hum
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 55 | 26 | 3 |
+| P2 | 56 | 27 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 36 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -50,13 +50,14 @@ done 79/237 (3 dropped) · in-flight M2B-005a,M2B-007a,M2-010 · blocked 12 (hum
 | M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
 | M2B-006c | worker | rust | done | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
 | M2B-004f | worker | rust | todo | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
-| M2B-007a | worker | rust | assigned | sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout) |
+| M2B-007a | worker | rust | done | sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout) |
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
 | M2-003c | worker | rust | todo | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
+| M2B-007b | worker | rust | todo | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | assigned | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
-| M2-011 | worker | rust | todo | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
+| M2-011 | worker | rust | assigned | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
 | CI-001 | human | rust | blocked | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
 | M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
