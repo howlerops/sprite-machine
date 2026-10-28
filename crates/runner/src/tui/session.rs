@@ -21,7 +21,7 @@
 //!   alone: the first answer to reach its own log wins, and the bridge refuses a second
 //!   command (`unknown_interrupt`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -128,6 +128,9 @@ struct Inner {
     upstream: Option<Arc<dyn Upstream>>,
     opened: bool,
     seen_keys: HashSet<String>,
+    /// The task of each prompt typed here, by its command key, until the bridge takes it. A
+    /// refusal of one of these goes back to the UI as [`Feed::Refused`].
+    local_prompts: HashMap<String, String>,
     next_key: u64,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
@@ -140,6 +143,12 @@ impl Inner {
     /// Appends an event to the log, numbered, and shows it. Returns its index.
     fn push(&mut self, mut envelope: Envelope, to_hub: bool) {
         envelope.seq = self.log.len() as u64 + 1;
+        // The bridge took a prompt typed here once its task has events: it is no longer one the
+        // bridge could refuse.
+        if let Some(task) = &envelope.task_id {
+            self.local_prompts
+                .retain(|_, pending| pending.as_str() != task.as_str());
+        }
         let _ = self
             .feed
             .send(Feed::Thread(Incoming::Event(Box::new(envelope.clone()))));
@@ -217,6 +226,11 @@ pub struct Handle {
 
 impl Handle {
     /// The hub commands the bridge has processed. Taken once, by the task that acks them.
+    /// How many prompts typed here the bridge has not taken yet (or refused). For tests.
+    pub async fn tracked_prompts(&self) -> usize {
+        self.inner.lock().await.local_prompts.len()
+    }
+
     pub fn take_processed(&self) -> Option<Processed> {
         self.processed
             .lock()
@@ -304,14 +318,21 @@ impl EventSink for LogSink {
     }
 
     async fn command_result(&self, failure: CommandFailure) -> Result<(), SinkError> {
-        // A command the bridge refused is the bridge's to tell the hub; the screen has nothing
-        // to show for it except in the log of the process.
+        // A command the bridge refused is the bridge's to tell the hub. A prompt typed here comes
+        // back to the screen, which queues it again.
         tracing::warn!(
             code = ?failure.code,
             "command {} refused: {}",
             failure.idempotency_key,
             failure.message
         );
+        let mut inner = self.inner.lock().await;
+        if let Some(task_id) = inner.local_prompts.remove(&failure.idempotency_key) {
+            let _ = inner.feed.send(Feed::Refused {
+                task_id,
+                message: failure.message,
+            });
+        }
         Ok(())
     }
 }
@@ -372,6 +393,7 @@ impl Session {
             upstream: None,
             opened: false,
             seen_keys: HashSet::new(),
+            local_prompts: HashMap::new(),
             next_key: 0,
             now_ms,
         }));
@@ -398,9 +420,16 @@ impl Session {
         self.handle.clone()
     }
 
-    async fn send_command(&self, make: impl FnOnce(&str) -> Command) -> String {
+    async fn send_command(
+        &self,
+        track: Option<String>,
+        make: impl FnOnce(&str) -> Command,
+    ) -> String {
         let mut inner = self.handle.inner.lock().await;
         let key = inner.command_key();
+        if let Some(task_id) = track {
+            inner.local_prompts.insert(key.clone(), task_id);
+        }
         let command = make(&inner.thread_id);
         let _ = self.handle.commands.send(IncomingCommand {
             seq: 0,
@@ -442,7 +471,7 @@ impl Backend for Session {
         message_id: String,
         text: String,
     ) -> Result<(), String> {
-        self.send_command(|thread_id| Command::Prompt {
+        self.send_command(Some(task_id.clone()), |thread_id| Command::Prompt {
             thread_id: thread_id.to_owned(),
             task_id,
             message_id,
@@ -508,7 +537,7 @@ impl Backend for Session {
 
     async fn cancel(&mut self, task_id: &str) -> Result<(), String> {
         let task_id = task_id.to_owned();
-        self.send_command(|thread_id| Command::Cancel {
+        self.send_command(None, |thread_id| Command::Cancel {
             thread_id: thread_id.to_owned(),
             task_id,
         })

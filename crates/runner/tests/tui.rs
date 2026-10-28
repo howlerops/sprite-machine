@@ -746,6 +746,7 @@ fn auto_connect_comes_from_the_settings_file() {
 #[test]
 fn prompts_get_unique_valid_ids() {
     let mut app = new_app(false);
+    let mut hub = Hub::new();
     let mut seen = Vec::new();
     for text in ["one", "two", "three"] {
         let actions = send_line(&mut app, text);
@@ -764,7 +765,89 @@ fn prompts_get_unique_valid_ids() {
         assert!(!seen.contains(task_id) && !seen.contains(message_id));
         seen.push(task_id.clone());
         seen.push(message_id.clone());
+        // The task runs and ends before the next line: each one is sent when it is typed.
+        let task = task_id.clone();
+        feed(&mut app, hub.prompt(&task, text, &terminal_actor()));
+        feed(&mut app, vec![hub.finish(&task)]);
     }
+}
+
+/// Delivers hub messages to the app and returns the actions they leave, in order.
+fn deliver(app: &mut App, messages: Vec<Incoming>) -> Vec<Action> {
+    messages
+        .into_iter()
+        .flat_map(|message| app.incoming(message))
+        .collect()
+}
+
+/// A line typed while a task runs is queued and shown as pending. It is sent when that task has
+/// ended, and the lines typed meanwhile run one at a time, in the order they were typed.
+#[test]
+fn a_line_typed_while_a_task_runs_is_queued_behind_it() {
+    let mut app = new_app(false);
+    let mut hub = Hub::new();
+    assert!(deliver(&mut app, hub.prompt("tk_a", "long job", &terminal_actor())).is_empty());
+    assert!(send_line(&mut app, "second").is_empty(), "queued, not sent");
+    assert!(send_line(&mut app, "third").is_empty(), "queued, not sent");
+    let shown = screen(&app);
+    let (second, third) = (shown.find("pending: second"), shown.find("pending: third"));
+    assert!(
+        matches!((second, third), (Some(a), Some(b)) if a < b),
+        "{shown}"
+    );
+
+    let actions = deliver(&mut app, vec![hub.finish("tk_a")]);
+    let [Action::Prompt { task_id, text, .. }] = actions.as_slice() else {
+        panic!("the queued line is sent when the task ends");
+    };
+    assert_eq!(text, "second");
+    let task = task_id.clone();
+    assert!(
+        !screen(&app).contains("pending: second"),
+        "sent, so no longer pending"
+    );
+    assert!(screen(&app).contains("pending: third"));
+
+    // While the second one runs the third waits.
+    assert!(deliver(&mut app, hub.prompt(&task, "second", &terminal_actor())).is_empty());
+    let actions = deliver(&mut app, vec![hub.finish(&task)]);
+    let [Action::Prompt { text, .. }] = actions.as_slice() else {
+        panic!("the third line is sent when the second ends");
+    };
+    assert_eq!(text, "third");
+}
+
+/// A prompt the bridge refuses (a task was running) is queued again, with a notice, and is sent
+/// when the running task has ended; it is never lost.
+#[test]
+fn a_refused_prompt_is_queued_again_and_sent_after_the_running_task() {
+    let mut app = new_app(false);
+    let mut hub = Hub::new();
+    let actions = send_line(&mut app, "typed");
+    let [Action::Prompt { task_id, .. }] = actions.as_slice() else {
+        panic!("a prompt");
+    };
+    let refused = task_id.clone();
+    assert!(
+        deliver(
+            &mut app,
+            hub.prompt("tk_phone", "from the phone", &phone_actor())
+        )
+        .is_empty()
+    );
+    app.refused(&refused, "thread t already has a running task");
+    assert_eq!(app.queued().count(), 1, "queued again");
+    assert!(
+        app.notice()
+            .is_some_and(|notice| notice.contains("already has a running task")),
+        "{:?}",
+        app.notice()
+    );
+    let actions = deliver(&mut app, vec![hub.finish("tk_phone")]);
+    let [Action::Prompt { text, .. }] = actions.as_slice() else {
+        panic!("the refused line is sent when the running task ends");
+    };
+    assert_eq!(text, "typed");
 }
 
 #[test]
@@ -1063,12 +1146,14 @@ async fn the_loop_shows_terminal_and_phone_messages_in_order() {
             let mut events = hub.agent_says("tk_t11", "On it.");
             events.push(hub.finish("tk_t11"));
             events.extend(hub.prompt("tk_phone", "and a test please", &phone_actor()));
+            events.push(hub.finish("tk_phone"));
             events
         };
         for event in events {
             phone.send(Feed::Thread(event)).expect("feed");
         }
         settle().await;
+        // The phone's turn has ended, so this line is sent at once (not queued).
         keys(&keys_tx, "thanks").await;
         keys_tx.send(Key::Ctrl('c')).await.expect("keys");
     };
@@ -1318,13 +1403,16 @@ mod session {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use protocol::tunnel::{Command, ContentPart, Workspace};
+    use protocol::tunnel::{Command, CommandErrorCode, ContentPart, Workspace};
     use runner::tui::driver::execute;
     use runner::tui::session::{
         Handle, HubAnswerFuture, HubVerdict, Identity, Registrar, Registration, Session, Upstream,
         UpstreamFuture, local_actor,
     };
-    use sidecar::bridge::{Bridge, Config, IncomingCommand, Origin, SequentialGenerator};
+    use sidecar::bridge::{
+        Bridge, CommandFailure, CommandSource, Config, EventSink, IncomingCommand, Origin,
+        SequentialGenerator,
+    };
     use sidecar::store::Store;
     use tempfile::TempDir;
     use tokio::time::timeout;
@@ -1544,8 +1632,12 @@ mod session {
                     })
                     .expect("the session ended");
                 match feed {
-                    Feed::Thread(incoming) => self.app.incoming(incoming),
+                    Feed::Thread(incoming) => {
+                        let actions = self.app.incoming(incoming);
+                        assert!(execute(actions, &mut self.app, &mut self.session).await);
+                    }
                     Feed::Connectivity(state) => self.app.set_connectivity(state),
+                    Feed::Refused { task_id, message } => self.app.refused(&task_id, &message),
                     Feed::Reset => panic!("the session never resets"),
                 }
             }
@@ -1627,6 +1719,119 @@ mod session {
         assert_eq!(rig.registrations.load(Ordering::SeqCst), 0);
         assert!(rig.hub.sent.lock().expect("lock").is_empty());
         assert!(rig.hub.opened.lock().expect("lock").is_empty());
+    }
+
+    /// Each prompt typed here is taken by the bridge, and afterwards nothing about it is kept.
+    #[tokio::test]
+    async fn accepted_prompts_leave_nothing_tracked() {
+        let mut rig = rig(
+            vec![plain_turn("One."), plain_turn("Two."), plain_turn("Three.")],
+            false,
+        )
+        .await;
+        rig.start().await;
+        for (done, text) in ["one", "two", "three"].into_iter().enumerate() {
+            let done = done + 1;
+            rig.say(text).await;
+            rig.until("the turn", move |app| {
+                app.view()
+                    .tasks()
+                    .iter()
+                    .filter(|t| t.status() == client_core::TaskStatus::Succeeded)
+                    .count()
+                    == done
+            })
+            .await;
+        }
+        assert_eq!(rig.handle.tracked_prompts().await, 0);
+    }
+
+    /// A prompt typed here that the bridge refuses comes back to the screen as `Feed::Refused`
+    /// for the task it was typed for, and is no longer tracked.
+    #[tokio::test]
+    async fn a_refused_typed_prompt_is_fed_back_to_the_screen() {
+        let work = TempDir::new().expect("work dir");
+        let registrar: Registrar = Box::new(|_handle| {
+            Box::pin(async { Err::<Registration, String>("no hub".to_owned()) })
+        });
+        let (mut session, sink, mut commands) = Session::new(
+            Identity {
+                thread_id: THREAD.to_owned(),
+                title: "refusal".to_owned(),
+                agent: "agt_mock".to_owned(),
+                workspace: Workspace {
+                    path: work.path().to_string_lossy().into_owned(),
+                    branch: None,
+                    spawn: None,
+                },
+            },
+            Arc::new(|| 1_700_000_000_000),
+            registrar,
+        );
+        let handle = session.handle();
+        session
+            .prompt(
+                "tk_typed".to_owned(),
+                "msg_typed".to_owned(),
+                "typed".to_owned(),
+            )
+            .await
+            .expect("the prompt is queued for the bridge");
+        assert_eq!(handle.tracked_prompts().await, 1);
+
+        // The bridge reads the command and refuses it, as it does while a task runs.
+        let command = commands.next().await.expect("the prompt command");
+        sink.command_result(CommandFailure {
+            idempotency_key: command.idempotency_key,
+            code: CommandErrorCode::Invalid,
+            message: "thread t already has a running task".to_owned(),
+        })
+        .await
+        .expect("the refusal is reported");
+
+        match timeout(STEP, session.next())
+            .await
+            .expect("the refusal reaches the screen")
+            .expect("the session is open")
+        {
+            Feed::Refused { task_id, message } => {
+                assert_eq!(task_id, "tk_typed");
+                assert!(message.contains("already has a running task"), "{message}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert_eq!(handle.tracked_prompts().await, 0);
+    }
+
+    /// A line typed while the approval of a running turn is open waits behind that turn, and runs
+    /// on the bridge after it.
+    #[tokio::test]
+    async fn a_line_typed_during_a_turn_runs_after_it() {
+        let mut rig = rig(
+            vec![
+                permission_turn("Running.", "All green."),
+                plain_turn("Second."),
+            ],
+            false,
+        )
+        .await;
+        rig.start().await;
+        rig.say("run the tests").await;
+        rig.until("the approval", open_approval).await;
+
+        rig.say("and then this").await;
+        let shown = screen_sized(&rig.app, 60, 16);
+        assert!(shown.contains("pending: and then this"), "{shown}");
+        assert!(!shown.contains("terminal> and then this"), "{shown}");
+
+        rig.press(Key::Enter).await;
+        rig.until("the queued line to run", |app| {
+            screen(app).contains("agent> Second.")
+        })
+        .await;
+        let shown = screen_sized(&rig.app, 60, 16);
+        assert!(shown.contains("terminal> and then this"), "{shown}");
+        assert!(!shown.contains("pending:"), "{shown}");
     }
 
     /// A phone's prompt and its answer arrive as hub commands: the screen shows them once, in

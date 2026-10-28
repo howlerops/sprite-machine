@@ -313,9 +313,7 @@ async fn steps(base: &str, machine_id: &str, runner: &Runner) -> Result<Vec<Enve
     phone
         .until("the approval turn", |seen| finished(seen) == 2)
         .await?;
-    // The bridge runs one task per thread: a line typed while the phone's turn runs is refused
-    // (M2B-019 finding), so it is typed again once the turn is over.
-    runner.type_unless_logged(USER[2]).await?;
+    // The line typed while the phone's turn ran is queued behind it and runs after it.
     phone
         .until("the typed turn", |seen| finished(seen) == 3)
         .await?;
@@ -346,7 +344,7 @@ async fn steps(base: &str, machine_id: &str, runner: &Runner) -> Result<Vec<Enve
     phone
         .until("the cut turn", |seen| finished(seen) == 4)
         .await?;
-    runner.type_unless_logged(USER[4]).await?;
+    // The line typed while the tunnel was down was queued behind the cut turn.
     phone
         .until("the offline turn", |seen| finished(seen) == 5)
         .await?;
@@ -1224,19 +1222,6 @@ impl Runner {
             .map_err(|_| anyhow!("the terminal session ended"))
     }
 
-    /// Types `line` unless the terminal's log already holds it as a message (the bridge refused
-    /// it while a task ran, so it was never logged).
-    async fn type_unless_logged(&self, line: &str) -> Result<()> {
-        let logged = user_messages_of(&self.snapshot().events)
-            .iter()
-            .any(|(_, text, _)| text == line);
-        if logged {
-            return Ok(());
-        }
-        println!("the bridge refused {line:?} while a task ran; the terminal types it again");
-        self.type_line(line).await
-    }
-
     /// Ends the session and its tunnel.
     async fn stop(self) {
         let Parts {
@@ -1308,11 +1293,15 @@ async fn ui_loop(
                             Incoming::Event(envelope) => Some((**envelope).clone()),
                             _ => None,
                         };
-                        app.incoming(incoming);
+                        let actions = app.incoming(incoming);
                         publish(app, event);
+                        if !execute(actions, app, session).await {
+                            return;
+                        }
                     }
                     Feed::Reset => {}
                     Feed::Connectivity(state) => app.set_connectivity(state),
+                    Feed::Refused { task_id, message } => app.refused(&task_id, &message),
                 }
             }
         }

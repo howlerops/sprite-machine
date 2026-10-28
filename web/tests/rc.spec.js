@@ -189,15 +189,6 @@ test.describe('rc: computer to phone and back, across a dropped tunnel', () => {
   let thread;
   let page;
 
-  /** Types `line` again unless the terminal's log has it (the bridge refused it while a task ran). */
-  async function typeUnlessLogged(line) {
-    const seen = await computer.ask('seen');
-    const logged = seen.some(
-      (e) => e.event.type === 'UserMessage' && e.event.parts.some((p) => p.text === line),
-    );
-    if (!logged) await computer.type(line);
-  }
-
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(20 * 60_000);
     const binary = buildCli();
@@ -239,11 +230,10 @@ test.describe('rc: computer to phone and back, across a dropped tunnel', () => {
     await page.locator('#send').click();
     await expect(allow(page)).toHaveCount(1);
 
-    // The computer types while the phone allows. The bridge runs one task per thread, so the
-    // line typed during the turn is refused; it is typed again when the turn is over.
+    // The computer types while the phone allows. The line is queued behind the turn and runs
+    // after it.
     await Promise.all([computer.type(USER[2]), allow(page).click()]);
     await expect(replies(page).filter({ hasText: AGENT[2] })).toHaveCount(1);
-    await typeUnlessLogged(USER[2]);
     await expect(replies(page).filter({ hasText: AGENT[3] })).toHaveCount(1);
     await expect(users(page)).toHaveText(USER.slice(0, 3));
 
@@ -277,7 +267,6 @@ test.describe('rc: computer to phone and back, across a dropped tunnel', () => {
     await computer.ask('restore');
     await expect.poll(() => presence(machine.machine_id), { timeout: 30_000 }).toBe('online');
     await expect(replies(page).filter({ hasText: AGENT[5] })).toHaveCount(1);
-    await typeUnlessLogged(USER[4]);
     await expect(replies(page).filter({ hasText: AGENT[6] })).toHaveCount(1);
   });
 
