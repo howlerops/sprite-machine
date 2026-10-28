@@ -40,19 +40,32 @@ pub struct CodeRow {
     pub invite_ids: String,
 }
 
-/// Drops expired authorize requests and codes.
-pub async fn purge_expired(db: &impl Db, now_ms: i64) -> Result<(), DbError> {
-    db.execute(
-        "DELETE FROM oauth_requests WHERE expires_at_ms < ?",
-        &[now_ms.into()],
-    )
-    .await?;
-    db.execute(
-        "DELETE FROM oauth_codes WHERE expires_at_ms < ?",
-        &[now_ms.into()],
-    )
-    .await
-    .map(|_| ())
+/// A user an admin created with a login and no GitHub id can be linked by that login only while
+/// they are younger than this (a GitHub login can be renamed and re-registered by someone else).
+pub const LINK_BY_LOGIN_MAX_AGE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// Drops expired authorize requests, codes and invites. Returns the rows deleted
+/// `(requests, codes, invites)`.
+pub async fn purge_expired(db: &impl Db, now_ms: i64) -> Result<(u64, u64, u64), DbError> {
+    let requests = db
+        .execute(
+            "DELETE FROM oauth_requests WHERE expires_at_ms < ?",
+            &[now_ms.into()],
+        )
+        .await?;
+    let codes = db
+        .execute(
+            "DELETE FROM oauth_codes WHERE expires_at_ms < ?",
+            &[now_ms.into()],
+        )
+        .await?;
+    let invites = db
+        .execute(
+            "DELETE FROM org_invites WHERE expires_at_ms < ?",
+            &[now_ms.into()],
+        )
+        .await?;
+    Ok((requests, codes, invites))
 }
 
 pub async fn insert_request(db: &impl Db, request: &NewRequest<'_>) -> Result<(), DbError> {
@@ -121,16 +134,20 @@ pub async fn user_by_github_id(db: &impl Db, github_id: i64) -> Result<Option<St
     rows.first().map(|row| text(row, "id")).transpose()
 }
 
-/// Links a user who has this login and no GitHub id yet. `login` is lowercase.
+/// Links a user who has this login, no GitHub id yet, and was created less than
+/// [`LINK_BY_LOGIN_MAX_AGE_MS`] before `now_ms`. `login` is lowercase.
 pub async fn link_user_by_login(
     db: &impl Db,
     github_id: i64,
     login: &str,
+    now_ms: i64,
 ) -> Result<Option<String>, DbError> {
+    let oldest_secs = (now_ms - LINK_BY_LOGIN_MAX_AGE_MS).div_euclid(1000);
     let rows = db
         .query(
-            "SELECT id FROM users WHERE github_id IS NULL AND lower(github_login) = ?",
-            &[login.into()],
+            "SELECT id FROM users WHERE github_id IS NULL AND lower(github_login) = ? \
+             AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?, 'unixepoch')",
+            &[login.into(), oldest_secs.into()],
         )
         .await?;
     let Some(id) = rows.first().map(|row| text(row, "id")).transpose()? else {

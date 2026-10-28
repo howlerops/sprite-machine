@@ -298,6 +298,17 @@ before it stores the token.
 | `PATCH /v1/members/{user_id}` `{ role }` | admin | never above your own role, never yourself, 404 for another org's user |
 | `DELETE /v1/members/{user_id}` | admin | same limits; the member's sessions in the org end at once |
 
+**Hardening** (M2-003e):
+
+- `authorize` is unauthenticated and writes a row, so it is limited per `CF-Connecting-IP`: 10 starts
+  per minute, then **429 `rate_limited`** with `Retry-After`. No such header (local dev) means no limit.
+- The hourly cron deletes expired `oauth_requests`, `oauth_codes` and `org_invites` rows.
+- A GitHub login can be renamed and re-registered, so a login alone proves little. A user an admin
+  created with a login and no GitHub id is **linked by login only if the user is younger than 7 days**;
+  the link is audited (`auth.github.link`). An older one is never linked by login: that sign-in is
+  refused like an unknown account (`access_denied`) unless it has an open invite, in which case a new
+  user is created and the stale user loses the login. Once linked, the account is known by its GitHub id.
+
 An invite is accepted by the first GitHub sign-in of that account, which makes it a member with the
 invite's role. Every mutation is audited (`member.invite`, `member.invite.revoke`, `member.role`,
 `member.remove`).
