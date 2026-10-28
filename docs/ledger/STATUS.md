@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 58/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 55/120
+done 59/219 (3 dropped) · in-flight M2-008c,M1A-006d,M2B-011a · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 56/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 58/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (hu
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 40 | 5 | 3 |
+| P2 | 40 | 6 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -33,7 +33,7 @@ done 58/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (hu
 | M2-008c | worker | rust | assigned | hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO |
 | MVP-000d | worker | rust | todo | Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer |
 | M2B-004a | worker | rust | done | Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight |
-| M2B-004b | worker | rust | assigned | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
+| M2B-004b | worker | rust | done | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
 | M2B-004c | worker | rust | todo | runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads |
 | M1A-006d | worker | rust | assigned | Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key |
 | SPEC-004 | leader | docs | done | Spec: dispatch/session carry per-thread MCP servers; an interrupt outcome / RunError code for "agent gone" (harness_exited) instead of expired |
@@ -52,7 +52,7 @@ done 58/219 (3 dropped) · in-flight M2-008c,M2B-004b,M1A-006d · blocked 11 (hu
 | M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |
 | M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |
 | M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |
-| M2B-011a | worker | rust | todo | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
+| M2B-011a | worker | rust | assigned | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
 | M2B-012 | worker | rust | todo | Attachments from phone → local files / image blocks |
 | M2B-014 | worker | rust | todo | Presence + reconnect notifications on the phone |
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |

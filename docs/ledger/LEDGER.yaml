@@ -2077,7 +2077,8 @@ items:
     title: 'runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite)'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged adcf82c; runner tests all ok on merged tree (tunnel_tls 5, tunnel_client 37, tls unit 3), no openssl-sys, clippy clean, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2660,6 +2661,9 @@ items:
     title: 'runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":")'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: low
