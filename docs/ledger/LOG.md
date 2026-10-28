@@ -182,3 +182,4 @@
 2026-10-28T11:15Z M2B-005a → done (verify9). M2-011 and M2-010 merged (leader resolved union conflicts: MIGRATIONS 0007/0008/0010, [[test]] entries, do/thread.rs hooks, router merges). Full verify running (11 live suites)
 2026-10-28T11:15Z M2-003c assigned (sonnet, priority 1)
 2026-10-28T11:35Z leader: post-merge verify found wrangler.toml with two [vars] tables (M2-010 x M2-011 auto-merge) → every hub-test failed at d1 migrations apply. Fixed d3d8e00; M2-003c worker told to merge v2. Workspace tests 759 passed. Re-running the 11 live suites + tracer
+2026-10-28T12:03Z M2-011 → done, M2-010 → done (all 11 live suites + tracer after the wrangler fix). M2-003c merged 721d8e5 (sonnet); leader checked role_cap = min(member role, cap) with Viewer<Member<Admin<Owner. Verify running

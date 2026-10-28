@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 81/241 (3 dropped) · in-flight M2-003c,M2-010,M2-011 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 77/120
+done 83/241 (3 dropped) · in-flight M2-003c · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 77/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 81/241 (3 dropped) · in-flight M2-003c,M2-010,M2-011 · blocked 12 (human:
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 59 | 28 | 3 |
+| P2 | 59 | 30 | 1 |
 | P3 | 20 | 1 | 0 |
 | P4 | 36 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -59,8 +59,8 @@ done 81/241 (3 dropped) · in-flight M2-003c,M2-010,M2-011 · blocked 12 (human:
 | M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
-| M2-010 | worker | rust | assigned | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
-| M2-011 | worker | rust | assigned | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
+| M2-010 | worker | rust | done | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
+| M2-011 | worker | rust | done | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
 | CI-001 | human | rust | blocked | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
 | M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |

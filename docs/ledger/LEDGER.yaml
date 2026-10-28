@@ -2827,7 +2827,8 @@ items:
     title: 'hub: titles, rename, archive/delete, D1 FTS5 search + deep links'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 07bdfb5 + d3d8e00; workspace 759 passed; live tasks 7 (second org never sees threads, FTS, archive, rename/delete roles) + links 3 PASS with the other 9 suites; tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     deps: [M2-008, M2-016]
@@ -2853,7 +2854,8 @@ items:
     title: 'hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged (07bdfb5 chain) + wrangler [vars] fix d3d8e00; workspace 759 passed; all 11 live hub suites incl. notify 4 (one encrypted VAPID push, ids only; 503 retried; 404/410 delete; prefs) PASS; tracer PASS; RFC 8291 Appendix A vector byte-for-byte"
     attempt: 1
     assignee: "worker:sonnet"
     deps: [M2-008, M2-016]
