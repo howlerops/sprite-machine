@@ -6,6 +6,12 @@ license.workspace = true
 publish = false
 description = "Runner core library: ACP client, bridge, durable store, host modes, keepalive, checkpoints, previews."
 
+[features]
+# TEST ONLY: compiles `FilePolicy::loopback_for_tests`, the attachment fetch policy that allows
+# `http` and loopback. Enabled through `runner`'s `test-support` by the e2e check that needs a
+# local hub (`cli e2e attachments`); no product build enables it.
+test-support = []
+
 [dependencies]
 protocol = { path = "../protocol" }
 anyhow.workspace = true

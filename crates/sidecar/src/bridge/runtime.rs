@@ -8,7 +8,7 @@ use protocol::tunnel::{Command, CommandErrorCode};
 use protocol::turn_event::{Envelope, Event, RunErrorReason, RunOutcome, UserMessage};
 use serde_json::Value;
 
-use super::files::{self, FilePolicy};
+use super::files;
 use super::handler::{Internal, Resources};
 use super::ids::SharedIds;
 use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand, Origin};
@@ -349,7 +349,8 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
 
         // Files are fetched and stored before the prompt is sent; a failure ends the task
         // without the agent seeing the prompt.
-        let blocks = match files::prompt_blocks(&parts, &workspace, &FilePolicy::default()).await {
+        let blocks = match files::prompt_blocks(&parts, &workspace, &self.config.file_policy).await
+        {
             Ok(blocks) => blocks,
             Err(error) => {
                 return self

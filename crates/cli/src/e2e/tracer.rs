@@ -86,7 +86,7 @@ pub async fn run() -> Result<()> {
 }
 
 /// Resolves on Ctrl-C or SIGTERM.
-async fn interrupted() {
+pub(super) async fn interrupted() {
     let ctrl_c = tokio::signal::ctrl_c();
     match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
         Ok(mut term) => {
@@ -103,30 +103,7 @@ async fn interrupted() {
 
 async fn tracer(work: &TempDir) -> Result<()> {
     let hub_dir = hub_dir()?;
-
-    println!(
-        "== worker-build --profile {WASM_PROFILE} ({})",
-        hub_dir.display()
-    );
-    let build_log = work.path.join("worker-build.log");
-    let build_started = Instant::now();
-    let status = wasm_command("worker-build", &hub_dir)
-        .args(["--profile", WASM_PROFILE])
-        .stdout(log_file(&build_log)?)
-        .stderr(log_file_append(&build_log)?)
-        .kill_on_drop(true)
-        .status()
-        .await
-        .context("run worker-build (is worker-build 0.8.7 installed?)")?;
-    if !status.success() {
-        print_tail(&build_log, 40);
-        bail!("worker-build failed: {status}");
-    }
-    println!("built in {:.1}s", build_started.elapsed().as_secs_f64());
-    // The same step as the second command of the wrangler [build] command (MVP-000f).
-    let (before, after) = wasm::strip_file(&hub_dir.join("build/index_bg.wasm"))?;
-    println!("strip-names: index_bg.wasm {before} -> {after} bytes");
-    report_bundle(&hub_dir)?;
+    build_hub(&hub_dir, work).await?;
 
     println!("== d1 migrations (local)");
     migrate(&hub_dir, work)?;
@@ -134,7 +111,7 @@ async fn tracer(work: &TempDir) -> Result<()> {
     let port = free_port()?;
     let base = format!("http://127.0.0.1:{port}");
     println!("== wrangler dev --local on port {port}");
-    let wrangler = Wrangler::start(&hub_dir, port, work)?;
+    let wrangler = Wrangler::start(&hub_dir, port, work, &[])?;
     wrangler.wait_ready(&base).await?;
 
     println!("== runner core (acp-mock + bridge + tunnel) and headless client");
@@ -159,6 +136,34 @@ async fn tracer(work: &TempDir) -> Result<()> {
     );
     println!("second answer to the interrupt: HTTP 409 (first answer wins)");
     Ok(())
+}
+
+/// Builds the hub bundle with worker-build (`WASM_PROFILE`) and strips its names. Shared with
+/// the other hub-backed e2e checks.
+pub(super) async fn build_hub(hub_dir: &Path, work: &TempDir) -> Result<()> {
+    println!(
+        "== worker-build --profile {WASM_PROFILE} ({})",
+        hub_dir.display()
+    );
+    let build_log = work.path.join("worker-build.log");
+    let build_started = Instant::now();
+    let status = wasm_command("worker-build", hub_dir)
+        .args(["--profile", WASM_PROFILE])
+        .stdout(log_file(&build_log)?)
+        .stderr(log_file_append(&build_log)?)
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("run worker-build (is worker-build 0.8.7 installed?)")?;
+    if !status.success() {
+        print_tail(&build_log, 40);
+        bail!("worker-build failed: {status}");
+    }
+    println!("built in {:.1}s", build_started.elapsed().as_secs_f64());
+    // The same step as the second command of the wrangler [build] command (MVP-000f).
+    let (before, after) = wasm::strip_file(&hub_dir.join("build/index_bg.wasm"))?;
+    println!("strip-names: index_bg.wasm {before} -> {after} bytes");
+    report_bundle(hub_dir)
 }
 
 /// Wires acp-mock → bridge → tunnel client in-process and runs the headless client against the
@@ -238,7 +243,7 @@ async fn run_loop(base: &str, machine_id: &str) -> Result<client_core::tracer::O
 }
 
 /// Registers the runner's machine as the dev user: `POST /v1/machines` (client-api.md §5.1).
-async fn create_machine(base: &str) -> Result<String> {
+pub(super) async fn create_machine(base: &str) -> Result<String> {
     let response = reqwest::Client::new()
         .post(format!("{base}/v1/machines"))
         .bearer_auth("dev")
@@ -259,7 +264,7 @@ async fn create_machine(base: &str) -> Result<String> {
 }
 
 /// Applies the hub's D1 migrations to the local database wrangler dev will persist in `work`.
-fn migrate(hub_dir: &Path, work: &TempDir) -> Result<()> {
+pub(super) fn migrate(hub_dir: &Path, work: &TempDir) -> Result<()> {
     let log = work.path.join("d1-migrations.log");
     let status = Command::new("wrangler")
         .current_dir(hub_dir)
@@ -419,7 +424,7 @@ fn shape_of(envelope: &Envelope) -> String {
 /// The hub crate of the checkout the cli runs in, found at run time. Not from
 /// `CARGO_MANIFEST_DIR`: with a shared `CARGO_TARGET_DIR` a cached cli binary built in another
 /// (since deleted) checkout would point at a missing tree.
-fn hub_dir() -> Result<PathBuf> {
+pub(super) fn hub_dir() -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("current dir")?;
     let dir = find_hub_dir(&cwd).ok_or_else(|| {
         anyhow!(
@@ -498,14 +503,14 @@ fn wasm_command(program: &str, dir: &Path) -> tokio::process::Command {
     command
 }
 
-fn free_port() -> Result<u16> {
+pub(super) fn free_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").context("bind a free port")?;
     Ok(listener.local_addr().context("local addr")?.port())
 }
 
 /// `wrangler dev --local`, in its own process group; the whole group (workerd included) is
 /// killed by [`Wrangler::stop`] or, failing that, on drop.
-struct Wrangler {
+pub(super) struct Wrangler {
     child: Option<Child>,
     pgid: i32,
     log: PathBuf,
@@ -513,8 +518,13 @@ struct Wrangler {
 
 impl Wrangler {
     /// wrangler's bundling scratch `crates/hub/.wrangler` stays in the checkout; it is ignored by
-    /// `crates/hub/.gitignore`.
-    fn start(hub_dir: &Path, port: u16, work: &TempDir) -> Result<Self> {
+    /// `crates/hub/.gitignore`. `extra_vars` are passed as `--var NAME:VALUE`.
+    pub(super) fn start(
+        hub_dir: &Path,
+        port: u16,
+        work: &TempDir,
+        extra_vars: &[String],
+    ) -> Result<Self> {
         let log = work.path.join("wrangler.log");
         let persist = work.path.join("persist");
         let mut command = Command::new("wrangler");
@@ -527,6 +537,7 @@ impl Wrangler {
             .arg(&persist)
             // The dev-only routes and the placeholder `Bearer dev` token (DEV_FIXTURES=1).
             .args(["--var", "DEV_FIXTURES:1"])
+            .args(extra_vars.iter().flat_map(|var| ["--var", var.as_str()]))
             .arg("--show-interactive-dev-session=false")
             .env_remove("RUSTFLAGS")
             .env_remove("RUSTC_WRAPPER")
@@ -547,7 +558,7 @@ impl Wrangler {
         })
     }
 
-    async fn wait_ready(&self, base: &str) -> Result<()> {
+    pub(super) async fn wait_ready(&self, base: &str) -> Result<()> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
             .build()
@@ -576,7 +587,7 @@ impl Wrangler {
     }
 
     /// Kills the process group and reaps wrangler. Errors if the group survives SIGKILL.
-    fn stop(mut self) -> Result<()> {
+    pub(super) fn stop(mut self) -> Result<()> {
         self.kill_group();
         ensure!(
             !group_alive(self.pgid),
@@ -631,12 +642,12 @@ fn group_alive(pgid: i32) -> bool {
 // ---- files --------------------------------------------------------------------------------
 
 /// A per-run scratch directory (logs, wrangler `--persist-to`), removed on drop.
-struct TempDir {
-    path: PathBuf,
+pub(super) struct TempDir {
+    pub(super) path: PathBuf,
 }
 
 impl TempDir {
-    fn create() -> Result<Self> {
+    pub(super) fn create() -> Result<Self> {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())

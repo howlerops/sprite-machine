@@ -88,6 +88,34 @@ impl Default for FilePolicy {
     }
 }
 
+impl std::fmt::Debug for FilePolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilePolicy")
+            .field("max_bytes", &self.max_bytes)
+            .field("timeout", &self.timeout)
+            .field(
+                "insecure_loopback_for_tests",
+                &self.insecure_loopback_for_tests,
+            )
+            .field("resolver", &self.resolver.is_some())
+            .finish()
+    }
+}
+
+impl FilePolicy {
+    /// TEST ONLY: the production policy with the test allowance (`http` and loopback) and a
+    /// `max_bytes` cap. Compiled only with the `test-support` feature, which only the e2e check
+    /// enables; `runner::server::run` always uses [`FilePolicy::default`].
+    #[cfg(feature = "test-support")]
+    pub fn loopback_for_tests(max_bytes: u64) -> Self {
+        Self {
+            max_bytes,
+            insecure_loopback_for_tests: true,
+            ..Self::default()
+        }
+    }
+}
+
 /// Why a file part could not become prompt content.
 #[derive(Debug, thiserror::Error)]
 pub enum AttachmentError {

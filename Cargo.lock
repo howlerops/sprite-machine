@@ -1102,11 +1102,13 @@ version = "0.1.0"
 dependencies = [
  "acp-mock",
  "anyhow",
+ "base64 0.22.1",
  "client-core",
  "protocol",
  "reqwest",
  "runner",
  "serde_json",
+ "sha2 0.10.9",
  "sidecar",
  "tokio",
  "tracing",

@@ -10,6 +10,11 @@ description = "The `sm` runner: host modes (local, sandbox), tunnel client, TUI,
 name = "sm"
 path = "src/main.rs"
 
+[features]
+# TEST ONLY: `server::run_with_file_policy`, which takes the loopback attachment policy. Only the
+# e2e check (`cli e2e attachments`) enables it; `sm` never does.
+test-support = ["sidecar/test-support"]
+
 [dependencies]
 protocol = { path = "../protocol" }
 sidecar = { path = "../sidecar" }
