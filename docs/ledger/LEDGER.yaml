@@ -5496,3 +5496,21 @@ items:
       - 'Successive passes visit every hosted thread (native test with 450 threads and 200 per pass: all visited within 3 passes)'
     verify:
       - 'cargo test -p hub'
+
+  - id: M3-001h
+    title: 'client-core: one owner holds the Subscription and the Outbox and publishes the combined connectivity (Connectivity::combine) for the app banner'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-001b]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/banner.rs'
+    context:
+      - 'docs/ledger/reports/M3-001b.md (Discovered work)'
+    acceptance:
+      - 'A client-core type owns both links and exposes a watch/stream of the combined state; test drives subscription and outbox state changes and asserts the published banner sequence'
+    verify:
+      - 'cargo test -p client-core'

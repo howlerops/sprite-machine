@@ -222,3 +222,4 @@
 2026-10-28T15:44Z M2B-014 blocked on paths (my scoping again: notify Kind/prefs + machine DO call site not listed). Leader decisions: Kind machine_back, default on, one job per comeback, debounce persisted in DO storage, leading edge; paths widened; worker resumed on the same attempt. Lesson re-noted: list the call site and the enum an item must extend
 2026-10-28T15:53Z verify18 green → M2-010a done
 2026-10-28T15:54Z P2 left: M2B-014, WEB-003, M2B-005f in flight; WEB-004, M2B-010 wait on WEB-003; M1B-008c leader. Started P3 in parallel within caps: M3-001b, M3-017 (haiku)
+2026-10-28T16:00Z M3-001b back (haiku): next_persisted + Connectivity::combine; its own M3-001g (view advances before the cache append) is a defect in the new function → worker fixes it on the same attempt. Added M3-001h (banner owner)
