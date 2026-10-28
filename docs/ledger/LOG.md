@@ -157,3 +157,4 @@
 2026-10-28T09:38Z M2B-005 → done (verify: hub+runner 251, devices/machine_do/authz live, tracer, no openssl). M1A-006f merged 80b58f8 → done (293 passed, tracer)
 2026-10-28T09:38Z M2B-006 assigned (haiku), M1B-008b assigned (haiku). WEB-001 held until M2-008e lands (hub auth files)
 2026-10-28T09:44Z M2B-006 assigned→done merged b316bb5 (haiku); added M2B-006a (confirm invocations), M2B-006c (MCP command resolution, sse, ${VAR}); M2B-007 acceptance += discovery/MCP wiring. Harness flagged the report as settings-json-shaped: it describes reading ~/.claude.json for MCP servers (the feature); no instructions
+2026-10-28T09:44Z M2B-004e assigned (haiku)

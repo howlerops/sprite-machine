@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 72/231 (3 dropped) · in-flight M1B-008b,M2-008e · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 68/120
+done 72/231 (3 dropped) · in-flight M1B-008b,M2B-004e,M2-008e · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 69/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 72/231 (3 dropped) · in-flight M1B-008b,M2-008e · blocked 11 (human: M0-0
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 51 | 19 | 2 |
+| P2 | 51 | 19 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -42,7 +42,7 @@ done 72/231 (3 dropped) · in-flight M1B-008b,M2-008e · blocked 11 (human: M0-0
 | M2-008d | worker | rust | done | hub authz: POST /v1/threads only for a machine of the caller's org (not revoked); POST /v1/threads in the auth policy table |
 | CI-002 | worker | docs | todo | scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree's hub.wasm stand in) |
 | M1A-006f | worker | rust | done | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
-| M2B-004e | worker | rust | todo | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
+| M2B-004e | worker | rust | assigned | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
 | M2-008e | worker | rust | assigned | hub authz (security): every thread route checks the thread belongs to the caller's org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404 |
 | M1A-006g | worker | rust | todo | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
 | M2B-005a | worker | rust | todo | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
