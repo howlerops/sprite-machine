@@ -267,3 +267,4 @@
 2026-10-28T22:20Z merged-tree verify: sleep_logind release tests flaky (mock's fd closes async) → leader made them wait_for EOF (5/5 pass); e2e rc failed copying current_exe '(deleted)' (MVP-000h strip tool vs shared target) → copy /proc/self/exe on Linux; e2e rc PASS. M2-008j, M2B-019a done. M3-002a back (haiku) → merged; added M3-002c
 2026-10-28T22:21Z assign M2B-019c (sonnet), M2-008i (haiku)
 2026-10-28T22:21Z M3-002a verify green → done
+2026-10-28T22:22Z assign M3-008 (sonnet, client lane). Disk 4 GB after pruning stale test exes (a /tmp sweep was refused by the session check; not retried)

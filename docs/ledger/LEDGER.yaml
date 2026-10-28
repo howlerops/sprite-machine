@@ -3990,6 +3990,9 @@ items:
     title: 'client: task view — transcript, reasoning, tool calls, terminal activity'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     size: M
     deps: [M3-002]
