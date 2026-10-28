@@ -1,0 +1,82 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Run two commands."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_c1",
+          "title": "Run cargo build",
+          "kind": "execute",
+          "status": "pending"
+        }
+      }
+    },
+    {
+      "op": "request_permission",
+      "interrupt_id": "int_1",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "request": {
+        "sessionId": "sess_7f3a",
+        "toolCall": {
+          "toolCallId": "call_c1",
+          "title": "Run cargo build",
+          "kind": "execute",
+          "status": "pending"
+        },
+        "options": [
+          {
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject_once",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    },
+    {
+      "op": "request_permission",
+      "interrupt_id": "int_2",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "request": {
+        "sessionId": "sess_7f3a",
+        "toolCall": {
+          "toolCallId": "call_c2",
+          "title": "Run cargo test",
+          "kind": "execute",
+          "status": "pending"
+        },
+        "options": [
+          {
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject_once",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    },
+    {
+      "op": "error",
+      "code": "harness_exited",
+      "message": "the agent process exited with status 1"
+    }
+  ]
+}

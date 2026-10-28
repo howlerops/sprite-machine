@@ -1082,7 +1082,25 @@ impl<I: IdSource> AcpTurnMapper<I> {
         em.out
     }
 
+    /// The next request (permission or form) buffered during a pause, dropping the updates
+    /// buffered before it. `None` when the task has none left.
+    fn next_queued_interrupt(&mut self) -> Option<Queued> {
+        let task = self.task.as_mut()?;
+        while let Some(queued) = task.queue.pop_front() {
+            if matches!(
+                queued.input,
+                Input::Permission { .. } | Input::Elicitation { .. }
+            ) {
+                return Some(queued);
+            }
+        }
+        None
+    }
+
     /// Ends the task with `RunError` (see [`Self::on_cancel`], [`Self::on_interrupt_expired`]).
+    /// A paused run first resolves its open interrupts (`first` as given, the rest `cancelled`)
+    /// and resumes; each request buffered during the pause is then shown and resolved the same
+    /// way before the task's `RunError`.
     fn abort(
         &mut self,
         ts: &str,
@@ -1093,26 +1111,36 @@ impl<I: IdSource> AcpTurnMapper<I> {
         first: Option<(&str, ResolvedOutcome)>,
     ) -> Vec<Envelope> {
         let mut out = Vec::new();
-        if let Some(task) = &mut self.task
-            && let Phase::Paused { unresolved, .. } = &mut task.phase
-        {
-            let mut em = Emit::new(&self.thread_id, Some(&task.task_id), None, ts);
-            for interrupt_id in std::mem::take(unresolved) {
-                let outcome = match &first {
-                    Some((id, outcome)) if *id == interrupt_id => outcome.clone(),
-                    _ => ResolvedOutcome::Cancelled,
-                };
-                em.task(
-                    te::InterruptResolved {
-                        interrupt_id,
-                        outcome,
-                        resolved_by: resolved_by.clone(),
-                    },
-                    None,
-                );
+        let mut first = first;
+        loop {
+            if let Some(task) = &mut self.task
+                && let Phase::Paused { unresolved, .. } = &mut task.phase
+            {
+                let mut em = Emit::new(&self.thread_id, Some(&task.task_id), None, ts);
+                for interrupt_id in std::mem::take(unresolved) {
+                    let outcome = match &first {
+                        Some((id, outcome)) if *id == interrupt_id => outcome.clone(),
+                        _ => ResolvedOutcome::Cancelled,
+                    };
+                    em.task(
+                        te::InterruptResolved {
+                            interrupt_id,
+                            outcome,
+                            resolved_by: resolved_by.clone(),
+                        },
+                        None,
+                    );
+                }
+                first = None;
+                out.extend(em.out);
+                out.extend(self.resume_run(ts));
             }
-            out.extend(em.out);
-            out.extend(self.resume_run(ts));
+            // A request the agent sent while the run was paused is still open to the agent:
+            // it is shown in a run of its own and resolved the same way (§5 rule 6).
+            let Some(queued) = self.next_queued_interrupt() else {
+                break;
+            };
+            out.extend(self.process(queued.input, &queued.ts));
         }
         out.extend(
             self.end_run(
