@@ -6486,6 +6486,7 @@ dependencies = [
  "anyhow",
  "futures-util",
  "protocol",
+ "reqwest",
  "serde_json",
  "sidecar",
  "tokio",

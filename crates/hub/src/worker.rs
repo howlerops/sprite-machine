@@ -9,6 +9,8 @@
 //!
 //! - `GET /healthz`: build info (`{"name","version"}`).
 //! - `/v1/threads/...` and `/v1/dev/threads/...`: the Thread DO routes (M2-008, `threads/routes.rs`).
+//! - `/v1/machines/...` and `/v1/dev/machines/...`: the machine admin API and the runner tunnel to
+//!   the Machine DO (M2B-002, `machines/routes.rs`).
 //! - tracer routes (MVP-000, NO AUTH, see `tracer/worker.rs`), forwarded to the `TracerHub`
 //!   Durable Object. `GET /health` is the tracer's liveness probe (`cli e2e tracer` polls it).
 //! - anything else: `404` with the client-api.md §4 error body.
@@ -46,6 +48,7 @@ pub fn router(env: Env) -> Router {
         .route("/healthz", get(healthz))
         .merge(crate::auth::routes::auth_routes())
         .merge(crate::threads::routes::thread_routes())
+        .merge(crate::machines::routes::machine_routes())
         .merge(tracer_routes())
         .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)
@@ -108,14 +111,14 @@ async fn observe(req: Request, next: Next) -> Response {
     response
 }
 
-// ---- tracer routes (MVP-000 stub; replaced by M2-008 + M2B-002) ----------------------------
+// ---- tracer routes (MVP-000 stub; the tunnel is the Machine DO's since M2B-002) -------------
 
 /// The tracer's routes. Each one forwards the request, WebSocket upgrades included, to the
-/// `TracerHub` Durable Object (`tracer/worker.rs`), which does the work.
+/// `TracerHub` Durable Object (`tracer/worker.rs`), which does the work. The runner's tunnel is
+/// not one of them any more: `/v1/machines/{id}/tunnel` is a Machine DO route.
 fn tracer_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .route("/v1/machines/{machine_id}/tunnel", get(to_hub))
         .route("/threads/{thread_id}/subscribe", get(to_hub))
         .route("/threads/{thread_id}/prompts", post(to_hub))
         .route(
