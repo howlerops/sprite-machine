@@ -110,3 +110,5 @@
 2026-10-28T05:37Z M2B-002 review→done (workspace tests, live machine_do/thread_do/authz, tracer green on merged tree)
 2026-10-28T05:46Z M2B-011 assigned→done merged 8c932b6 (haiku; one denied stray interrupt_session call); added M2B-011a (refname encoding + CAS)
 2026-10-28T05:46Z M1A-014a paths += runtime.rs (test FilePolicy injection only); assigned (haiku)
+2026-10-28T06:02Z leader: disk hit 100% (shared 13G + leader private target 9.5G); removed the leader target. Leader private target is wiped after each verify from now on
+2026-10-28T06:02Z M1B-008a assigned→done merged 3e50593 (haiku; tracer not re-run: spikes/ is outside the workspace). Notes for M1B-008c: frame t_us is post-present hook time, marker = shell+focused composer (not first rows)

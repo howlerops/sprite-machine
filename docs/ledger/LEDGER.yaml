@@ -1586,7 +1586,8 @@ items:
     title: 'gpui spike: bench hooks (fixture feed, BENCH_MARKER, frame and key-to-glyph JSONL)'
     milestone: M1b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 3e50593; leader re-ran on merged tree (worker's post-fmt run hit the full disk): spike tests 64 lib + 9 test bins all ok, clippy clean, dry-run ok; worker real xvfb run: 1 marker line, 517 frame lines, window gpui-spike"
     attempt: 1
     assignee: "worker:haiku"
     lane: client
