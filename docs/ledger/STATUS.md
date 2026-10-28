@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 63/224 (3 dropped) · in-flight M1A-006e,M2-008d,M2-009 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 60/120
+done 65/224 (3 dropped) · in-flight M2-008b,MVP-000d,M2B-004d,M2-008d · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 63/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 63/224 (3 dropped) · in-flight M1A-006e,M2-008d,M2-009 · blocked 11 (huma
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 44 | 10 | 3 |
+| P2 | 44 | 12 | 4 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -29,21 +29,21 @@ done 63/224 (3 dropped) · in-flight M1A-006e,M2-008d,M2-009 · blocked 11 (huma
 | M1B-008b | worker | client | todo | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
 | M1B-008c | leader | docs | todo | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
 | M1B-009 | leader | docs | todo | ADR 0001a: desktop client stack (no devices needed) |
-| M2-008b | worker | rust | todo | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
+| M2-008b | worker | rust | assigned | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
 | M2-008c | worker | rust | done | hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO |
-| MVP-000d | worker | rust | todo | Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer |
+| MVP-000d | worker | rust | assigned | Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer |
 | M2B-004a | worker | rust | done | Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight |
 | M2B-004b | worker | rust | done | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
 | M2B-004c | worker | rust | done | runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads |
 | M1A-006d | worker | rust | done | Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key |
 | SPEC-004 | leader | docs | done | Spec: dispatch/session carry per-thread MCP servers; an interrupt outcome / RunError code for "agent gone" (harness_exited) instead of expired |
-| M1A-006e | worker | rust | assigned | Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config |
-| M2B-004d | worker | rust | todo | runner: OS sleep hook calls SleepHint::asleep (macOS willSleep, Linux logind PrepareForSleep); TunnelSink tracks opened threads (thread_open once per thread, events for an unopened local thread refused) |
+| M1A-006e | worker | rust | done | Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config |
+| M2B-004d | worker | rust | assigned | runner: OS sleep hook calls SleepHint::asleep (macOS willSleep, Linux logind PrepareForSleep); TunnelSink tracks opened threads (thread_open once per thread, events for an unopened local thread refused) |
 | M2-008d | worker | rust | assigned | hub authz: POST /v1/threads only for a machine of the caller's org (not revoked); POST /v1/threads in the auth policy table |
 | CI-002 | worker | docs | todo | scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree's hub.wasm stand in) |
 | M1A-006f | worker | rust | todo | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
-| M2-009 | worker | rust | assigned | hub: attachments in R2 + signed URLs |
+| M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | todo | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
 | M2-011 | worker | rust | todo | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
 | CI-001 | human | rust | blocked | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |

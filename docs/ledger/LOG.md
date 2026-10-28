@@ -141,3 +141,5 @@
 2026-10-28T08:14Z M2-008c → done (verify green). M2-008d assigned (sonnet, high)
 2026-10-28T08:15Z M2-009 merged (haiku) + leader e676b37: removed the in-source dev signing key fallback; hub-test.sh passes a random per-run ATTACHMENT_SIGNING_KEY. Added M2-009a (D1 idempotency, sweep). Verify running
 2026-10-28T08:15Z M1A-006e merged (haiku); criterion 1 (tracer spawn_with) blocked by paths → M1A-006f
+2026-10-28T08:26Z M2-009 → done, M1A-006e → done (verify: 379 passed, live attachments/thread_do/authz, tracer). M2-008d merged 78f8606 (sonnet), verify running
+2026-10-28T08:26Z MVP-000d paths widened (sidecar tracer, hub machines HostKind::Tracer, wrangler DO deletion migration, tests); assigned (sonnet). M2-008b paths += sidecar session_config test; assigned (haiku). M2B-004d assigned (haiku). M1A-006f deps += MVP-000d

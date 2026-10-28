@@ -1952,12 +1952,16 @@ items:
     title: 'hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     priority: 2
     deps: [M1A-013, M2B-002]
     paths:
-      - crates/hub/src/threads/**
-      - crates/hub/tests/thread_session.rs
-      - crates/acp-mock/**
+      - "crates/hub/src/threads/**"
+      - "crates/hub/tests/thread_session.rs"
+      - "crates/acp-mock/**"
+      - "crates/sidecar/tests/session_config.rs"
     context:
       - 'docs/specs/client-api.md §5.5a, docs/specs/tunnel.md §3.5 session_config'
       - 'docs/ledger/reports/M1A-013.md (discovered 1, 2)'
@@ -2003,17 +2007,26 @@ items:
     title: 'Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     lane: rust
     size: L
     risk: high
     deps: [M2B-004, M2-008c]
     paths:
-      - 'crates/hub/src/tracer/**'
-      - 'crates/hub/src/worker.rs'
-      - 'crates/client-core/src/tracer*'
-      - 'crates/cli/src/e2e/**'
-      - 'crates/runner/src/tracer.rs'
-      - 'crates/sidecar/src/bridge/**'
+      - "crates/hub/src/tracer/**"
+      - "crates/hub/src/worker.rs"
+      - "crates/hub/src/lib.rs"
+      - "crates/hub/src/machines/**"
+      - "crates/hub/wrangler.toml"
+      - "crates/hub/tests/**"
+      - "crates/client-core/src/tracer*"
+      - "crates/cli/src/e2e/**"
+      - "crates/runner/src/tracer.rs"
+      - "crates/sidecar/src/tracer.rs"
+      - "crates/sidecar/src/bridge/**"
+      - "crates/sidecar/tests/**"
     context:
       - 'docs/specs/client-api.md §6 (hub emits UserMessage)'
       - 'docs/ledger/reports/M2B-002.md, M2B-004.md'
@@ -2175,7 +2188,8 @@ items:
     title: 'Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config'
     milestone: M1a
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged bf1263b; criteria 2-5 met (bridge_robust 7, acp-mock recording 4, applied-keys prune tests), verified in the same run (379 passed, tracer PASS); criterion 1 (tracer spawn_with) blocked by paths -> M1A-006f"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2207,6 +2221,9 @@ items:
     title: 'runner: OS sleep hook calls SleepHint::asleep (macOS willSleep, Linux logind PrepareForSleep); TunnelSink tracks opened threads (thread_open once per thread, events for an unopened local thread refused)'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: low
@@ -2281,7 +2298,9 @@ items:
     lane: rust
     size: M
     risk: medium
-    deps: [M1A-006e]
+    deps:
+      - "M1A-006e"
+      - "MVP-000d"
     paths:
       - 'crates/sidecar/src/tracer.rs'
       - 'crates/cli/src/e2e/tracer*'
@@ -2353,7 +2372,8 @@ items:
     title: 'hub: attachments in R2 + signed URLs'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 5bffe9d + leader e676b37 (no signing key in source; random per-run key in hub-test.sh); hub+sidecar+acp-mock+runner 379 passed 0 failed, clippy native/live/wasm clean, no tokio runtime, hub-test attachments 6 / thread_do 7 / authz 10, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     deps: [M2-003a, M2-008]
