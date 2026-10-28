@@ -1,0 +1,510 @@
+//! The task transcript: the ordered items a task produced, built from its TurnEvents
+//! (turn-event.md §4). Every item is an upsert keyed by its id, so a replayed or duplicated
+//! event never adds a second item.
+
+use std::collections::HashMap;
+
+use protocol::tunnel::{Actor, ContentPart};
+use protocol::turn_event::{
+    Activity, ActivityMode, ActivityType, Checkpoint, DiffContent, Event, Interrupt, InterruptKind,
+    InterruptOption, InterruptResolved, Location, PlanContent, PolicyContent, TerminalContent,
+    ToolCallEndStatus, ToolKind,
+};
+use serde_json::{Map, Value};
+
+use crate::patch;
+
+use super::ViewError;
+
+/// One thing shown in a task's transcript, in the order it first appeared.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Item {
+    User(UserView),
+    /// An assistant message, streamed by `message_id`.
+    Text(TextView),
+    /// A reasoning block, streamed by `message_id`.
+    Reasoning(TextView),
+    /// A tool call, upserted by `tool_call_id`.
+    Tool(Box<ToolView>),
+    /// A diff, plan, terminal or policy activity, keyed by `activity_id`.
+    Activity(ActivityView),
+    /// An interrupt (approval, form or auth) and its resolution, if any.
+    Interrupt(Box<InterruptView>),
+    Checkpoint(Checkpoint),
+    /// A `RunError`: the run was cancelled or failed.
+    Error {
+        code: Option<String>,
+        message: String,
+    },
+}
+
+/// The prompt that opened the task.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserView {
+    pub message_id: String,
+    /// Text parts joined; file parts are shown by name.
+    pub text: String,
+    pub author: Actor,
+}
+
+/// A streamed message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextView {
+    pub message_id: String,
+    pub text: String,
+    /// `false` after the matching `*End`.
+    pub open: bool,
+}
+
+/// Where a tool call stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// A tool call, merged from its `ToolCallStart`, `Args`, `Result` and `End` events.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolView {
+    pub tool_call_id: String,
+    pub title: Option<String>,
+    pub kind: Option<ToolKind>,
+    pub status: ToolStatus,
+    pub locations: Vec<Location>,
+    pub parent_message_id: Option<String>,
+    pub raw_input: Option<Value>,
+    pub content: Vec<ContentPart>,
+    pub raw_output: Option<Value>,
+}
+
+impl ToolView {
+    /// `true` until the tool call's `ToolCallEnd`.
+    pub fn is_open(&self) -> bool {
+        matches!(self.status, ToolStatus::Pending | ToolStatus::InProgress)
+    }
+}
+
+/// An activity as the stored content object, with its typed accessors.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityView {
+    pub activity_id: String,
+    pub activity_type: ActivityType,
+    /// The current content object (snapshot replaced, append concatenated, patch applied).
+    pub content: Map<String, Value>,
+    /// `false` while a chunked diff still has chunks to come.
+    pub complete: bool,
+}
+
+impl ActivityView {
+    pub fn diff(&self) -> Option<DiffContent> {
+        self.typed()
+    }
+
+    pub fn plan(&self) -> Option<PlanContent> {
+        self.typed()
+    }
+
+    pub fn terminal(&self) -> Option<TerminalContent> {
+        self.typed()
+    }
+
+    pub fn policy(&self) -> Option<PolicyContent> {
+        self.typed()
+    }
+
+    fn typed<T: serde::de::DeserializeOwned>(&self) -> Option<T> {
+        serde_json::from_value(Value::Object(self.content.clone())).ok()
+    }
+}
+
+/// A local answer that the outbound queue is still delivering (see `outbox`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalAnswer {
+    /// Queued or being retried; the hub has not answered yet.
+    Pending,
+    /// The queue gave up on this answer (for example, the interrupt expired).
+    Failed { message: String },
+}
+
+/// An interrupt and everything known about its answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterruptView {
+    pub interrupt: Interrupt,
+    /// The first accepted answer, from the hub's `InterruptResolved`.
+    pub resolution: Option<InterruptResolved>,
+    /// Set when the hub answered `409 already_resolved`: who won (client-api.md §4).
+    pub conflict: Option<Actor>,
+    /// This device's own answer, while it is queued.
+    pub local: Option<LocalAnswer>,
+}
+
+impl InterruptView {
+    pub fn id(&self) -> &str {
+        &self.interrupt.interrupt_id
+    }
+
+    pub fn kind(&self) -> InterruptKind {
+        self.interrupt.kind
+    }
+
+    pub fn options(&self) -> &[InterruptOption] {
+        self.interrupt.options.as_deref().unwrap_or(&[])
+    }
+
+    /// `true` while nobody has answered, as far as this client knows (a 409 counts as answered).
+    pub fn is_open(&self) -> bool {
+        self.resolution.is_none() && self.conflict.is_none()
+    }
+
+    /// Who answered, as far as this client knows: the hub's resolver, else the 409 winner.
+    pub fn resolved_by(&self) -> Option<&Actor> {
+        self.resolution
+            .as_ref()
+            .map(|resolution| &resolution.resolved_by)
+            .or(self.conflict.as_ref())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Key {
+    User(String),
+    Text(String),
+    Reasoning(String),
+    Tool(String),
+    Activity(String),
+    Interrupt(String),
+    Checkpoint(String),
+}
+
+/// The transcript of one task. Items keep first-appearance order.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Transcript {
+    items: Vec<Item>,
+    index: HashMap<Key, usize>,
+}
+
+impl Transcript {
+    pub fn items(&self) -> &[Item] {
+        &self.items
+    }
+
+    pub fn interrupt(&self, interrupt_id: &str) -> Option<&InterruptView> {
+        match self.index.get(&Key::Interrupt(interrupt_id.to_owned())) {
+            Some(&slot) => match &self.items[slot] {
+                Item::Interrupt(view) => Some(view),
+                _ => None,
+            },
+            None => None,
+        }
+    }
+
+    pub fn interrupts(&self) -> impl Iterator<Item = &InterruptView> {
+        self.items.iter().filter_map(|item| match item {
+            Item::Interrupt(view) => Some(view.as_ref()),
+            _ => None,
+        })
+    }
+
+    /// Applies one TurnEvent. Events that are not transcript items are ignored.
+    pub fn apply(&mut self, event: &Event) -> Result<(), ViewError> {
+        match event {
+            Event::UserMessage(message) => {
+                let key = Key::User(message.message_id.clone());
+                if !self.index.contains_key(&key) {
+                    let view = UserView {
+                        message_id: message.message_id.clone(),
+                        text: join_parts(&message.parts),
+                        author: message.author.clone(),
+                    };
+                    self.push(key, Item::User(view));
+                }
+            }
+            Event::TextMessageStart(start) => {
+                self.text_slot(Key::Text(start.message_id.clone()));
+            }
+            Event::TextMessageContent(content) => {
+                let slot = self.text_slot(Key::Text(content.message_id.clone()));
+                if let Item::Text(view) = &mut self.items[slot] {
+                    view.text.push_str(&content.delta);
+                }
+            }
+            Event::TextMessageEnd(end) => {
+                self.close_text(Key::Text(end.message_id.clone()));
+            }
+            Event::ReasoningMessageStart(start) => {
+                self.reasoning_slot(Key::Reasoning(start.message_id.clone()));
+            }
+            Event::ReasoningMessageContent(content) => {
+                let slot = self.reasoning_slot(Key::Reasoning(content.message_id.clone()));
+                if let Item::Reasoning(view) = &mut self.items[slot] {
+                    view.text.push_str(&content.delta);
+                }
+            }
+            Event::ReasoningMessageEnd(end) => {
+                self.close_text(Key::Reasoning(end.message_id.clone()));
+            }
+            Event::ToolCallStart(start) => {
+                let slot = self.tool_slot(&start.tool_call_id);
+                if let Item::Tool(tool) = &mut self.items[slot] {
+                    if let Some(title) = &start.title {
+                        tool.title = Some(title.clone());
+                    }
+                    if let Some(kind) = start.kind {
+                        tool.kind = Some(kind);
+                    }
+                    if let Some(locations) = &start.locations {
+                        tool.locations = locations.clone();
+                    }
+                    if let Some(parent) = &start.parent_message_id {
+                        tool.parent_message_id = Some(parent.clone());
+                    }
+                    // Once ToolCallEnd closed the call, nothing may reopen it (§5 rule 5).
+                    if let (true, Some(status)) = (tool.is_open(), start.status) {
+                        tool.status = match status {
+                            protocol::turn_event::ToolCallOpenStatus::Pending => {
+                                ToolStatus::Pending
+                            }
+                            protocol::turn_event::ToolCallOpenStatus::InProgress => {
+                                ToolStatus::InProgress
+                            }
+                        };
+                    }
+                }
+            }
+            Event::ToolCallArgs(args) => {
+                let slot = self.tool_slot(&args.tool_call_id);
+                if let Item::Tool(tool) = &mut self.items[slot] {
+                    tool.raw_input = Some(args.raw_input.clone());
+                }
+            }
+            Event::ToolCallResult(result) => {
+                let slot = self.tool_slot(&result.tool_call_id);
+                if let Item::Tool(tool) = &mut self.items[slot] {
+                    tool.content = result.content.clone();
+                    tool.raw_output = result.raw_output.clone();
+                }
+            }
+            Event::ToolCallEnd(end) => {
+                let slot = self.tool_slot(&end.tool_call_id);
+                if let Item::Tool(tool) = &mut self.items[slot] {
+                    tool.status = match end.status {
+                        ToolCallEndStatus::Completed => ToolStatus::Completed,
+                        ToolCallEndStatus::Failed => ToolStatus::Failed,
+                    };
+                }
+            }
+            Event::Activity(activity) => self.apply_activity(activity)?,
+            Event::Interrupt(interrupt) => {
+                let key = Key::Interrupt(interrupt.interrupt_id.clone());
+                if !self.index.contains_key(&key) {
+                    let view = InterruptView {
+                        interrupt: (**interrupt).clone(),
+                        resolution: None,
+                        conflict: None,
+                        local: None,
+                    };
+                    self.push(key, Item::Interrupt(Box::new(view)));
+                }
+            }
+            Event::InterruptResolved(resolved) => {
+                let key = Key::Interrupt(resolved.interrupt_id.clone());
+                let found = self.index.get(&key).map(|&slot| &mut self.items[slot]);
+                if let Some(Item::Interrupt(view)) = found {
+                    // The first accepted answer is the one that counts.
+                    if view.resolution.is_none() {
+                        view.resolution = Some(resolved.clone());
+                    }
+                    view.local = None;
+                }
+            }
+            Event::Checkpoint(checkpoint) => {
+                let key = Key::Checkpoint(checkpoint.checkpoint_id.clone());
+                if !self.index.contains_key(&key) {
+                    self.push(key, Item::Checkpoint(checkpoint.clone()));
+                }
+            }
+            Event::RunError(error) => {
+                self.items.push(Item::Error {
+                    code: error.code.clone(),
+                    message: error.message.clone(),
+                });
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Records the `409` winner for an interrupt this device answered. Returns `false` if the
+    /// transcript has no such interrupt.
+    pub fn note_conflict(&mut self, interrupt_id: &str, resolved_by: Actor) -> bool {
+        match self.interrupt_mut(interrupt_id) {
+            Some(view) => {
+                view.conflict = Some(resolved_by);
+                view.local = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sets (or clears, with `None`) this device's pending answer to an interrupt.
+    pub fn set_local_answer(&mut self, interrupt_id: &str, local: Option<LocalAnswer>) -> bool {
+        match self.interrupt_mut(interrupt_id) {
+            Some(view) => {
+                view.local = local;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn interrupt_mut(&mut self, interrupt_id: &str) -> Option<&mut InterruptView> {
+        let slot = *self.index.get(&Key::Interrupt(interrupt_id.to_owned()))?;
+        match &mut self.items[slot] {
+            Item::Interrupt(view) => Some(view.as_mut()),
+            _ => None,
+        }
+    }
+
+    fn push(&mut self, key: Key, item: Item) -> usize {
+        let slot = self.items.len();
+        self.items.push(item);
+        self.index.insert(key, slot);
+        slot
+    }
+
+    fn text_slot(&mut self, key: Key) -> usize {
+        if let Some(&slot) = self.index.get(&key) {
+            return slot;
+        }
+        let id = match &key {
+            Key::Text(id) => id.clone(),
+            _ => String::new(),
+        };
+        self.push(
+            key,
+            Item::Text(TextView {
+                message_id: id,
+                text: String::new(),
+                open: true,
+            }),
+        )
+    }
+
+    fn reasoning_slot(&mut self, key: Key) -> usize {
+        if let Some(&slot) = self.index.get(&key) {
+            return slot;
+        }
+        let id = match &key {
+            Key::Reasoning(id) => id.clone(),
+            _ => String::new(),
+        };
+        self.push(
+            key,
+            Item::Reasoning(TextView {
+                message_id: id,
+                text: String::new(),
+                open: true,
+            }),
+        )
+    }
+
+    fn close_text(&mut self, key: Key) {
+        if let Some(&slot) = self.index.get(&key) {
+            match &mut self.items[slot] {
+                Item::Text(view) | Item::Reasoning(view) => view.open = false,
+                _ => {}
+            }
+        }
+    }
+
+    fn tool_slot(&mut self, tool_call_id: &str) -> usize {
+        let key = Key::Tool(tool_call_id.to_owned());
+        if let Some(&slot) = self.index.get(&key) {
+            return slot;
+        }
+        self.push(
+            key,
+            Item::Tool(Box::new(ToolView {
+                tool_call_id: tool_call_id.to_owned(),
+                title: None,
+                kind: None,
+                status: ToolStatus::Pending,
+                locations: Vec::new(),
+                parent_message_id: None,
+                raw_input: None,
+                content: Vec::new(),
+                raw_output: None,
+            })),
+        )
+    }
+
+    fn apply_activity(&mut self, activity: &Activity) -> Result<(), ViewError> {
+        let key = Key::Activity(activity.activity_id.clone());
+        let slot = match self.index.get(&key) {
+            Some(&slot) => slot,
+            None => self.push(
+                key,
+                Item::Activity(ActivityView {
+                    activity_id: activity.activity_id.clone(),
+                    activity_type: activity.activity_type,
+                    content: Map::new(),
+                    complete: true,
+                }),
+            ),
+        };
+        let Item::Activity(view) = &mut self.items[slot] else {
+            return Ok(());
+        };
+        view.activity_type = activity.activity_type;
+        let incoming = activity.content.clone().unwrap_or_default();
+        view.complete = incoming
+            .get("chunk")
+            .and_then(|chunk| chunk.get("last"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        match activity.mode {
+            ActivityMode::Snapshot => view.content = incoming,
+            ActivityMode::Append => {
+                for (name, value) in incoming {
+                    let concatenated = match (name.as_str(), view.content.get(&name), &value) {
+                        ("output" | "new_text", Some(Value::String(old)), Value::String(new)) => {
+                            Some(Value::String(format!("{old}{new}")))
+                        }
+                        _ => None,
+                    };
+                    view.content.insert(name, concatenated.unwrap_or(value));
+                }
+            }
+            ActivityMode::Patch => {
+                let mut document = Value::Object(std::mem::take(&mut view.content));
+                let ops = activity.patch.as_deref().unwrap_or(&[]);
+                let applied = patch::apply(&mut document, ops);
+                view.content = patch::as_object(document);
+                applied?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Text parts joined with newlines, file parts shown by name.
+fn join_parts(parts: &[ContentPart]) -> String {
+    let mut out = String::new();
+    for part in parts {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        match part {
+            ContentPart::Text { text } => out.push_str(text),
+            ContentPart::File { name, .. } => {
+                out.push_str("[file: ");
+                out.push_str(name);
+                out.push(']');
+            }
+        }
+    }
+    out
+}
