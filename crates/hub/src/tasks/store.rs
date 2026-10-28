@@ -57,6 +57,85 @@ pub async fn upsert(db: &impl Db, org_id: &str, row: &IndexRow) -> Result<(), Db
     Ok(())
 }
 
+/// The fields of a stored index row that the reconcile compares with the Thread DO's view.
+/// `last_seq` and `updated_at` are not among them: they move only at index-changing events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredIndex {
+    pub status: String,
+    pub title: String,
+    pub machine_id: String,
+    pub agent: String,
+    pub workspace_path: String,
+    pub archived: bool,
+    pub deleted: bool,
+}
+
+impl StoredIndex {
+    /// `true` when the stored row already says what `row` says.
+    pub fn is_current(&self, row: &IndexRow) -> bool {
+        self.status == row.status
+            && self.title == row.title
+            && self.machine_id == row.machine_id
+            && self.agent == row.agent
+            && self.workspace_path == row.workspace_path
+            && self.archived == row.archived
+            && self.deleted == row.deleted
+    }
+}
+
+/// The thread's stored index row in `org_id`, or `None` when it has none.
+pub async fn stored(
+    db: &impl Db,
+    org_id: &str,
+    thread_id: &str,
+) -> Result<Option<StoredIndex>, DbError> {
+    let rows = db
+        .query(
+            "SELECT status, title, machine_id, agent, workspace_path, \
+             archived_at IS NOT NULL AS archived, deleted_at IS NOT NULL AS deleted \
+             FROM tasks WHERE org_id = ? AND thread_id = ?",
+            &[org_id.into(), thread_id.into()],
+        )
+        .await?;
+    rows.first()
+        .map(|row| {
+            Ok(StoredIndex {
+                status: text(row, "status")?,
+                title: text(row, "title")?,
+                machine_id: text(row, "machine_id")?,
+                agent: text(row, "agent")?,
+                workspace_path: text(row, "workspace_path")?,
+                archived: int(row, "archived")? != 0,
+                deleted: int(row, "deleted")? != 0,
+            })
+        })
+        .transpose()
+}
+
+/// Most threads one reconcile pass looks at.
+pub const RECONCILE_LIMIT: usize = 200;
+
+/// The hosted threads a reconcile checks, at most `limit`: threads with no index row first
+/// (created before migration 0008, or a first upsert that failed), then the rest by most recent
+/// index change. Threads already marked deleted are left out. Each id is paired with its org.
+pub async fn reconcile_candidates(
+    db: &impl Db,
+    limit: usize,
+) -> Result<Vec<(String, String)>, DbError> {
+    let rows = db
+        .query(
+            "SELECT h.org_id AS org_id, h.thread_id AS thread_id FROM thread_hosts AS h \
+             LEFT JOIN tasks AS t ON t.org_id = h.org_id AND t.thread_id = h.thread_id \
+             WHERE t.thread_id IS NULL OR t.deleted_at IS NULL \
+             ORDER BY (t.thread_id IS NULL) DESC, t.updated_at DESC, h.thread_id LIMIT ?",
+            &[Param::Int(i64::try_from(limit).unwrap_or(i64::MAX))],
+        )
+        .await?;
+    rows.iter()
+        .map(|row| Ok((text(row, "org_id")?, text(row, "thread_id")?)))
+        .collect()
+}
+
 /// One row of the thread list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadSummary {

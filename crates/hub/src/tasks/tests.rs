@@ -14,9 +14,11 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 use serde_json::Value;
 
-use super::index::{IndexRow, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING, changes_index};
+use super::index::{
+    IndexRow, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING, changes_index,
+};
 use super::query::{ListQuery, parse_list_query};
-use super::store::{ThreadSummary, list_threads, paginate, upsert};
+use super::store::{ThreadSummary, list_threads, paginate, reconcile_candidates, stored, upsert};
 use crate::db::{Db, DbError, MIGRATIONS, Param, Row};
 
 // ---- the native fake -----------------------------------------------------------------------
@@ -419,4 +421,105 @@ fn only_title_status_and_lifecycle_changes_refresh_the_index() {
         &[session_delta("th_1")]
     ));
     assert!(!changes_index("GET", "/v1/threads/th_1", &[]));
+}
+
+// ---- the reconcile (M2-010a) ---------------------------------------------------------------
+
+fn host(db: &Fake, org: &str, thread: &str) {
+    db.conn
+        .borrow()
+        .execute(
+            "INSERT INTO thread_hosts (thread_id, org_id, machine_id) VALUES (?, ?, 'mch_laptop')",
+            rusqlite::params![thread, org],
+        )
+        .expect("host");
+}
+
+/// What the reconcile does for one thread, given the Thread DO's row: writes it when the thread
+/// has no stored row or a different one. Returns `true` when it wrote.
+fn reconcile_one(db: &Fake, org: &str, row: &IndexRow) -> bool {
+    let current = block_on(stored(db, org, &row.thread_id)).expect("stored");
+    if current.is_some_and(|current| current.is_current(row)) {
+        return false;
+    }
+    block_on(upsert(db, org, row)).expect("upsert");
+    true
+}
+
+#[test]
+fn a_hosted_thread_without_an_index_row_is_a_reconcile_candidate_and_is_listed_after_it() {
+    // A thread from before migration 0008 (or whose first upsert failed): hosted, no row.
+    let db = Fake::new();
+    host(&db, "org_a", "th_old");
+    host(&db, "org_a", "th_new");
+    block_on(upsert(
+        &db,
+        "org_a",
+        &row("th_new", "known", "2026-10-28T10:00:00.000Z"),
+    ))
+    .expect("upsert");
+    assert_eq!(list(&db, "org_a", &ListQuery::default()), ["th_new"]);
+
+    let candidates = block_on(reconcile_candidates(&db, 10)).expect("candidates");
+    assert_eq!(candidates[0], ("org_a".to_owned(), "th_old".to_owned()));
+    assert!(candidates.contains(&("org_a".to_owned(), "th_new".to_owned())));
+
+    let fresh = row("th_old", "from the thread", "2026-10-28T12:00:00.000Z");
+    assert!(reconcile_one(&db, "org_a", &fresh));
+    assert_eq!(
+        list(&db, "org_a", &ListQuery::default()),
+        ["th_old", "th_new"]
+    );
+}
+
+#[test]
+fn a_stale_row_from_a_failed_upsert_is_rewritten_and_a_current_one_is_left_alone() {
+    let db = Fake::new();
+    host(&db, "org_a", "th_1");
+    // The row says running; the failed upsert of the run's end left it so.
+    let mut stale = row("th_1", "title", "2026-10-28T10:00:00.000Z");
+    stale.status = STATUS_RUNNING;
+    block_on(upsert(&db, "org_a", &stale)).expect("upsert");
+
+    let mut actual = row("th_1", "title", "2026-10-28T11:00:00.000Z");
+    actual.status = STATUS_DONE;
+    assert!(reconcile_one(&db, "org_a", &actual));
+    let rows = block_on(list_threads(&db, "org_a", &ListQuery::default(), 10)).expect("list");
+    assert_eq!(rows[0].status, "done");
+
+    // In step now: a second pass writes nothing, so `updated_at` does not move.
+    let mut later = actual.clone();
+    later.updated_at = "2026-10-28T13:00:00.000Z".to_owned();
+    later.last_seq = 99;
+    assert!(!reconcile_one(&db, "org_a", &later));
+    let rows = block_on(list_threads(&db, "org_a", &ListQuery::default(), 10)).expect("list");
+    assert_eq!(rows[0].updated_at, "2026-10-28T11:00:00.000Z");
+}
+
+#[test]
+fn deleted_threads_are_not_candidates_and_the_stored_row_is_per_org() {
+    let db = Fake::new();
+    host(&db, "org_a", "th_gone");
+    host(&db, "org_b", "th_b");
+    let mut gone = row("th_gone", "x", "2026-10-28T10:00:00.000Z");
+    gone.deleted = true;
+    block_on(upsert(&db, "org_a", &gone)).expect("upsert");
+    let candidates = block_on(reconcile_candidates(&db, 10)).expect("candidates");
+    assert_eq!(candidates, [("org_b".to_owned(), "th_b".to_owned())]);
+    assert_eq!(
+        block_on(stored(&db, "org_a", "th_b")).expect("stored"),
+        None
+    );
+}
+
+#[test]
+fn a_done_status_is_listed_as_done_and_found_by_the_status_filter() {
+    let db = Fake::new();
+    let mut finished = row("th_1", "t", "2026-10-28T10:00:00.000Z");
+    finished.status = STATUS_DONE;
+    block_on(upsert(&db, "org_a", &finished)).expect("upsert");
+    let query = parse_list_query(Some("status=done")).expect("query");
+    assert_eq!(list(&db, "org_a", &query), ["th_1"]);
+    let rows = block_on(list_threads(&db, "org_a", &ListQuery::default(), 10)).expect("list");
+    assert_eq!(rows[0].to_json()["status"], "done");
 }

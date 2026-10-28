@@ -101,6 +101,13 @@ VAPID_PRIVATE_KEY=${VAPID_KEYS% *}
 VAPID_PUBLIC_KEY=${VAPID_KEYS#* }
 [[ -n $VAPID_PRIVATE_KEY && -n $VAPID_PUBLIC_KEY ]] || fail "could not generate a VAPID key"
 
+# M2-010a: harmless test values for the app-link vars (a made-up team, bundle, package and
+# fingerprint, not a real app), so tests/links.rs can check the configured documents live.
+export APPLE_TEAM_ID=ABCDE12345 APPLE_BUNDLE_ID=dev.sprite.machine.test
+export ANDROID_PACKAGE_NAME=dev.sprite.machine.test
+ANDROID_SHA256_CERT_FINGERPRINTS=$(printf 'AB:%.0s' $(seq 1 31))AB
+export ANDROID_SHA256_CERT_FINGERPRINTS
+
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
@@ -108,6 +115,9 @@ echo "== wrangler dev --local --test-scheduled on port $PORT"
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" "${dev_fixtures_args[@]}" \
   --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
+  --var "APPLE_TEAM_ID:$APPLE_TEAM_ID" --var "APPLE_BUNDLE_ID:$APPLE_BUNDLE_ID" \
+  --var "ANDROID_PACKAGE_NAME:$ANDROID_PACKAGE_NAME" \
+  --var "ANDROID_SHA256_CERT_FINGERPRINTS:$ANDROID_SHA256_CERT_FINGERPRINTS" \
   --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 

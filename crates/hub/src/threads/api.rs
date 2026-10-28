@@ -121,6 +121,11 @@ fn route<S: ThreadStore>(
     let path = request.path.trim_matches('/').to_owned();
     let segments: Vec<&str> = path.split('/').collect();
     let method = request.method.as_str();
+    // A soft-deleted thread answers 404 on every client route, like an unknown one. The
+    // internal routes (the runner's events, the reindex) still reach it.
+    if segments.first() == Some(&"v1") {
+        core.ensure_live()?;
+    }
     match (method, segments.as_slice()) {
         ("GET", ["v1", "threads", _]) => core.thread_info(),
         ("PATCH", ["v1", "threads", _]) => {
@@ -206,6 +211,12 @@ fn route<S: ThreadStore>(
             write(core, request, now_ms, |core, actor, key| {
                 core.create_thread(actor, key, body, now_ms)
             })
+        }
+        // The cron reconcile (`tasks::reconcile`): only checks the thread exists; the DO then
+        // compares and refreshes its D1 index row (`do/thread.rs`).
+        ("POST", ["internal", "threads", _, "reindex"]) => {
+            core.index_row(0)?;
+            Ok(Reply::new(204, Value::Null))
         }
         ("POST", ["internal", "threads", _, "init"]) => {
             let info: Map<String, Value> = parse_body(&request.body)?;
