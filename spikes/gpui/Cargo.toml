@@ -21,7 +21,10 @@ path = "src/main.rs"
 [dependencies]
 protocol = { path = "../../crates/protocol" }
 agui-fixture = { path = "../../crates/agui-fixture" }
-serde_json = "1"
+# float_roundtrip: the feed's floats (usage cost) decode to the exact values the fixture encoded.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# M1B-008a: the fixture feed (blocking WebSocket client, run on a background thread).
+tungstenite = "0.29"
 # M1B-004d: the approval card's HTTP AnswerSink (blocking; called on the background executor).
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 # M1B-004c: the terminal pane's VT model (`Term` + the `vte` ANSI processor). Exact pin.
