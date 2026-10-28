@@ -116,6 +116,9 @@ impl DurableObject for Thread {
         for envelope in &appended {
             self.broadcast(&event_message(envelope).to_string());
         }
+        // M2-011: an Interrupt, a finished run or a failed run notifies; the NOTIFY queue job
+        // carries ids only (`notify::job`).
+        crate::queues_notify::enqueue(&self.env, &crate::notify::job::jobs_for(&appended)).await;
         if pushes_commands(&request.method, &request.path, &appended) {
             self.push_commands(&thread_id).await;
         }

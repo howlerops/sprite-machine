@@ -20,6 +20,12 @@ sha2 = "0.10"
 getrandom = { version = "0.2", features = ["js"] }
 # Signed attachment URLs (M2-009): HMAC-SHA256 with a constant-time check. Already in the lock file.
 hmac = "0.12"
+# Web Push (M2-011): RFC 8291 message encryption (ECDH P-256, HKDF-SHA256, AES-128-GCM) and
+# RFC 8292 VAPID (ES256). Pure Rust, so they build for wasm32-unknown-unknown.
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "arithmetic"] }
+hkdf = "0.12"
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+base64 = "0.22"
 
 [features]
 # Integration tests that need a running hub (HUB_URL). Off by default, so `cargo test -p hub`
@@ -58,6 +64,10 @@ required-features = ["live"]
 
 [[test]]
 name = "devices"
+required-features = ["live"]
+
+[[test]]
+name = "notify"
 required-features = ["live"]
 
 # Workers glue (spike M0-017 pins). wasm32 only, so native builds and tests stay plain Rust.

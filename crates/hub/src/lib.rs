@@ -9,6 +9,7 @@ pub mod auth;
 pub mod db;
 pub mod devices;
 pub mod machines;
+pub mod notify;
 pub mod router;
 pub mod threads;
 pub mod workspace_do;
@@ -16,6 +17,11 @@ pub mod workspace_do;
 /// The Worker entries: axum router, `fetch` and `queue`.
 #[cfg(target_arch = "wasm32")]
 pub mod worker;
+
+/// The NOTIFY Queue producer and consumer (M2-011).
+#[cfg(target_arch = "wasm32")]
+#[path = "queues/notify.rs"]
+pub mod queues_notify;
 
 /// Durable Object skeletons (THREAD, MACHINE, FLOW).
 #[cfg(target_arch = "wasm32")]

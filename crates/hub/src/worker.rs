@@ -13,7 +13,9 @@
 //!   the Machine DO (M2B-002, `machines/routes.rs`).
 //! - `/v1/attachments...`: the attachment create (session token) and the signed upload and content
 //!   URLs (M2-009, `attachments/routes.rs`).
-//! //! - anything else: `404` with the client-api.md §4 error body.
+//! - `/v1/push/...`: Web Push subscriptions, prefs and the VAPID public key (M2-011,
+//!   `notify/routes.rs`).
+//! - anything else: `404` with the client-api.md §4 error body.
 //!
 //! Every response carries `x-request-id` and one JSON access-log line goes to the Workers console.
 
@@ -37,9 +39,6 @@ use crate::router::{self, REQUEST_ID_HEADER};
 /// Router state: the Worker bindings.
 pub type AppState = SendWrapper<Env>;
 
-/// The Queue bound as `NOTIFY` (producer and consumer, see wrangler.toml).
-const NOTIFY_QUEUE: &str = "sm-notify";
-
 /// Builds the request router. The middleware wraps every route and the fallback, so even a 404 gets a request id and an access-log line.
 pub fn router(env: Env) -> Router {
     Router::new()
@@ -49,6 +48,7 @@ pub fn router(env: Env) -> Router {
         .merge(crate::machines::routes::machine_routes())
         .merge(crate::devices::routes::device_routes())
         .merge(crate::attachments::routes::attachment_routes())
+        .merge(crate::notify::routes::push_routes())
         .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)
         .layer(middleware::from_fn(observe))
@@ -61,18 +61,14 @@ async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> worker::Result<Resp
     Ok(router(env).call(req).await?)
 }
 
-/// The Queue consumer for `sm-notify`. Nothing consumes yet, so the batch is acknowledged
-/// (no retries) and logged.
+/// The Queue consumer for `sm-notify`: Web Push delivery (M2-011, `queues/notify.rs`).
 #[event(queue)]
 async fn queue(
     batch: MessageBatch<serde_json::Value>,
-    _env: Env,
+    env: Env,
     _ctx: Context,
 ) -> worker::Result<()> {
-    let messages = batch.messages()?.len();
-    worker::console_log!("{}", router::queue_log(NOTIFY_QUEUE, messages));
-    batch.ack_all();
-    Ok(())
+    crate::queues_notify::consume(batch, &env).await
 }
 
 /// The Cron Trigger (wrangler.toml `[triggers]`): purges expired device pairings and old
