@@ -5407,8 +5407,10 @@ items:
     milestone: M2b
     phase: P2
     status: "assigned"
-    assignee: "haiku"
-    attempt: 1
+    review_notes:
+      - "BLOCKER: key thread holds stdin.lock() for the whole run; trust::terminal_asker also locks stdin for its y/n answer -> deadlock (and raw mode hides the answer). One stdin owner; test that a trust answer gets through while the key reader runs"
+    assignee: "sonnet"
+    attempt: 2
     lane: rust
     size: S
     risk: low

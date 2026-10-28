@@ -211,3 +211,4 @@
 - M2B-009 back (haiku): qr/settings modules + sm mobile wired; sm rc URL/spacebar not wired (my scoping: main.rs/server not in paths). Accept modules; M2B-009a (P2) wires sm rc; autoConnect criterion moved to M2B-010 (the TUI is what it applies to). Merge held until verify17
 - merged M2B-005b and M2B-009 (main.rs usage/imports conflict resolved); runner: fmt, clippy clean, 169 tests passed on the merged tree
 - M2B-005b, M2B-009 done; assign M2B-009a (haiku)
+- M2B-009a attempt 1 (haiku) rejected: pump thread holds stdin lock forever, trust asker deadlocks on dispatch to an untrusted dir. Attempt 2 (sonnet) builds on it
