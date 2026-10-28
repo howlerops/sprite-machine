@@ -53,3 +53,4 @@
 2026-10-28T01:02Z leader: macos CI red since M1A-003 merge (/proc-only test); fixed in 5b435f3 (kill -0, mutation-checked)
 2026-10-28T01:04Z M1B-004a assigned→done merged 0007480 (opus); CONVENTIONS.md updated with its GPUI API notes; discovered work → M1B-004b..d / M1B-008 (variable-height rows, streaming + frame timing)
 2026-10-28T01:04Z leader: all 12 P0 items done — P0 phase review starts (clean rebuild of the shared target)
+2026-10-28T01:30Z leader: P0 phase review complete (docs/ledger/reviews/P0.md): clean rebuild, 129 tests, tracer, hub smoke, gpui spike, schemas all green; CI run 40612758905 green; no tag (plan §5 tags alpha.1 at P2)

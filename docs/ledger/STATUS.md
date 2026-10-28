@@ -4,7 +4,7 @@ _Rewritten by the leader on every ledger commit._
 
 done 24/192 (3 dropped) · in-flight — · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 19/120
 
-P0 complete; phase review running.
+P0 complete and reviewed (docs/ledger/reviews/P0.md). Paused at the phase boundary; P1 is ready to start and needs nothing from you.
 
 ## Per phase
 
