@@ -3614,6 +3614,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "getrandom 0.2.17",
+ "hmac",
  "protocol",
  "rusqlite",
  "serde",

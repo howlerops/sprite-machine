@@ -78,3 +78,7 @@ binding = "ASSETS"
 
 [env.dev.vars]
 DEV_FIXTURES = "1"
+# DEV ONLY placeholder for the attachment URL signing key (M2-009). Not a secret: production sets
+# ATTACHMENT_SIGNING_KEY as a Worker secret, and `wrangler deploy` does not read [env.dev.vars].
+# Must match DEV_SIGNING_KEY in crates/hub/src/attachments/routes.rs.
+ATTACHMENT_SIGNING_KEY = "dev-only-attachment-signing-key-not-a-secret-00"
