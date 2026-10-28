@@ -5954,7 +5954,8 @@ items:
     title: 'Bootstrap owner gets a GitHub login (BOOTSTRAP_OWNER_GITHUB_LOGIN), so the first owner can sign in with GitHub'
     milestone: M2
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged (attempts 1+2); leader: cargo test -p hub 321/0, clippy ok, live oauth 11/11 on merged tree"
     review_notes:
       - "live oauth: the_bootstrap_owner_signs_in_with_the_configured_github_login_and_no_other_login_can fails with access_denied (10/11); native tests pass"
     assignee: "sonnet"
