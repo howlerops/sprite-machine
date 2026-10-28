@@ -122,6 +122,14 @@ them when absent. Threads started on the runner itself (TUI, `/rc`) appear throu
 (same `states` as the subscription `snapshot` message).
 
 **`GET /v1/threads/{thread_id}/subscribe?after=<seq>`**: WebSocket, turn-event.md §6.
+Native clients send `Authorization: Bearer`. Browsers cannot set headers on a WebSocket, so
+(SPEC-006) they first call **`POST /v1/threads/{thread_id}/subscribe-ticket`** (Bearer, viewer
+role, same thread/org check as subscribe) → 201 `{ "ticket", "expires_at" }`: 256 random bits,
+only its SHA-256 stored, **single use, valid 60 seconds**, bound to the session, the user and
+this thread. The page then opens `…/subscribe?after=<seq>&ticket=<ticket>`; the hub consumes
+the ticket on the upgrade. A missing, reused, expired or other-thread ticket → 401 (same answer).
+The session token never appears in a URL, and the ticket never appears in logs or audit
+details. A ticket whose session was revoked before use is refused.
 
 ### 5.3 Prompts and pending tasks
 
