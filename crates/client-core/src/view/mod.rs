@@ -96,7 +96,15 @@ impl TaskView {
         TaskStatus::Starting
     }
 
+    /// Whether the transcript would refuse `envelope`. Changes nothing.
+    fn check(&self, envelope: &Envelope) -> Result<(), ViewError> {
+        self.transcript.check(&envelope.event)
+    }
+
     fn apply(&mut self, envelope: &Envelope) -> Result<(), ViewError> {
+        // The transcript is the only step that can refuse an event, and it changes nothing when
+        // it does. It runs first, so a refused event leaves this task as it was.
+        self.transcript.apply(&envelope.event)?;
         match &envelope.event {
             Event::RunStarted(_) => {
                 self.run_id = envelope.run_id.clone();
@@ -115,7 +123,7 @@ impl TaskView {
             }
             _ => {}
         }
-        self.transcript.apply(&envelope.event)
+        Ok(())
     }
 }
 
@@ -200,12 +208,32 @@ impl ThreadView {
         self.states = states.into_iter().collect();
     }
 
+    /// Whether [`ThreadView::apply`] would refuse `envelope`. Changes nothing, so the caller can
+    /// check an event before it persists it.
+    pub fn check(&self, envelope: &Envelope) -> Result<(), ViewError> {
+        self.staged_delta(envelope)?;
+        if let Some(task_id) = &envelope.task_id {
+            match self.task(task_id) {
+                Some(task) => task.check(envelope)?,
+                None => TaskView::new(task_id).check(envelope)?,
+            }
+        }
+        Ok(())
+    }
+
     /// Applies one envelope. The caller guarantees `seq` order without gaps.
+    ///
+    /// Transactional: if it returns an error, `last_seq` and every other field are unchanged.
+    /// Each step that can fail runs before any field is written, and `last_seq` is set last.
     pub fn apply(&mut self, envelope: &Envelope) -> Result<(), ViewError> {
-        self.last_seq = envelope.seq;
         if matches!(envelope.event, Event::Unknown) {
             // A type from a newer hub: it takes its seq and changes nothing here (§2).
+            self.last_seq = envelope.seq;
             return Ok(());
+        }
+        let staged = self.staged_delta(envelope)?;
+        if let Some(task_id) = &envelope.task_id {
+            self.apply_to_task(task_id, envelope)?;
         }
         match &envelope.event {
             Event::StateSnapshot(snapshot) => {
@@ -213,14 +241,6 @@ impl ThreadView {
                     scope_key(snapshot.scope).to_owned(),
                     Value::Object(snapshot.snapshot.clone()),
                 );
-            }
-            Event::StateDelta(delta) => {
-                let key = scope_key(delta.scope);
-                let document = self
-                    .states
-                    .get_mut(key)
-                    .ok_or_else(|| ViewError::DeltaBeforeSnapshot(key.to_owned()))?;
-                patch::apply(document, &delta.patch)?;
             }
             Event::Presence(presence) => {
                 self.machine_id = Some(presence.machine_id.clone());
@@ -236,10 +256,40 @@ impl ThreadView {
             }
             _ => {}
         }
-        if let Some(task_id) = &envelope.task_id {
-            let slot = self.task_slot(task_id);
-            self.tasks[slot].apply(envelope)?;
+        if let Some((key, document)) = staged {
+            self.states.insert(key.to_owned(), document);
         }
+        self.last_seq = envelope.seq;
+        Ok(())
+    }
+
+    /// The state document `envelope` leaves behind, when it is a `StateDelta`. Changes nothing:
+    /// the patch is applied to a copy, and an error means the stored document is untouched.
+    fn staged_delta(
+        &self,
+        envelope: &Envelope,
+    ) -> Result<Option<(&'static str, Value)>, ViewError> {
+        let Event::StateDelta(delta) = &envelope.event else {
+            return Ok(None);
+        };
+        let key = scope_key(delta.scope);
+        let mut document = self
+            .states
+            .get(key)
+            .cloned()
+            .ok_or_else(|| ViewError::DeltaBeforeSnapshot(key.to_owned()))?;
+        patch::apply(&mut document, &delta.patch)?;
+        Ok(Some((key, document)))
+    }
+
+    fn apply_to_task(&mut self, task_id: &str, envelope: &Envelope) -> Result<(), ViewError> {
+        if let Some(task) = self.tasks.iter_mut().find(|task| task.task_id == task_id) {
+            return task.apply(envelope);
+        }
+        // A new task is added only once its first event has been accepted.
+        let mut task = TaskView::new(task_id);
+        task.apply(envelope)?;
+        self.tasks.push(task);
         Ok(())
     }
 
@@ -257,14 +307,6 @@ impl ThreadView {
             task.transcript
                 .set_local_answer(interrupt_id, local.clone())
         })
-    }
-
-    fn task_slot(&mut self, task_id: &str) -> usize {
-        if let Some(slot) = self.tasks.iter().position(|task| task.task_id == task_id) {
-            return slot;
-        }
-        self.tasks.push(TaskView::new(task_id));
-        self.tasks.len() - 1
     }
 }
 

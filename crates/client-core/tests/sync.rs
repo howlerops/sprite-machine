@@ -586,3 +586,97 @@ async fn a_live_unknown_event_is_stored_as_its_envelope_text_and_survives_a_rest
     assert_eq!(restored.last_seq(THREAD).expect("last seq"), 2);
     let _ = std::fs::remove_file(&path);
 }
+
+/// The wire text of a `usage` state event at `seq`, as the hub would send it in an envelope.
+fn usage_event(seq: u64, event: serde_json::Value) -> String {
+    json!({
+        "v": 1, "seq": seq, "thread_id": THREAD, "task_id": null, "run_id": null,
+        "ts": "2026-10-27T22:00:00.000Z", "event": event
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn an_event_the_view_refuses_is_not_cached_and_the_cache_matches_the_view() {
+    let delta = |path: &str| {
+        json!({"type": "StateDelta", "scope": "usage",
+               "patch": [{"op": "replace", "path": path, "value": 9}]})
+    };
+    let snapshot = usage_event(
+        1,
+        json!({"type": "StateSnapshot", "scope": "usage",
+               "snapshot": {"context_used": 1, "context_size": 200000}}),
+    );
+    let good_delta = usage_event(2, delta("/context_used"));
+    let frames = vec![
+        r#"{"type":"hello","head_seq":2,"replay_from":1}"#.to_owned(),
+        // Seq 1 is a delta before its snapshot: the view refuses it, so it is not stored.
+        format!(
+            r#"{{"type":"event","envelope":{}}}"#,
+            usage_event(1, delta("/context_used"))
+        ),
+        format!(r#"{{"type":"event","envelope":{snapshot}}}"#),
+        // Seq 2 is a patch that does not apply: refused, and seq 2 is still the next one due.
+        format!(
+            r#"{{"type":"event","envelope":{}}}"#,
+            usage_event(2, delta("/missing"))
+        ),
+        format!(r#"{{"type":"event","envelope":{good_delta}}}"#),
+        r#"{"type":"live"}"#.to_owned(),
+    ];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
+    let base = format!("http://{}", listener.local_addr().expect("address"));
+    let hub = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accepts");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("handshake");
+        for frame in frames {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(frame.into()))
+                .await
+                .expect("sends");
+        }
+        std::future::pending::<()>().await;
+    });
+
+    let path = temp_db("view-refuses");
+    let mut cache = Cache::open(&path).expect("opens");
+    let mut subscription = Subscription::connect(&base, ThreadSync::new(THREAD), None)
+        .await
+        .expect("connects");
+
+    let hello = subscription.next_persisted(&mut cache).await;
+    assert!(matches!(hello, Ok(Applied::Hello { .. })), "{hello:?}");
+    let early = subscription.next_persisted(&mut cache).await;
+    assert!(
+        matches!(early, Err(SubscriptionError::Sync(_))),
+        "the view refuses a delta before its snapshot: {early:?}"
+    );
+    assert_eq!(subscription.sync().last_seq(), 0);
+    assert_eq!(cache.last_seq(THREAD).expect("last seq"), 0);
+
+    let mut events = 0;
+    let mut refused = 0;
+    loop {
+        match subscription.next_persisted(&mut cache).await {
+            Ok(Applied::Event(_)) => events += 1,
+            Ok(Applied::Live) => break,
+            Ok(_) => {}
+            Err(SubscriptionError::Sync(_)) => refused += 1,
+            Err(error) => panic!("unexpected read error: {error}"),
+        }
+    }
+    hub.abort();
+    assert_eq!(refused, 1, "the bad patch at seq 2 is refused once");
+    assert_eq!(events, 2, "the snapshot and the valid delta apply");
+    assert_eq!(subscription.sync().last_seq(), 2);
+    assert_eq!(
+        cache.raw_events(THREAD).expect("raw events"),
+        vec![snapshot, good_delta],
+        "the cache holds exactly the events the view accepted"
+    );
+    let _ = std::fs::remove_file(&path);
+}

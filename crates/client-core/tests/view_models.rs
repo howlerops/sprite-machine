@@ -562,3 +562,85 @@ fn state_deltas_patch_their_scope_and_unknown_types_only_take_a_seq() {
     assert_eq!(view.last_seq(), 3);
     assert!(view.task("tk_future").is_none());
 }
+
+#[test]
+fn a_refused_envelope_leaves_the_view_and_last_seq_exactly_as_they_were() {
+    let mut view = ThreadView::new("th_1");
+    let snapshot: Envelope = serde_json::from_value(json!({
+        "v": 1, "seq": 1, "thread_id": "th_1", "task_id": null, "run_id": null,
+        "ts": "2026-10-27T22:00:00.000Z",
+        "event": {"type": "StateSnapshot", "scope": "usage",
+                  "snapshot": {"context_used": 1, "context_size": 200000}}
+    }))
+    .expect("parses");
+    view.apply(&snapshot).expect("snapshot applies");
+
+    // A delta whose second op does not apply: `/missing` has no value to replace.
+    let bad_delta: Envelope = serde_json::from_value(json!({
+        "v": 1, "seq": 2, "thread_id": "th_1", "task_id": null, "run_id": null,
+        "ts": "2026-10-27T22:00:01.000Z",
+        "event": {"type": "StateDelta", "scope": "usage",
+                  "patch": [{"op": "replace", "path": "/context_used", "value": 9},
+                            {"op": "replace", "path": "/missing", "value": 1}]}
+    }))
+    .expect("parses");
+    let before = view.clone();
+    assert!(view.check(&bad_delta).is_err(), "check refuses the patch");
+    assert!(view.apply(&bad_delta).is_err(), "apply refuses the patch");
+    assert_eq!(
+        view, before,
+        "a refused delta changes nothing, last_seq included"
+    );
+    assert_eq!(view.last_seq(), 1);
+
+    // An activity patch that does not apply, on a task the view has not seen yet: no task and
+    // no item is created.
+    let bad_activity: Envelope = serde_json::from_value(json!({
+        "v": 1, "seq": 2, "thread_id": "th_1", "task_id": "tk_1", "run_id": "run_1",
+        "ts": "2026-10-27T22:00:02.000Z",
+        "event": {"type": "Activity", "activity_id": "act_1", "activity_type": "plan",
+                  "mode": "patch",
+                  "patch": [{"op": "test", "path": "/nope", "value": 1}]}
+    }))
+    .expect("parses");
+    let before = view.clone();
+    assert!(
+        view.check(&bad_activity).is_err(),
+        "check refuses the activity"
+    );
+    assert!(
+        view.apply(&bad_activity).is_err(),
+        "apply refuses the activity"
+    );
+    assert_eq!(
+        view, before,
+        "a refused activity creates no task and no item"
+    );
+    assert!(view.task("tk_1").is_none());
+
+    // The same seq then applies with a valid event, so the refusal left no gap.
+    let good: Envelope = serde_json::from_value(json!({
+        "v": 1, "seq": 2, "thread_id": "th_1", "task_id": null, "run_id": null,
+        "ts": "2026-10-27T22:00:01.000Z",
+        "event": {"type": "StateDelta", "scope": "usage",
+                  "patch": [{"op": "replace", "path": "/context_used", "value": 9}]}
+    }))
+    .expect("parses");
+    view.apply(&good).expect("applies");
+    assert_eq!(view.last_seq(), 2);
+    assert_eq!(
+        view.state("usage").expect("usage")["context_used"],
+        json!(9)
+    );
+}
+
+#[test]
+fn a_delta_before_its_snapshot_leaves_last_seq_at_zero() {
+    let mut view = ThreadView::new("th_1");
+    let delta = example("StateDelta.json");
+    let before = view.clone();
+    assert!(view.apply(&delta).is_err());
+    assert_eq!(view, before);
+    assert_eq!(view.last_seq(), 0);
+    assert!(view.state("usage").is_none());
+}

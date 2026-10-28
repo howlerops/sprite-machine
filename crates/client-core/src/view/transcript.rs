@@ -441,52 +441,92 @@ impl Transcript {
         )
     }
 
+    /// Whether [`Transcript::apply`] would refuse `event`. Changes nothing.
+    pub(super) fn check(&self, event: &Event) -> Result<(), ViewError> {
+        match event {
+            Event::Activity(activity) => self.activity_content(activity).map(|_| ()),
+            _ => Ok(()),
+        }
+    }
+
     fn apply_activity(&mut self, activity: &Activity) -> Result<(), ViewError> {
         let key = Key::Activity(activity.activity_id.clone());
-        let slot = match self.index.get(&key) {
-            Some(&slot) => slot,
-            None => self.push(
-                key,
-                Item::Activity(ActivityView {
-                    activity_id: activity.activity_id.clone(),
-                    activity_type: activity.activity_type,
-                    content: Map::new(),
-                    complete: true,
-                }),
-            ),
-        };
-        let Item::Activity(view) = &mut self.items[slot] else {
+        let slot = self.index.get(&key).copied();
+        if let Some(slot) = slot
+            && !matches!(self.items[slot], Item::Activity(_))
+        {
             return Ok(());
-        };
-        view.activity_type = activity.activity_type;
-        let incoming = activity.content.clone().unwrap_or_default();
-        view.complete = incoming
-            .get("chunk")
+        }
+        // Everything that can fail happens in `activity_content`, before the item changes.
+        let content = self.activity_content(activity)?;
+        let complete = activity
+            .content
+            .as_ref()
+            .and_then(|incoming| incoming.get("chunk"))
             .and_then(|chunk| chunk.get("last"))
             .and_then(Value::as_bool)
             .unwrap_or(true);
+        match slot {
+            Some(slot) => {
+                if let Item::Activity(view) = &mut self.items[slot] {
+                    view.activity_type = activity.activity_type;
+                    view.complete = complete;
+                    view.content = content;
+                }
+            }
+            None => {
+                self.push(
+                    key,
+                    Item::Activity(ActivityView {
+                        activity_id: activity.activity_id.clone(),
+                        activity_type: activity.activity_type,
+                        content,
+                        complete,
+                    }),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The content an `Activity` leaves its item with. Changes nothing, so a patch that does not
+    /// apply is refused before the transcript is touched.
+    fn activity_content(&self, activity: &Activity) -> Result<Map<String, Value>, ViewError> {
+        let incoming = activity.content.clone().unwrap_or_default();
         match activity.mode {
-            ActivityMode::Snapshot => view.content = incoming,
+            ActivityMode::Snapshot => Ok(incoming),
             ActivityMode::Append => {
+                let mut content = self.activity_content_so_far(&activity.activity_id);
                 for (name, value) in incoming {
-                    let concatenated = match (name.as_str(), view.content.get(&name), &value) {
+                    let concatenated = match (name.as_str(), content.get(&name), &value) {
                         ("output" | "new_text", Some(Value::String(old)), Value::String(new)) => {
                             Some(Value::String(format!("{old}{new}")))
                         }
                         _ => None,
                     };
-                    view.content.insert(name, concatenated.unwrap_or(value));
+                    content.insert(name, concatenated.unwrap_or(value));
                 }
+                Ok(content)
             }
             ActivityMode::Patch => {
-                let mut document = Value::Object(std::mem::take(&mut view.content));
+                let mut document =
+                    Value::Object(self.activity_content_so_far(&activity.activity_id));
                 let ops = activity.patch.as_deref().unwrap_or(&[]);
-                let applied = patch::apply(&mut document, ops);
-                view.content = patch::as_object(document);
-                applied?;
+                patch::apply(&mut document, ops)?;
+                Ok(patch::as_object(document))
             }
         }
-        Ok(())
+    }
+
+    /// The content an activity holds now (empty when it has no item yet).
+    fn activity_content_so_far(&self, activity_id: &str) -> Map<String, Value> {
+        match self.index.get(&Key::Activity(activity_id.to_owned())) {
+            Some(&slot) => match &self.items[slot] {
+                Item::Activity(view) => view.content.clone(),
+                _ => Map::new(),
+            },
+            None => Map::new(),
+        }
     }
 }
 

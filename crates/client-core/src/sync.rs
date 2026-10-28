@@ -422,7 +422,8 @@ impl Subscription {
     /// Like [`Subscription::next`], but a new event is appended to `cache` with
     /// [`Cache::append_raw`] before it is applied, as the envelope text the hub sent. If the
     /// append fails, the event is not applied, so the view never runs ahead of the cache, and
-    /// the error is returned. An event this build does not know survives a restart byte for
+    /// the error is returned. The view checks the event first, so an event it refuses is not
+    /// stored either. An event this build does not know survives a restart byte for
     /// byte.
     pub async fn next_persisted(
         &mut self,
@@ -449,10 +450,12 @@ impl Subscription {
                 let Some(incoming) = parse_incoming(body.as_str())? else {
                     return Ok(Applied::Ignored);
                 };
-                // Only the next event in line is new: it is persisted before the view sees it.
+                // Only the next event in line is new. The view must accept it before the cache
+                // keeps it, so the cache never holds an event the view refused.
                 if let (Some(cache), Incoming::Event(envelope)) = (cache, &incoming)
                     && envelope.seq == self.sync.last_seq() + 1
                 {
+                    self.sync.view().check(envelope).map_err(SyncError::from)?;
                     let text = envelope_text(body.as_str()).ok_or_else(|| {
                         SyncError::Malformed("event frame without an envelope".to_owned())
                     })?;
