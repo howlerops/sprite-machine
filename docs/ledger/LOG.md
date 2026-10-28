@@ -198,3 +198,4 @@
 2026-10-28T13:08Z WEB-002 blocked: browsers cannot send Authorization on a WebSocket. SPEC-006 done 1a9a23a (single-use 60 s subscribe ticket); added M2-008h (priority 1); WEB-002 back to todo with deps += M2-008h (attempt 1 spent on the finding)
 2026-10-28T13:09Z M2-008h assigned (sonnet, priority 1)
 2026-10-28T13:21Z M2B-002b back (haiku; tests/devices.rs:415 reads machines[].id → leader fixes on merge). verify15 (M2-008a): first workspace test pass 709/1 failed under 4 concurrent workers, second pass no failures (flaky under load; not a code failure)
+2026-10-28T13:26Z M2B-012 back (haiku, same attempt after path widening): cli e2e attachments PASS. Added M1A-014b (P4: private FilePolicy fields, sha256 end to end)
