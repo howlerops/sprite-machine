@@ -15,7 +15,7 @@ use runner::tunnel::Timing;
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str = "usage: sm login --hub <url> | sm logout | sm status | sm rc [flags] | \
+const USAGE: &str = "usage: sm | sm --rc [name] | sm login --hub <url> | sm logout | sm status | sm rc [flags] | \
 sm rc close <thread id> | sm trust <dir> | sm untrust <dir> | sm mobile [--hub <url>]";
 const MOBILE_USAGE: &str = "usage: sm mobile [--hub <url>]";
 const LOGIN_USAGE: &str = "usage: sm login --hub <url> [--yes]";
@@ -38,12 +38,34 @@ async fn main() -> Result<()> {
         Some("trust") => run_trust(&args[1..], true),
         Some("untrust") => run_trust(&args[1..], false),
         Some("mobile") => run_mobile(&args[1..]),
-        Some(other) => bail!("unknown command {other:?}\n{USAGE}"),
-        None => {
+        Some("--rc") if args.len() <= 2 => run_tui(true, args.get(1).cloned()).await,
+        Some("--version" | "-V") => {
             println!("{CRATE} {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        Some(other) => bail!("unknown command {other:?}\n{USAGE}"),
+        None => run_tui(false, None).await,
     }
+}
+
+/// `sm` / `sm --rc [name]`: the interactive session (see `runner::tui`). `--rc` shares it with
+/// the hub from the start; without it the `autoConnect` setting decides, and `/rc` shares later.
+async fn run_tui(rc: bool, name: Option<String>) -> Result<()> {
+    let state_dir = state_dir()?;
+    runner::tui::host::run(runner::tui::host::Options {
+        credentials: CredentialStore::from_env()?,
+        settings: runner::settings::load(&state_dir),
+        state_dir,
+        cwd: std::env::current_dir().context("current directory")?,
+        home: std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default(),
+        path_env: std::env::var_os("PATH").unwrap_or_default(),
+        permission_mode: server::PermissionMode::Default,
+        rc,
+        name,
+    })
+    .await
 }
 
 /// `sm login --hub <url>`: pair this machine with a hub by device code.
