@@ -130,6 +130,83 @@ async fn until_live(owner: &mut Connection, cache: &mut Cache) {
 }
 
 #[tokio::test]
+async fn an_unreachable_hub_starts_offline_and_reconnect_brings_it_live() {
+    // Reserve a local address, then free it: nothing listens there yet, so the connect fails.
+    let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
+    let addr = probe.local_addr().expect("address");
+    drop(probe);
+    let base = format!("http://{addr}");
+
+    let mut cache = Cache::open_in_memory().expect("cache");
+    let subscription = Subscription::connect_or_offline(&base, ThreadSync::new("th_1"), None)
+        .await
+        .expect("an unreachable hub is not an error");
+    assert_eq!(subscription.connectivity(), Connectivity::Offline);
+    let outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let mut owner = Connection::new(subscription, outbox);
+    let mut rx = owner.watch_connectivity();
+    let mut seen = vec![*rx.borrow_and_update()];
+    assert_eq!(owner.connectivity(), Connectivity::Offline);
+    assert_eq!(
+        owner.connectivity().banner(),
+        Some("Offline: changes will be sent when you reconnect")
+    );
+
+    // The hub comes up on that address: one socket says hello and live, then stays open.
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("rebinds");
+    let hub = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accepts");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("handshake");
+        for frame in [HELLO, LIVE] {
+            socket
+                .send(Message::Text(frame.into()))
+                .await
+                .expect("sends");
+        }
+        std::future::pending::<()>().await;
+    });
+
+    // Reconnecting opens the socket: the subscription is connecting.
+    owner.reconnect().await.expect("reconnects");
+    record(&mut rx, &mut seen);
+    assert_eq!(owner.connectivity(), Connectivity::Connecting);
+
+    // Live: the subscription is online, but the outbox has not heard from the hub yet.
+    until_live(&mut owner, &mut cache).await;
+    assert_eq!(owner.subscription().connectivity(), Connectivity::Online);
+    assert_eq!(owner.connectivity(), Connectivity::Connecting);
+
+    // The hub answers a queued intent: the outbox is online, so the combined state is online.
+    let clock = ManualClock::new(0);
+    let mut rng = FixedRandom(u64::MAX);
+    owner
+        .enqueue(&cache, cancel("tk_1"), clock.now_ms())
+        .expect("enqueues");
+    let answering = Scripted(Mutex::new(VecDeque::from([answered(202)])));
+    owner
+        .flush(&cache, &answering, &base, &clock, &mut rng)
+        .await
+        .expect("flushes");
+    record(&mut rx, &mut seen);
+    assert_eq!(owner.connectivity(), Connectivity::Online);
+
+    hub.abort();
+    assert_eq!(
+        seen,
+        vec![
+            Connectivity::Offline,
+            Connectivity::Connecting,
+            Connectivity::Online,
+        ],
+        "offline at start, then connecting, then online"
+    );
+}
+
+#[tokio::test]
 async fn the_owner_publishes_the_banner_sequence_as_either_link_changes() {
     // Hub: the first socket says hello and live, then closes. The second one (the reconnect)
     // says hello and live and stays open.
