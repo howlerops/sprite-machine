@@ -14,6 +14,10 @@ crate-type = ["cdylib", "rlib"]
 protocol = { path = "../protocol" }
 serde.workspace = true
 serde_json.workspace = true
+# Session-token hashing (only the SHA-256 is stored) and token entropy. `js` makes getrandom
+# use the Workers `crypto.getRandomValues` on wasm32-unknown-unknown; it is a no-op natively.
+sha2 = "0.10"
+getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 # Integration tests that need a running hub (HUB_URL). Off by default, so `cargo test -p hub`
@@ -32,6 +36,10 @@ required-features = ["live"]
 
 [[test]]
 name = "thread_do"
+required-features = ["live"]
+
+[[test]]
+name = "authz"
 required-features = ["live"]
 
 # Workers glue (spike M0-017 pins). wasm32 only, so native builds and tests stay plain Rust.

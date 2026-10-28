@@ -35,6 +35,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0002_org_metadata.sql",
         include_str!("../../migrations/0002_org_metadata.sql"),
     ),
+    (
+        "0003_auth_sessions.sql",
+        include_str!("../../migrations/0003_auth_sessions.sql"),
+    ),
 ];
 
 /// One result row: column name to JSON value (what D1 returns for an object row).

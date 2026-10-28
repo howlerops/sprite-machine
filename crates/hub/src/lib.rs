@@ -4,6 +4,8 @@
 //! Worker glue (`worker`, the Durable Object skeletons, and the tracer's `TracerHub`) is
 //! wasm32 only, so `cargo test -p hub` runs on the host.
 
+pub mod audit;
+pub mod auth;
 pub mod db;
 pub mod router;
 pub mod threads;
