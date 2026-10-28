@@ -5863,3 +5863,80 @@ items:
       - 'InterruptResolved.resolved_by for a terminal answer names the user who paired the machine; live test'
     verify:
       - 'bash scripts/hub-test.sh machine_do'
+
+  - id: M2-003d
+    title: 'Create the GitHub OAuth App for the hub and set its secrets'
+    milestone: M2
+    phase: P4
+    owner: human
+    status: "blocked"
+    blocked_on: 'human: a GitHub OAuth App and Cloudflare secrets'
+    deps: [M2-003b]
+    acceptance:
+      - 'A GitHub OAuth App exists with callback https://<hub>/auth/github/callback; GITHUB_CLIENT_SECRET is a Worker secret; GITHUB_CLIENT_ID and HUB_PUBLIC_URL are set for the hub; migration 0014 applied'
+    verify: []
+    howto: 'github.com → Settings → Developer settings → OAuth Apps → New. Homepage = the hub URL, callback = <hub>/auth/github/callback. Then in crates/hub: `wrangler secret put GITHUB_CLIENT_SECRET`, add GITHUB_CLIENT_ID and HUB_PUBLIC_URL to the deployed environment vars, `wrangler d1 migrations apply DB`. Leave GITHUB_API_BASE unset. Needs M2-014 (Cloudflare resources) first.'
+
+  - id: M2-003e
+    title: 'hub (security): GitHub sign-in hardening — per-IP limit on unauthenticated authorize starts; purge expired oauth_requests/oauth_codes/org_invites in the hourly cron; link a pre-created user by login only if created < 7 days ago and confirm on first sign-in (GitHub logins can be renamed and re-registered)'
+    milestone: M2
+    phase: P3
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-003b]
+    paths:
+      - 'crates/hub/src/auth/github*'
+      - 'crates/hub/src/devices/limits.rs'
+      - 'crates/hub/src/worker.rs'
+      - 'crates/hub/tests/oauth.rs'
+    context:
+      - 'docs/ledger/reports/M2-003b.md (Security notes, Discovered work)'
+    acceptance:
+      - 'authorize is limited per CF-Connecting-IP (native test); the cron purges expired rows (native test with injected clock); login-only linking follows the rule above (native + live test)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh oauth'
+
+  - id: M2-003f
+    title: 'Bootstrap owner gets a GitHub login (BOOTSTRAP_OWNER_GITHUB_LOGIN), so the first owner can sign in with GitHub'
+    milestone: M2
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-003b]
+    paths:
+      - 'crates/hub/src/auth/service.rs'
+      - 'crates/hub/src/auth/github*'
+      - 'crates/hub/tests/oauth.rs'
+    context:
+      - 'docs/ledger/reports/M2-003b.md (Discovered work)'
+    acceptance:
+      - 'With BOOTSTRAP_OWNER_GITHUB_LOGIN set, the first GitHub sign-in of that login becomes the owner; live test'
+    verify:
+      - 'bash scripts/hub-test.sh oauth'
+
+  - id: WEB-006
+    title: 'web: GitHub sign-in (PKCE verifier in sessionStorage, /#/auth/github?code= handling) and a members/invites settings screen'
+    milestone: M2b
+    phase: P3
+    lane: client
+    size: M
+    risk: medium
+    deps: [M2-003b, WEB-004]
+    paths:
+      - 'web/src/**'
+      - 'web/index.html'
+      - 'web/styles.css'
+      - 'web/tests/signin_github.spec.js'
+      - 'web/tests/members.spec.js'
+      - 'web/tests/helpers*'
+    context:
+      - 'docs/specs/client-api.md §5.9'
+      - 'docs/ledger/reports/M2-003b.md'
+    acceptance:
+      - 'Sign in with GitHub against the mock GitHub ends with a working session; the verifier never leaves sessionStorage and the code is read from the fragment then removed from history'
+      - 'Admins list members, invite by GitHub login, change roles, remove members; viewers see the list only'
+    verify:
+      - 'cd web && npx playwright test tests/signin_github.spec.js tests/members.spec.js'
