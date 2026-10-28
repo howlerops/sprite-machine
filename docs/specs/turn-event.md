@@ -98,7 +98,7 @@ persists an envelope. Producers do not rely on redaction: they never put credent
 - **thread**: both null.
 
 The **ACP source** column names the ACP v1 message (`session/update` → `sessionUpdate`
-value) it is mapped from (`crates/protocol/src/mapping/acp.rs`, item M1A-006a). Every
+value) it is mapped from (`crates/protocol/src/mapping/acp_turn*` (`AcpTurnMapper`, `SequenceValidator`), item M1A-006a). Every
 variant has a schema in `events/<Type>.schema.json` and an example in `examples/<Type>.json`.
 
 ### 4.1 Lifecycle
@@ -260,6 +260,31 @@ scope in a thread. The hub re-synthesises snapshots at subscription time (§6).
 **`Presence`** (scope: thread). Published by the Machine DO into every thread hosted on the
 machine when its presence changes. Fields: `machine_id` ✓, `state` ✓ (`online` \| `asleep` \|
 `offline`), `since` ✓.
+
+### 4.9 Mapper decisions (settled by M1A-006a, SPEC-001a)
+
+These cases are not spelled out by ACP; `AcpTurnMapper` implements them and they are normative:
+
+- **`user_message_chunk`** (ACP replay of the user's own text): inside a run it becomes
+  `Raw{source:"acp"}`; outside a task it is dropped. `UserMessage` comes from the hub
+  (client-api.md §6); `session/load` replay into `UserMessage` is future work (M1A-006d).
+- **Cancel or expiry while a run is paused on an interrupt**: emit
+  `InterruptResolved{cancelled|expired}` for each open interrupt, then a short
+  `RunStarted{resume}` run that closes open tool calls with `ToolCallEnd{failed}`, then
+  `RunError{cancelled}` / `RunError{error, code:"expired"}`. ACP updates queued during the pause
+  are dropped.
+- **A tool call still open at the end of a turn**: closed with `ToolCallEnd{completed}` when the
+  stop reason is `end_turn`, `ToolCallEnd{failed}` for any other stop reason or error.
+- **`session_info_update`**: only the title maps (`StateDelta{thread}` on `/title`). The hub owns
+  `pending_tasks`; a runner never sends a `StateSnapshot{thread}` that would overwrite it.
+- **Message boundaries**: a chunk with a different ACP `messageId` (when present) closes the
+  open message and starts a new one, as does any update of another kind.
+- **`ToolCallResult.content`** carries text and https file parts only; images, audio and binary
+  resources stay in `raw`.
+- **Size caps**: diff and text deltas are split above 96 KiB, terminal output above 64 KiB per
+  event; the closing terminal snapshot keeps the last 128 KiB of output so it fits §2.
+- **Invalid ids**: ACP tool-call ids outside the Id pattern are hashed to `tc_<hash>`; permission
+  options with an invalid `optionId` are dropped.
 
 ## 5. Tasks, runs and ordering rules
 
