@@ -6114,3 +6114,42 @@ items:
     verify:
       - 'python3 -I spikes/bench/validate_results.py spikes/bench/results/gpui-kit/*/*.json'
     howto: 'On a Linux desktop with a GPU or a Mac: install the deps from scripts/setup-dev.sh, then `bash spikes/bench/run-desktop.sh` from the repo root (Linux) and commit spikes/bench/results/gpui-kit/; on macOS this needs the macOS variant of the script (part of M1B-010).'
+
+  - id: M3-002a
+    title: 'client (desktop): a runnable app — bin target calling shell::run, editable hub address in settings, AppShell connectivity fed from client_core::Connection'
+    milestone: M3
+    phase: P3
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-002, M3-001h]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/main.rs'
+      - 'crates/client-gpui/Cargo.toml'
+      - 'crates/client-gpui/tests/shell.rs'
+    context:
+      - 'docs/ledger/reports/M3-002.md (Notes, Discovered work)'
+    acceptance:
+      - 'cargo run -p client-gpui starts the shell; the hub address can be edited in settings and persists; the banner follows a Connection (headless test drives Offline → Online)'
+    verify:
+      - 'cargo test -p client-gpui --test shell'
+
+  - id: M3-002b
+    title: 'client (desktop): session token in the OS keychain (macOS Keychain / Windows Credential Manager / Secret Service), FileStore as fallback'
+    milestone: M3
+    phase: P4
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-002]
+    paths:
+      - 'crates/client-gpui/src/shell/session.rs'
+      - 'crates/client-gpui/Cargo.toml'
+      - 'crates/client-gpui/tests/shell.rs'
+    context:
+      - 'docs/ledger/reports/M3-002.md (Discovered work)'
+    acceptance:
+      - 'A SessionStore backed by the OS keychain where available; tests with a fake keychain; FileStore stays the fallback'
+    verify:
+      - 'cargo test -p client-gpui --test shell'
