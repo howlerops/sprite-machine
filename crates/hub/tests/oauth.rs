@@ -89,6 +89,17 @@ fn http_to(
     token: Option<&str>,
     body: Option<&Value>,
 ) -> Reply {
+    http_with(authority, method, path, token, body, &[])
+}
+
+fn http_with(
+    authority: &str,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&Value>,
+    headers: &[(&str, &str)],
+) -> Reply {
     let mut stream = TcpStream::connect(authority)
         .unwrap_or_else(|error| panic!("cannot connect to {authority}: {error}"));
     stream
@@ -98,6 +109,9 @@ fn http_to(
         format!("{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n");
     if let Some(token) = token {
         request.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
     }
     let payload = body.map(Value::to_string).unwrap_or_default();
     if body.is_some() {
@@ -114,7 +128,19 @@ fn http_to(
 }
 
 fn http(method: &str, path: &str, token: Option<&str>, body: Option<&Value>) -> Reply {
-    http_to(&hub_authority(), method, path, token, body)
+    // wrangler dev sets `CF-Connecting-IP` on every request, and the authorize start is limited
+    // per IP: give each call its own address so only the rate-limit test meets the limit.
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    let n = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+    let ip = format!("10.{}.{}.{}", (n >> 16) & 255, (n >> 8) & 255, n & 255);
+    http_with(
+        &hub_authority(),
+        method,
+        path,
+        token,
+        body,
+        &[("CF-Connecting-IP", &ip)],
+    )
 }
 
 fn parse_reply(text: &str) -> Reply {
@@ -924,4 +950,37 @@ fn membership_is_required_for_org_routes_and_removal_ends_the_session() {
         next_id(),
     );
     assert_eq!(landing.param("error").as_deref(), Some("access_denied"));
+}
+
+/// M2-003e: the unauthenticated start is limited per `CF-Connecting-IP`; other IPs and the rest of
+/// the suite (which sends no such header) are not affected.
+#[test]
+fn authorize_is_rate_limited_per_connecting_ip() {
+    let (_, challenge) = pkce();
+    let path = authorize_path(&loopback(), &challenge, &unique("ratelimit"));
+    let start = |ip: &str| {
+        http_with(
+            &hub_authority(),
+            "GET",
+            &path,
+            None,
+            None,
+            &[("CF-Connecting-IP", ip)],
+        )
+    };
+    // A documentation-range address, unique per run so a rerun inside the same minute does not
+    // start already limited.
+    let ip = format!("198.51.100.{}", next_id() % 250 + 1);
+    let statuses: Vec<u16> = (0..12).map(|_| start(&ip).status).collect();
+    assert_eq!(&statuses[..10], &[302; 10], "the first ten are allowed");
+    assert_eq!(&statuses[10..], &[429, 429], "then the limit holds");
+    let limited = start(&ip);
+    assert_eq!(limited.json()["error"], json!("rate_limited"));
+    let wait: u64 = limited
+        .header("retry-after")
+        .and_then(|v| v.parse().ok())
+        .expect("Retry-After seconds");
+    assert!((1..=60).contains(&wait), "retry after {wait}");
+    // Another address is untouched.
+    assert_eq!(start("203.0.113.250").status, 302);
 }

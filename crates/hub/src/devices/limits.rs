@@ -9,6 +9,9 @@
 //! - `POST /v1/devices/token` (the runner's poll, M2B-005c): per `CF-Connecting-IP` (when
 //!   present) 60 per minute. Every call counts, since each one costs a D1 read.
 //!
+//! - `GET /v1/auth/github/authorize` (M2-003e): per `CF-Connecting-IP` (when present) 10 per
+//!   minute, since it is unauthenticated and writes a row.
+//!
 //! The clock is passed in. Expired pairings (after a grace period, so a late poll still sees
 //! `expired_token`) and old attempts are purged by [`purge`], from the cron trigger and
 //! opportunistically when a pairing starts.
@@ -20,6 +23,7 @@ pub const APPROVE_FAILS_PER_MINUTE: i64 = 5;
 pub const APPROVE_FAILS_PER_HOUR: i64 = 20;
 pub const CODE_PER_IP_PER_MINUTE: i64 = 10;
 pub const TOKEN_PER_IP_PER_MINUTE: i64 = 60;
+pub const AUTHORIZE_PER_IP_PER_MINUTE: i64 = 10;
 /// Live (pending, unexpired) pairings the hub holds at once.
 pub const MAX_PENDING: i64 = 1000;
 
@@ -170,6 +174,28 @@ pub async fn check_token(
     };
     let scope = format!("token:ip:{}", ip.chars().take(64).collect::<String>());
     if let Some(hit) = over(db, &scope, now_ms, TOKEN_PER_IP_PER_MINUTE, MINUTE_MS)
+        .await
+        .map_err(db_failure)?
+    {
+        return Ok(Some(hit));
+    }
+    record(db, &scope, now_ms).await?;
+    Ok(None)
+}
+
+/// Gate for `GET /v1/auth/github/authorize`: `Some` when `client_ip` already started
+/// [`AUTHORIZE_PER_IP_PER_MINUTE`] sign-ins in the last minute; an allowed call is counted. No IP
+/// (local dev, no Cloudflare in front) means no limit.
+pub async fn check_authorize(
+    db: &impl Db,
+    client_ip: Option<&str>,
+    now_ms: i64,
+) -> Result<Option<Limited>, ApiError> {
+    let Some(ip) = client_ip.map(str::trim).filter(|ip| !ip.is_empty()) else {
+        return Ok(None);
+    };
+    let scope = format!("authorize:ip:{}", ip.chars().take(64).collect::<String>());
+    if let Some(hit) = over(db, &scope, now_ms, AUTHORIZE_PER_IP_PER_MINUTE, MINUTE_MS)
         .await
         .map_err(db_failure)?
     {

@@ -14,10 +14,11 @@ use serde_json::{Value, json};
 use super::github::{
     CODE_TTL_MS, GithubConfig, GithubUser, INVITE_TTL_MS, Pending, RedirectKind, STATE_TTL_MS,
     authorize, begin_callback, classify_redirect, error_location, finish_callback, parse_query,
-    parse_token_response, parse_user, redeem, s256_challenge,
+    parse_token_response, parse_user, purge, redeem, s256_challenge,
 };
 use super::{Principal, authenticate};
 use crate::db::{Db, DbError, MIGRATIONS, Param, Role, Row};
+use crate::devices::limits;
 use crate::threads::ApiError;
 
 pub(crate) const T0: i64 = 1_800_000_000_000;
@@ -181,7 +182,7 @@ fn with(
 }
 
 fn start(db: &Fake, params: &[(String, String)], now: i64) -> Result<String, ApiError> {
-    block_on(authorize(db, &config(), params, now))
+    block_on(authorize(db, &config(), params, None, now))
 }
 
 /// The `state` GitHub would send back, read from the redirect to GitHub.
@@ -654,6 +655,7 @@ fn an_existing_user_with_the_login_and_no_github_id_is_linked_once() {
     let db = Fake::new();
     seed_org(&db, "org_a", "usr_owner");
     db.exec("UPDATE users SET github_login = 'Boss' WHERE id = 'usr_owner'");
+    age_user(&db, "usr_owner", T0, DAY_MS);
     let location = sign_in(&db, &alice(7007, "boss"), LOOPBACK, T0);
     let code = param_of(&location, "code").expect("code");
     let granted = token(&db, &code, VERIFIER, LOOPBACK, T0).expect("token");
@@ -666,6 +668,146 @@ fn an_existing_user_with_the_login_and_no_github_id_is_linked_once() {
     // Another account that merely has the same login cannot take the user over now.
     let other = sign_in(&db, &alice(8008, "boss"), LOOPBACK, T0);
     assert_eq!(param_of(&other, "error").as_deref(), Some("access_denied"));
+}
+
+// ---- sign-in hardening (M2-003e) -------------------------------------------------------------
+
+fn start_from(db: &Fake, ip: Option<&str>, now: i64) -> Result<String, ApiError> {
+    block_on(authorize(db, &config(), &query(LOOPBACK), ip, now))
+}
+
+#[test]
+fn authorize_is_limited_per_connecting_ip() {
+    let db = Fake::new();
+    for n in 0..limits::AUTHORIZE_PER_IP_PER_MINUTE {
+        start_from(&db, Some("203.0.113.7"), T0 + n).expect("under the limit");
+    }
+    let limited = start_from(&db, Some("203.0.113.7"), T0 + 1000).expect_err("over the limit");
+    assert_eq!(limited.status, 429);
+    assert_eq!(limited.code, "rate_limited");
+    assert!(limits::retry_after(&limited).is_some_and(|s| (1..=60).contains(&s)));
+    // A refused start stores nothing.
+    assert_eq!(
+        db.count("SELECT COUNT(*) AS n FROM oauth_requests"),
+        limits::AUTHORIZE_PER_IP_PER_MINUTE
+    );
+    // Another IP, and a request with no IP (local dev), are not affected.
+    start_from(&db, Some("203.0.113.8"), T0 + 1000).expect("other ip");
+    start_from(&db, None, T0 + 1000).expect("no ip");
+    // The window slides: a minute later the first IP may start again.
+    start_from(&db, Some("203.0.113.7"), T0 + 61_000).expect("window passed");
+}
+
+#[test]
+fn the_hourly_purge_drops_expired_requests_codes_and_invites_only() {
+    let db = Fake::new();
+    seed_org(&db, "org_a", "usr_owner");
+    // Two authorize requests, one expired by the clock below (state TTL 10 minutes).
+    start_from(&db, None, T0).expect("old");
+    start_from(&db, None, T0 + 9 * 60_000).expect("fresh");
+    // One hub code per age.
+    for (id, hash_char, created) in [("oac_old", "a", T0), ("oac_new", "b", T0 + 10 * 60_000)] {
+        db.exec(&format!(
+            "INSERT INTO oauth_codes (id, code_hash, user_id, org_id, redirect_uri, challenge, \
+             created_at_ms, expires_at_ms) VALUES ('{id}', '{}', 'usr_owner', 'org_a', 'x', '{}', {created}, {})",
+            hash_char.repeat(64),
+            "c".repeat(43),
+            created + CODE_TTL_MS
+        ));
+    }
+    invite(
+        &db,
+        "inv_old",
+        "org_a",
+        "olduser",
+        "member",
+        T0 - INVITE_TTL_MS - 1000,
+    );
+    invite(
+        &db,
+        "inv_new",
+        "org_a",
+        "newuser",
+        "member",
+        T0 + 20 * 60_000,
+    );
+
+    let now = T0 + 11 * 60_000;
+    let deleted = block_on(purge(&db, now)).expect("purge");
+    assert_eq!(deleted, (1, 1, 1));
+    assert_eq!(db.count("SELECT COUNT(*) AS n FROM oauth_requests"), 1);
+    let codes = db.rows("SELECT id FROM oauth_codes");
+    assert_eq!((codes.len(), &codes[0]["id"]), (1, &json!("oac_new")));
+    let invites = db.rows("SELECT id FROM org_invites");
+    assert_eq!((invites.len(), &invites[0]["id"]), (1, &json!("inv_new")));
+    // Nothing left to drop on the next pass.
+    assert_eq!(block_on(purge(&db, now)).expect("again"), (0, 0, 0));
+}
+
+/// Backdates a user's `created_at` to `age_ms` before `now`.
+fn age_user(db: &Fake, user_id: &str, now: i64, age_ms: i64) {
+    db.exec(&format!(
+        "UPDATE users SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', {}, 'unixepoch') WHERE id = '{user_id}'",
+        (now - age_ms) / 1000
+    ));
+}
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+#[test]
+fn a_pre_created_user_is_linked_by_login_only_in_the_first_seven_days_and_the_link_is_audited() {
+    let db = Fake::new();
+    seed_org(&db, "org_a", "usr_young");
+    db.exec(
+        "UPDATE users SET github_login = 'Young' WHERE id = 'usr_young';
+         INSERT INTO users (id, display_name, github_login) VALUES ('usr_old', 'Old', 'Old');
+         INSERT INTO members (org_id, user_id, role) VALUES ('org_a', 'usr_old', 'admin');",
+    );
+    age_user(&db, "usr_young", T0, 6 * DAY_MS);
+    age_user(&db, "usr_old", T0, 8 * DAY_MS);
+
+    // Younger than 7 days: linked, and the redeem audits it.
+    let location = sign_in(&db, &alice(5001, "young"), LOOPBACK, T0);
+    let code = param_of(&location, "code").expect("young is linked");
+    let granted = token(&db, &code, VERIFIER, LOOPBACK, T0).expect("token");
+    assert_eq!(granted["user"]["id"], json!("usr_young"));
+    assert_eq!(
+        db.rows("SELECT github_id FROM users WHERE id = 'usr_young'")[0]["github_id"],
+        json!(5001)
+    );
+    let audited = db.rows("SELECT target_id FROM audit_log WHERE action = 'auth.github.link'");
+    assert_eq!(audited.len(), 1);
+    assert_eq!(audited[0]["target_id"], json!("usr_young"));
+
+    // Older than 7 days: the login alone is not enough. Refused like an unknown account, and the
+    // old user stays unlinked.
+    let refused = sign_in(&db, &alice(5002, "old"), LOOPBACK, T0);
+    assert_eq!(
+        param_of(&refused, "error").as_deref(),
+        Some("access_denied")
+    );
+    assert!(db.rows("SELECT github_id FROM users WHERE id = 'usr_old'")[0]["github_id"].is_null());
+    assert_eq!(
+        db.count("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'auth.github.link'"),
+        1
+    );
+
+    // A fresh invite is the way in: a new user is made, and the stale user loses the login.
+    invite(&db, "inv_old", "org_a", "old", "member", T0);
+    let again = sign_in(&db, &alice(5002, "old"), LOOPBACK, T0 + 1);
+    assert!(param_of(&again, "code").is_some());
+    let fresh = db.rows("SELECT id FROM users WHERE github_id = 5002");
+    assert_eq!(fresh.len(), 1);
+    assert_ne!(fresh[0]["id"], json!("usr_old"));
+    assert!(
+        db.rows("SELECT github_login FROM users WHERE id = 'usr_old'")[0]["github_login"].is_null()
+    );
+
+    // Just over seven days is already too old.
+    db.exec("INSERT INTO users (id, display_name, github_login) VALUES ('usr_edge', 'E', 'Edge')");
+    age_user(&db, "usr_edge", T0 + 10, 7 * DAY_MS + 10);
+    let edge = sign_in(&db, &alice(5003, "edge"), LOOPBACK, T0 + 10);
+    assert_eq!(param_of(&edge, "error").as_deref(), Some("access_denied"));
 }
 
 // ---- GitHub replies --------------------------------------------------------------------------

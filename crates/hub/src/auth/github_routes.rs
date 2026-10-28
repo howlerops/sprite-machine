@@ -15,7 +15,7 @@ use axum::{
     extract::{Request, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
-        header::{CACHE_CONTROL, LOCATION},
+        header::{CACHE_CONTROL, LOCATION, RETRY_AFTER},
     },
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -27,6 +27,7 @@ use super::github::{self, GithubConfig, GithubUser, pct_encode};
 use super::routes::error_response;
 use super::service::parse_body;
 use crate::db::d1::D1;
+use crate::devices::limits;
 use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::threads::ApiError;
 use crate::worker::AppState;
@@ -40,6 +41,21 @@ pub fn github_routes() -> Router<AppState> {
         .route("/v1/auth/github/authorize", get(authorize))
         .route(github::CALLBACK_PATH, get(callback))
         .route("/v1/auth/github/token", post(token))
+}
+
+/// The cron trigger's work: purge expired authorize requests, hub codes and invites.
+pub async fn purge_scheduled(env: &Env) {
+    let result = async {
+        let database = database(env)?;
+        github::purge(&D1::new(&database), now_ms()).await
+    }
+    .await;
+    match result {
+        Ok((requests, codes, invites)) => worker::console_log!(
+            "github purge: {requests} requests, {codes} codes, {invites} invites"
+        ),
+        Err(error) => worker::console_log!("github purge failed: {}", error.message),
+    }
 }
 
 fn now_ms() -> i64 {
@@ -126,12 +142,25 @@ async fn authorize(State(env): State<AppState>, req: Request) -> Response {
         let config = config(&env, req.headers())?;
         let query = github::parse_query(req.uri().query().unwrap_or(""));
         let database = database(&env)?;
-        github::authorize(&D1::new(&database), &config, &query, now_ms()).await
+        // Cloudflare sets this from the connection; the rate limit is per IP when it is present.
+        let client_ip = req
+            .headers()
+            .get("cf-connecting-ip")
+            .and_then(|value| value.to_str().ok());
+        github::authorize(&D1::new(&database), &config, &query, client_ip, now_ms()).await
     }
     .await;
     match result {
         Ok(location) => redirect(&location),
-        Err(error) => error_response(&error),
+        Err(error) => {
+            let mut response = error_response(&error);
+            if let Some(seconds) = limits::retry_after(&error)
+                && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+            {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+            response
+        }
     }
 }
 

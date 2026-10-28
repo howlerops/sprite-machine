@@ -39,6 +39,7 @@ use super::service::{BROWSER_SESSION_TTL_SECONDS, discard_member_session, issue_
 use super::token::{ct_eq, hash_token, new_id, new_token};
 use crate::audit::{self, Event};
 use crate::db::{Db, DbError, Role};
+use crate::devices::limits;
 use crate::threads::ApiError;
 
 /// The `state` sent to GitHub lives this long.
@@ -49,6 +50,9 @@ pub const CODE_TTL_MS: i64 = 2 * 60 * 1000;
 pub const INVITE_TTL_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 /// Session lifetime for the desktop app (the web page uses the browser session lifetime).
 const DESKTOP_SESSION_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+/// Rides in `oauth_codes.invite_ids` when the sign-in linked a pre-created user by login, so the
+/// redeem can audit it (`auth.github.link`). Not an invite id (those start with `inv_`).
+const LINKED_MARKER: &str = "@linked";
 /// The path GitHub redirects to; also the web page's `redirect_uri`.
 pub const CALLBACK_PATH: &str = "/auth/github/callback";
 const LOOPBACK_PATH: &str = "/callback";
@@ -227,12 +231,19 @@ fn is_valid_app_state(value: &str) -> bool {
 /// `GET /v1/auth/github/authorize?...`: validates the request, stores it and returns the GitHub
 /// URL to redirect the browser to. Query: `redirect_uri`, `code_challenge`,
 /// `code_challenge_method=S256`, `state`, optional `org_id` (the org the session is for).
+///
+/// Open to the world and every call writes a row, so it is limited per `client_ip`
+/// (`CF-Connecting-IP`, `limits::check_authorize`; no IP means no limit): `429` + `Retry-After`.
 pub async fn authorize(
     db: &impl Db,
     config: &GithubConfig,
     query: &[(String, String)],
+    client_ip: Option<&str>,
     now_ms: i64,
 ) -> Result<String, ApiError> {
+    if let Some(limited) = limits::check_authorize(db, client_ip, now_ms).await? {
+        return Err(limited.into_api());
+    }
     let bad = |message: &str| ApiError::invalid_request(message.to_owned());
     let redirect_uri =
         param(query, "redirect_uri").ok_or_else(|| bad("redirect_uri is required"))?;
@@ -301,6 +312,12 @@ pub struct Pending {
     pub challenge: String,
     pub app_state: String,
     pub org_id: Option<String>,
+}
+
+/// The hourly cron's work: drops expired authorize requests, codes and invites. Returns the rows
+/// deleted `(requests, codes, invites)`.
+pub async fn purge(db: &impl Db, now_ms: i64) -> Result<(u64, u64, u64), ApiError> {
+    store::purge_expired(db, now_ms).await.map_err(db_failure)
 }
 
 /// Consumes the `state` GitHub sent back. `None` when it is unknown, used or expired (the caller
@@ -418,14 +435,19 @@ pub async fn finish_callback(
     let denied = || error_location(pending, &config.hub_origin, "access_denied");
     let login = user.login.to_ascii_lowercase();
 
+    let mut linked = false;
     let mut hub_user = store::user_by_github_id(db, user.id)
         .await
         .map_err(db_failure)?;
     if hub_user.is_none() {
-        // A user an admin created with this login and no GitHub id yet is linked, once.
-        hub_user = store::link_user_by_login(db, user.id, &login)
+        // A user an admin created with this login and no GitHub id yet is linked, once, and
+        // only while they are younger than 7 days: an older one may belong to a login that was
+        // renamed and re-registered, so that sign-in needs a fresh invite instead. The link is
+        // audited when the code is redeemed (`LINKED_MARKER` in the code's invite list).
+        hub_user = store::link_user_by_login(db, user.id, &login, now_ms)
             .await
             .map_err(db_failure)?;
+        linked = hub_user.is_some();
     }
     let invites = store::open_invites(db, &login, now_ms)
         .await
@@ -449,6 +471,9 @@ pub async fn finish_callback(
     };
 
     let mut accepted = Vec::new();
+    if linked {
+        accepted.push(LINKED_MARKER.to_owned());
+    }
     for invite in &invites {
         if store::accept_invite(db, invite, &user_id, now_ms)
             .await
@@ -563,6 +588,15 @@ pub async fn redeem(
         json!({ "github_login": login, "client": device_name }),
     )];
     for invite_id in row.invite_ids.split(',').filter(|id| !id.is_empty()) {
+        if invite_id == LINKED_MARKER {
+            events.push((
+                "auth.github.link",
+                "user",
+                row.user_id.clone(),
+                json!({ "github_login": login, "by": "login" }),
+            ));
+            continue;
+        }
         events.push((
             "member.invite.accept",
             "invite",
