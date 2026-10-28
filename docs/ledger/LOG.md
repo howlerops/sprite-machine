@@ -132,3 +132,4 @@
 2026-10-28T07:47Z M2B-011a assigned→done merged eba1bf6 (haiku; one denied stray create_session call); leader fix 5a89c03 for its discovered item (ids validated in every entry point)
 2026-10-28T07:50Z M1A-006d assigned→done merged e747f34 (sonnet). End-to-end crash window closed
 2026-10-28T07:50Z M1A-006e acceptance += prune applied-keys set; assigned (haiku). M2B-004c assigned (haiku)
+2026-10-28T07:51Z leader: disk 3.6 GB free → deleted 52 stale test executables (1.9 GB) + stale workspace rlibs older than 60 min from the shared target; 5.4 GB free
