@@ -2846,6 +2846,24 @@ items:
     verify:
       - 'grep -q audit docs/specs/tunnel.md'
 
+  - id: M2-008g
+    title: 'hub privacy: redact secrets in stored prompt parts (tasks table, pending preview); the queued prompt/dispatch command keeps the raw prompt only until delivered'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-008a]
+    paths:
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/tests/thread_hardening.rs'
+    context:
+      - 'docs/ledger/reports/M2-008a.md (Discovered work 1)'
+    acceptance:
+      - 'TaskRecord.parts and the GET /pending preview are stored/served redacted (threads::redact); the outbound prompt/dispatch command carries the raw text to the runner and its stored copy is dropped (or redacted) once acked; tests'
+    verify:
+      - 'cargo test -p hub'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2

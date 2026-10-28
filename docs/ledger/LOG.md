@@ -190,3 +190,4 @@
 2026-10-28T12:33Z WEB-001 back (sonnet; out-of-path web/.assetsignore accepted). Added M2B-002b (machines list shape per §5.1, live dev-fixtures 404)
 2026-10-28T12:44Z M2B-007b → done, M1A-006g → done (verify13 + leader fix ac9179c for a tunnel_client test race; authz flaked under load, passed alone)
 2026-10-28T12:44Z WEB-001 and M2B-008 merged; .gitignore for web test output. M2B-008 criterion 2 corrected by leader (remote terminal = phone raw shell, not the agent terminal tool). Added M2B-008c (P4 spec decision). Verify running
+2026-10-28T12:51Z M2-008a back (haiku; mutation-checked redaction). Leader: turn-event §6 amended d47050c (state floor at 50 runs, replay error message). Added M2-008g (P4: redact stored prompt parts)
