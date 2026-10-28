@@ -20,6 +20,8 @@ use protocol::turn_event::{Checkpoint, CheckpointKind, is_valid_id};
 const CHECKPOINT_NS: &str = "refs/sm/checkpoints";
 const IDENTITY_NAME: &str = "sm checkpoint";
 const IDENTITY_EMAIL: &str = "checkpoint@sm.invalid";
+/// Attempts at claiming a checkpoint number before `take` gives up.
+const TAKE_ATTEMPTS: usize = 16;
 
 static TEMP_INDEX_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -51,51 +53,66 @@ pub struct Diff {
 }
 
 /// Takes the next checkpoint (n = last + 1, or 1) of `thread` for the repository containing `dir`.
+///
+/// The ref is created with an expected old value of zero, so it only succeeds if no other take
+/// has claimed that n. A take that loses such a race recomputes n and tries again.
 pub fn take(dir: &Path, thread: &str, label: Option<&str>) -> Result<Snapshot> {
     ensure!(is_valid_id(thread), "invalid thread id {thread:?}");
     let repo = Repo::open(dir)?;
-    let n = repo
-        .checkpoint_numbers(thread)?
-        .into_iter()
-        .max()
-        .map_or(1, |last| last + 1);
-    let git_ref = checkpoint_ref(thread, n);
-    repo.git(&["check-ref-format", &git_ref], &[])
-        .with_context(|| format!("checkpoint ref {git_ref} is not a valid git ref"))?;
-
     let tree = repo.working_tree()?;
-    let parent = if n > 1 {
-        Some(repo.resolve_commit(&checkpoint_ref(thread, n - 1))?)
-    } else {
-        None
-    };
-    let base_tree = match &parent {
-        Some(commit) => repo.commit_tree(commit)?,
-        None => repo.text(&["mktree"], &[])?,
-    };
-    let files_changed = repo.changed_paths(&base_tree, &tree)?.len() as u64;
-
-    let message = match label {
-        Some(label) => format!("sm checkpoint {n}: {label}"),
-        None => format!("sm checkpoint {n}"),
-    };
     let identity = identity_env();
-    let mut args = vec!["commit-tree", tree.as_str(), "-m", message.as_str()];
-    if let Some(parent) = parent.as_deref() {
-        args.extend(["-p", parent]);
-    }
-    let commit = repo.text(&args, &identity)?;
-    repo.git(&["update-ref", &git_ref, &commit], &[])?;
+    let mut last_error = String::new();
 
-    Ok(Snapshot {
-        thread: thread.to_owned(),
-        n,
-        git_ref,
-        commit,
-        tree,
-        files_changed,
-        label: label.map(str::to_owned),
-    })
+    for _ in 0..TAKE_ATTEMPTS {
+        let n = repo
+            .checkpoint_numbers(thread)?
+            .into_iter()
+            .max()
+            .map_or(1, |last| last + 1);
+        let git_ref = checkpoint_ref(thread, n);
+        repo.git(&["check-ref-format", &git_ref], &[])
+            .with_context(|| format!("checkpoint ref {git_ref} is not a valid git ref"))?;
+
+        let parent = if n > 1 {
+            Some(repo.resolve_commit(&checkpoint_ref(thread, n - 1))?)
+        } else {
+            None
+        };
+        let base_tree = match &parent {
+            Some(commit) => repo.commit_tree(commit)?,
+            None => repo.text(&["mktree"], &[])?,
+        };
+        let files_changed = repo.changed_paths(&base_tree, &tree)?.len() as u64;
+
+        let message = match label {
+            Some(label) => format!("sm checkpoint {n}: {label}"),
+            None => format!("sm checkpoint {n}"),
+        };
+        let mut args = vec!["commit-tree", tree.as_str(), "-m", message.as_str()];
+        if let Some(parent) = parent.as_deref() {
+            args.extend(["-p", parent]);
+        }
+        let commit = repo.text(&args, &identity)?;
+
+        // An all-zero old value means "the ref must not exist": git refuses the update if
+        // another take created this n first, so nothing is ever overwritten.
+        let zero = "0".repeat(commit.len());
+        match repo.git(&["update-ref", &git_ref, &commit, &zero], &[]) {
+            Ok(_) => {
+                return Ok(Snapshot {
+                    thread: thread.to_owned(),
+                    n,
+                    git_ref,
+                    commit,
+                    tree,
+                    files_changed,
+                    label: label.map(str::to_owned),
+                });
+            }
+            Err(error) => last_error = format!("{error:#}"),
+        }
+    }
+    bail!("could not claim a checkpoint number for thread {thread:?}: {last_error}")
 }
 
 /// The checkpoint numbers that exist for `thread`, unordered.
@@ -167,8 +184,51 @@ pub fn checkpoint_event(snapshot: &Snapshot, checkpoint_id: &str) -> Checkpoint 
     }
 }
 
+/// Encodes a valid protocol thread id (`is_valid_id`) as one git ref name component.
+///
+/// An id that is already a valid component is returned unchanged, so existing refs keep working.
+/// Any other id has `:` replaced by `+` and `.` replaced by `%`. Those two characters never
+/// occur in a valid id, so the encoded form cannot collide with an unchanged id, and the length
+/// stays the same. [`decode_thread`] inverts it.
+pub fn encode_thread(thread: &str) -> String {
+    if is_plain_component(thread) {
+        return thread.to_owned();
+    }
+    thread
+        .chars()
+        .map(|c| match c {
+            ':' => '+',
+            '.' => '%',
+            other => other,
+        })
+        .collect()
+}
+
+/// Inverts [`encode_thread`]. Fails on a component that encoding could not have produced.
+pub fn decode_thread(component: &str) -> Result<String> {
+    component
+        .chars()
+        .map(|c| match c {
+            '+' => Ok(':'),
+            '%' => Ok('.'),
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '-' | '.' => Ok(c),
+            other => bail!("{component:?} is not an encoded thread id (found {other:?})"),
+        })
+        .collect()
+}
+
+/// True when `id` can be a git ref name component unchanged (no `:`, no `..`, no leading or
+/// trailing `.`, no `.lock` suffix). Ids that pass `is_valid_id` contain nothing else git rejects.
+fn is_plain_component(id: &str) -> bool {
+    !id.contains(':')
+        && !id.contains("..")
+        && !id.starts_with('.')
+        && !id.ends_with('.')
+        && !id.ends_with(".lock")
+}
+
 fn checkpoint_ref(thread: &str, n: u64) -> String {
-    format!("{CHECKPOINT_NS}/{thread}/{n}")
+    format!("{CHECKPOINT_NS}/{}/{n}", encode_thread(thread))
 }
 
 fn identity_env() -> [(&'static str, &'static OsStr); 4] {
@@ -259,7 +319,7 @@ impl Repo {
     }
 
     fn checkpoint_numbers(&self, thread: &str) -> Result<Vec<u64>> {
-        let prefix = format!("{CHECKPOINT_NS}/{thread}/");
+        let prefix = format!("{CHECKPOINT_NS}/{}/", encode_thread(thread));
         let refs = self.text(&["for-each-ref", "--format=%(refname)", CHECKPOINT_NS], &[])?;
         Ok(refs
             .lines()
