@@ -1,6 +1,7 @@
 # ADR 0001: client-stack gates (written before the prototypes)
 
 - Status: accepted (gates only; the decisions are ADR 0001a desktop, M1B-009, and 0001b mobile, M1B-011)
+- Desktop decided: ADR 0001a (gpui-kit, provisional on a GPU frame-time run)
 - Date: 2026-10-27
 - Plan: `docs/PLAN-v2-ade.md` §4.4, §7.3, §7.4
 - Gates file (normative): `spikes/bench/gates.yaml`

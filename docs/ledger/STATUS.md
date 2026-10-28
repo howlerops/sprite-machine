@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 122/282 (4 dropped) · in-flight — · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 113/200
+done 123/282 (4 dropped) · in-flight — · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 113/200
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 122/282 (4 dropped) · in-flight — · blocked 13 (human: M0-014, M0-020, 
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 60 | 0 |
+| P2 | 69 | 61 | 0 |
 | P3 | 27 | 9 | 0 |
 | P4 | 58 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -28,7 +28,7 @@ done 122/282 (4 dropped) · in-flight — · blocked 13 (human: M0-014, M0-020, 
 | M1A-006c | worker | rust | done | runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume |
 | M1B-008b | worker | client | done | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
 | M1B-008c | leader | docs | done | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
-| M1B-009 | leader | docs | todo | ADR 0001a: desktop client stack (no devices needed) |
+| M1B-009 | leader | docs | done | ADR 0001a: desktop client stack (no devices needed) |
 | M2-008b | worker | rust | done | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
 | M2-008c | worker | rust | done | hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO |
 | MVP-000d | worker | rust | done | Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer |

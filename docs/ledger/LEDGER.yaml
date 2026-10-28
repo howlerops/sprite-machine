@@ -1692,6 +1692,8 @@ items:
     title: 'ADR 0001a: desktop client stack (no devices needed)'
     milestone: M1b
     phase: P2
+    status: "done"
+    evidence: "docs/adr/0001a-desktop.md: gpui-kit for desktop; 4/5 gates pass on CPU-only lavapipe; frame time re-run on GPU hardware is the open gate (M1B-008f)"
     lane: docs
     owner: leader
     deps: [M1B-004d, M1B-008, M1B-008c]
