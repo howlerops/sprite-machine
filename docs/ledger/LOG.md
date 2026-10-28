@@ -31,3 +31,10 @@
 2026-10-27T23:21Z M1A-001 assigned→done merged 48a29b6 (discovered: SM_GIT_SHA build script → release items; hub URL validation → M2B-004; no new items)
 2026-10-27T23:22Z M1A-003 todo→assigned attempt 1 (haiku; no overlap with MVP-000)
 2026-10-27T23:48Z leader: added MVP-000a, MVP-000b, SPEC-003 from MVP-000 report; M2-008 + M3-001 now depend on SPEC-003; M1A-003 review passed (ignored re-exec helper accepted as logged exception → M1A-003b)
+2026-10-28T00:04Z MVP-000 review→done merged e60a768 (leader resolved sidecar Cargo.toml dependency union with M1A-001)
+2026-10-28T00:04Z M1A-003 review→done merged 4896911 (removed duplicate protocol dep after auto-merge)
+2026-10-28T00:04Z SPEC-003 todo→done merged 2e60d44; tracer's runner-emitted UserMessage is a stub deviation, fixed by M2-008/M1A-006b
+2026-10-28T00:04Z leader: tracer green after merges (110 tests)
+2026-10-28T00:05Z M2-001 paths += crates/hub/src/tracer/worker.rs (must move the tracer's #[event(fetch)] into the real router)
+2026-10-28T00:05Z M1B-002 todo→assigned attempt 1 (haiku, last P0 worker item)
+2026-10-28T00:05Z M2-001 todo→assigned attempt 1 (haiku)

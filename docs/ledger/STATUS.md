@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 16/191 (3 dropped) · in-flight MVP-000,M1A-003 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 13/120
+done 19/191 (3 dropped) · in-flight M1B-002,M2-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 16/120
 
-MVP-000 under leader verify; M1A-003 review passed, merge queued.
+Batch 7: M1B-002 + M2-001 assigned. Tracer bullet green.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
-| P0 | 12 | 9 | 1 |
-| P1 | 29 | 2 | 1 |
+| P0 | 12 | 10 | 1 |
+| P1 | 29 | 4 | 1 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -26,13 +26,13 @@ MVP-000 under leader verify; M1A-003 review passed, merge queued.
 | M0-002 | leader | rust | done | Cargo workspace skeleton (all crates incl. client-gpui, runner, edges; web/) + Rust CI incl. macos-latest |
 | SPEC-001 | leader | docs | done | Spec: TurnEvent envelope (docs/specs/turn-event.md + JSON Schemas) |
 | SPEC-002 | leader | docs | done | Spec: runner ↔ hub tunnel (docs/specs/tunnel.md) |
-| MVP-000 | worker | rust | assigned | Tracer bullet: acp-mock → runner core → tunnel → hub on wrangler dev → headless client |
+| MVP-000 | worker | rust | done | Tracer bullet: acp-mock → runner core → tunnel → hub on wrangler dev → headless client |
 | M0-003 | worker | client | done | Dev toolchain script (targets, lavapipe/Vulkan + gpui render proof, wrangler, sccache, nextest, worker-build) |
 | M0-006 | worker | rust | done | protocol::acp — re-export ACP v1 schema from the official Rust SDK (agent-client-protocol 3.x) |
 | M0-017 | worker | rust | done | Spike: Cloudflare Workers (workers-rs + axum, SQLite DO + hibernatable WebSocket, D1, R2) under wrangler dev |
 | M1A-002 | worker | rust | done | acp-mock: scriptable ACP v1 agent |
 | GPUI-000 | leader | client | done | Pin gpui + gpui-component, vendor their examples, write client-gpui CONVENTIONS.md |
-| M1B-002 | worker | rust | todo | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
+| M1B-002 | worker | rust | assigned | agui-fixture: synthetic TurnEvent stream server (crate name kept) |
 | M1B-003 | leader | docs | done | Client-stack gates written before prototypes |
 | M1B-004a | worker | client | todo | gpui spike: app shell + virtualized transcript pane |
 
