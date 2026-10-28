@@ -434,6 +434,21 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
 }
 
 #[test]
+fn the_session_route_needs_a_member_and_names_thread_session() {
+    use super::policy::thread_policy;
+    let (db, owner, _) = bootstrapped();
+    let (viewer, _) = issue(&db, &owner, "viewer");
+    let policy =
+        thread_policy("POST", "/v1/threads/th_1/session").expect("the session route has a policy");
+    assert_eq!(
+        (policy.thread_id.as_str(), policy.role, policy.action),
+        ("th_1", Role::Member, Some("thread.session"))
+    );
+    let denied = viewer.require(policy.role).expect_err("viewer");
+    assert_eq!((denied.status, denied.code), (403, "forbidden"));
+}
+
+#[test]
 fn post_threads_needs_a_member_and_names_thread_create() {
     use super::policy::thread_policy;
     let (db, owner, _) = bootstrapped();

@@ -50,6 +50,7 @@ pub fn thread_policy(method: &str, path: &str) -> Option<Policy> {
         }
         (false, "POST", ["prompts"]) => make(Role::Member, Some("thread.prompt"), None),
         (false, "POST", ["cancel"]) => make(Role::Member, Some("thread.cancel"), None),
+        (false, "POST", ["session"]) => make(Role::Member, Some("thread.session"), None),
         (false, "POST", ["interrupts", interrupt_id]) => make(
             Role::Member,
             Some("thread.approval.resolve"),

@@ -43,7 +43,7 @@ use crate::audit::{self, Event};
 use crate::auth::{
     Principal, authenticate, policy::thread_policy, routes::authorize_thread_request,
 };
-use crate::db::{Db, Role, d1::D1};
+use crate::db::{Db, d1::D1};
 use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::worker::AppState;
 
@@ -67,7 +67,7 @@ pub fn thread_routes() -> Router<AppState> {
             post(forward),
         )
         .route("/v1/threads/{thread_id}/cancel", post(forward))
-        .route("/v1/threads/{thread_id}/session", post(session_config))
+        .route("/v1/threads/{thread_id}/session", post(forward))
         .route("/v1/dev/threads/{thread_id}/events", post(forward))
 }
 
@@ -137,79 +137,6 @@ async fn to_thread(env: &Env, thread_id: &str, req: Request) -> Result<Response,
     let req = worker::Request::try_from(req).map_err(internal)?;
     let response = stub.fetch_with_request(req).await.map_err(internal)?;
     Ok(response.into())
-}
-
-/// `POST /v1/threads/{id}/session` (client-api.md §5.5a, M2-008b): member role, audited as
-/// `thread.session`, then forwarded to the Thread DO, which checks the mode and config against
-/// the thread's `session` state and queues the `session_config` command.
-///
-/// `auth::policy` has no rule for this route, so `forward` (which takes its role and audit action
-/// from `thread_policy`) cannot run it. This handler does the same two steps itself: it checks
-/// the member role and writes the audit row before it forwards.
-#[worker::send]
-async fn session_config(
-    State(env): State<AppState>,
-    Path(params): Path<HashMap<String, String>>,
-    req: Request,
-) -> Response {
-    match session_config_inner(&env, &params, req).await {
-        Ok(response) => response,
-        Err(error) => (
-            StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            Json(error.body()),
-        )
-            .into_response(),
-    }
-}
-
-async fn session_config_inner(
-    env: &Env,
-    params: &HashMap<String, String>,
-    mut req: Request,
-) -> Result<Response, ApiError> {
-    let thread_id = params
-        .get("thread_id")
-        .filter(|id| is_valid_id(id))
-        .ok_or_else(|| {
-            ApiError::invalid_request("thread_id must be 1-128 characters of [A-Za-z0-9_:.-]")
-        })?;
-    let database = env
-        .d1("DB")
-        .map_err(|error| ApiError::internal(format!("D1 binding DB: {error}")))?;
-    let db = D1::new(&database);
-    let principal = {
-        let authorization = req
-            .headers()
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok());
-        authenticate(&db, authorization, dev_fixtures(env)).await?
-    };
-    principal.require(Role::Member)?;
-    let request_id_header = req
-        .headers()
-        .get(REQUEST_ID_HEADER)
-        .and_then(|value| value.to_str().ok());
-    let request_id = request_id(request_id_header, worker::Date::now().as_millis());
-    audit::record(
-        &db,
-        &Event::by(
-            &principal,
-            "thread.session",
-            "thread",
-            thread_id,
-            &request_id,
-            json!({ "thread_id": thread_id }),
-        ),
-    )
-    .await?;
-
-    let actor_json =
-        serde_json::to_string(&principal.actor()).map_err(|e| ApiError::internal(e.to_string()))?;
-    let value =
-        HeaderValue::from_str(&actor_json).map_err(|e| ApiError::internal(e.to_string()))?;
-    req.headers_mut()
-        .insert(HeaderName::from_static(ACTOR_HEADER), value);
-    to_thread(env, thread_id, req).await
 }
 
 /// The body limit of `POST /v1/threads` (a prompt's parts travel in it).
