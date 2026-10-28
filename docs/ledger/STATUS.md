@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 98/254 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 92/120
+done 98/254 (3 dropped) · in-flight CI-002,M2-010a,WEB-002,M2B-005f · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 96/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 98/254 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 64 | 45 | 0 |
+| P2 | 64 | 45 | 4 |
 | P3 | 20 | 1 | 0 |
 | P4 | 44 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -40,7 +40,7 @@ done 98/254 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M
 | M1A-006e | worker | rust | done | Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config |
 | M2B-004d | worker | rust | done | runner: OS sleep hook calls SleepHint::asleep (macOS willSleep, Linux logind PrepareForSleep); TunnelSink tracks opened threads (thread_open once per thread, events for an unopened local thread refused) |
 | M2-008d | worker | rust | done | hub authz: POST /v1/threads only for a machine of the caller's org (not revoked); POST /v1/threads in the auth policy table |
-| CI-002 | worker | docs | todo | scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree's hub.wasm stand in) |
+| CI-002 | worker | docs | assigned | scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree's hub.wasm stand in) |
 | M1A-006f | worker | rust | done | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
 | M2B-004e | worker | rust | done | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
 | M2-008e | worker | rust | done | hub authz (security): every thread route checks the thread belongs to the caller's org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404 |
@@ -56,7 +56,7 @@ done 98/254 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M
 | M2B-007b | worker | rust | done | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
 | M2B-005c | worker | rust | done | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
 | M2-011a | worker | rust | done | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
-| M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
+| M2-010a | worker | rust | assigned | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
 | M2B-002b | worker | rust | done | hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES |
 | SPEC-006 | leader | docs | done | Spec: browser-usable auth for the thread subscription (single-use subscribe ticket) |
 | M2-008h | worker | rust | done | hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006) |
@@ -80,10 +80,10 @@ done 98/254 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
 | WEB-001 | worker | rust | done | web: mobile web page — pairing (QR / device code) + session list with presence |
-| WEB-002 | worker | rust | todo | web: transcript rendering for every TurnEvent variant |
+| WEB-002 | worker | rust | assigned | web: transcript rendering for every TurnEvent variant |
 | WEB-003 | worker | rust | todo | web: composer with attachments + Allow/Deny + Stop |
 | WEB-004 | worker | rust | todo | web: PWA + Web Push |
-| M2B-005f | worker | rust | todo | hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect |
+| M2B-005f | worker | rust | assigned | hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect |
 | M2B-009a | worker | rust | done | runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode) |
 
 ## Waiting on the human

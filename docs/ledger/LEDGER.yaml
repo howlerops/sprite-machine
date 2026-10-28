@@ -2290,6 +2290,9 @@ items:
     title: 'scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree''s hub.wasm stand in)'
     milestone: M0
     phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: docs
     size: S
     risk: low
@@ -2776,6 +2779,9 @@ items:
     title: 'Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check'
     milestone: M2
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
@@ -3655,9 +3661,9 @@ items:
     title: 'web: transcript rendering for every TurnEvent variant'
     milestone: M2b
     phase: P2
-    status: "todo"
-    attempt: 1
-    assignee: "worker:haiku"
+    status: "assigned"
+    attempt: 2
+    assignee: "sonnet"
     deps:
       - "WEB-001"
       - "M2-008"
@@ -5304,6 +5310,9 @@ items:
     title: 'hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium

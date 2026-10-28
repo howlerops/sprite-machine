@@ -214,3 +214,4 @@
 - M2B-009a attempt 1 (haiku) rejected: pump thread holds stdin lock forever, trust asker deadlocks on dispatch to an untrusted dir. Attempt 2 (sonnet) builds on it
 - M2B-009a attempt 2 (sonnet) back: Prompt routes stdin to the trust question; merged, runner 177 passed → done. M2B-009b not filed (autoConnect is on M2B-010)
 - verify17 green (workspace 836/0 incl. the sidecar kill test that timed out under load in verify16) → M2B-002b, M2B-012, M2-008h, M2-011a, M2B-005c done
+2026-10-28T15:07Z assign CI-002 (haiku), WEB-002 attempt 2 (sonnet; ticket now exists), M2B-005f (sonnet, security), M2-010a (sonnet, medium)
