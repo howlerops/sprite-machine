@@ -5784,6 +5784,8 @@ items:
     title: 'cli e2e tui: sm TUI session with acp-mock against wrangler dev (/rc registers, a phone prompt shows in the TUI, tunnel drop and restore)'
     milestone: M2b
     phase: P2
+    status: "done"
+    evidence: "dropped: superseded by M2B-019 (e2e rc drives the sm --rc session over the real tunnel, cut and restore) and M2B-019b (rendered screen, hand-typed /rc)"
     lane: rust
     size: S
     risk: medium
@@ -6009,3 +6011,45 @@ items:
       - 'Connection::new with an unreachable hub publishes Offline, and a later reconnect to a live hub publishes Connecting then Online; test'
     verify:
       - 'cargo test -p client-core'
+
+  - id: M2B-019a
+    title: 'runner tui: a line typed while a task runs is queued behind it (like a phone prompt at the hub) or the TUI says busy; never dropped silently'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-019]
+    paths:
+      - 'crates/runner/src/tui/**'
+      - 'crates/runner/tests/tui.rs'
+      - 'crates/cli/src/e2e/rc.rs'
+      - 'web/tests/rc.spec.js'
+    context:
+      - 'docs/ledger/reports/M2B-019.md (Acceptance caveat 2, Discovered work)'
+    acceptance:
+      - 'A prompt typed in the sm TUI while a task runs is queued and runs after it (shown as pending in the TUI); TUI test'
+      - 'cli e2e rc and web/tests/rc.spec.js drop their "type again after the turn" step and still pass'
+    verify:
+      - 'cargo test -p runner --test tui'
+      - 'cargo run -p cli -- e2e rc'
+      - 'cd web && npx playwright test tests/rc.spec.js'
+
+  - id: M2B-019b
+    title: 'cli e2e rc renders the TUI screen (ratatui TestBackend via a runner::tui test driver) and types /rc by hand; covers the rest of M2B-010b'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-019]
+    paths:
+      - 'crates/cli/src/e2e/rc.rs'
+      - 'crates/cli/Cargo.toml'
+      - 'crates/runner/src/tui/**'
+    context:
+      - 'docs/ledger/reports/M2B-019.md'
+    acceptance:
+      - 'e2e rc asserts the rendered screen shows the phone message, the approval resolved by the phone and remote: on after the restore; /rc typed by hand registers the session'
+    verify:
+      - 'cargo run -p cli -- e2e rc'

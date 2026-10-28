@@ -246,3 +246,4 @@
 2026-10-28T19:46Z M2-003e back (sonnet): authorize 10/min per IP, cron purge of oauth rows, 7-day login-link rule (native tests; no live test possible: no route creates a login-only user) → accepted, merged; verify running. Worker reported its worktree began on a commit without crates/ and reset to v2 (second such report): briefs will say to check 'git log -1' is on v2 first
 2026-10-28T19:52Z M1B-008e back (haiku) → merged, done. The leader runs M1B-008c when the hub verify and running workers are idle
 2026-10-28T19:54Z M2-003e verify green → done
+2026-10-28T20:09Z M2B-019 back (sonnet): e2e rc (sm --rc session + headless phone, tunnel cut via TCP proxy: seq 1..51 gap-free, no dups), rc.spec.js 4/4, docs/remote-control-parity.md → merged; merged-tree run going. Finding: a TUI line typed during a running task is dropped → M2B-019a (P2). M2B-010b dropped (covered); M2B-019b (P4) for the rendered screen
