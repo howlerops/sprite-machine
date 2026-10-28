@@ -1494,8 +1494,8 @@ items:
     title: 'gpui spike: approval card + build release'
     milestone: M1b
     phase: P1
-    status: "review"
-    evidence: "merged 5999cf6 (approval card: 61 spike tests, headless click + 409, real HTTP sink vs agui-fixture); criterion 3 release build pending — leader runs it at the next idle cache window"
+    status: "done"
+    evidence: "merged 5999cf6 (approval card: 61 spike tests, headless click + 409, real HTTP sink); leader release build at 3e50593+: cargo build --release OK in 14m48s (2 jobs); gpui-spike 56.1 MB raw, 41.0 MB stripped (gate desktop max 80 MB), 15.9 MB gzip -9"
     assignee: "worker:haiku"
     attempt: 1
     lane: client
