@@ -3990,7 +3990,8 @@ items:
     title: 'client: task view — transcript, reasoning, tool calls, terminal activity'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged-tree verify after the restart: clippy (client-gpui, runner, cli) clean, client-gpui+runner tests 286/0, e2e rc PASS; 26/32 examples render, the rest tracked by M3-001m + M3-008a"
     assignee: "sonnet"
     attempt: 1
     lane: client
@@ -6179,7 +6180,8 @@ items:
     title: 'runner tui: when a task ends, a queued local line and a phone prompt queued at the hub do not race (the hub tells the TUI what it will send next, or the TUI sends only when the hub has nothing queued)'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged-tree verify after the restart: clippy (client-gpui, runner, cli) clean, client-gpui+runner tests 286/0, e2e rc PASS; interim settle window, hub ordering in M2B-019d"
     assignee: "sonnet"
     attempt: 1
     lane: rust

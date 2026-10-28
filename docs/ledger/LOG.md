@@ -277,3 +277,4 @@
 2026-10-28T23:06Z container restart: lost the M3-008/M2B-019c verify runs and the M3-001m worker run. Repo and shared target intact. M3-001m resumed in its worktree (uncommitted edits kept); combined verify for M3-008 + M2B-019c restarted
 2026-10-28T23:22Z M3-001m back (haiku): Item::Step/Subagent/Raw added; client-core tests pass, but runner tui render.rs and client-gpui transcript.rs have exhaustive matches and would not compile → held unmerged; M3-008a (sonnet) builds on the M3-001m branch, adds the runner arms (paths widened) and renders them; both merge together
 2026-10-28T23:23Z M3-008a first dispatch stopped at 1.3 GB free (no work). Freed to 4.5 GB (stale test exes, aarch64-apple-darwin target, stray logs in the target dir); re-dispatched M3-008a (same attempt)
+2026-10-28T23:24Z verify green → M3-008, M2B-019c done
