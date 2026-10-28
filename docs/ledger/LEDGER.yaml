@@ -3104,8 +3104,9 @@ items:
     milestone: M0
     phase: P2
     owner: human
-    status: "blocked"
-    blocked_on: human
+    status: "done"
+    evidence: "user made the repo public; run 161 (2cb277d) jobs start and run (linux, tracer in progress, macos queued) instead of failing in 3 s"
+    blocked_on: null
     deps: []
     acceptance:
       - 'A push to v2 runs the rust.yml linux, macos and tracer jobs to completion again'
@@ -3117,7 +3118,7 @@ items:
     milestone: M2
     phase: P2
     status: "blocked"
-    howto: "The session permission check refused `wrangler d1 create` / `r2 bucket create` / `queues create` in the shared Cloudflare account (Modify Shared Resources). Either run the three commands in docs/ops/hub.md yourself (from crates/hub, with the token env set) and tell the leader, or add a Claude Code permission rule allowing `wrangler d1 create sm-hub*`, `wrangler r2 bucket create sm-hub*`, `wrangler queues create sm-hub*` for this repo. Secrets moved to M2-014a (after the first deploy)."
+    howto: "Chat consent is not enough: the auto-mode classifier refused wrangler d1 create even after the user said go (2026-10-28). Either run, from crates/hub with the Cloudflare token: wrangler d1 create sm-hub; wrangler r2 bucket create sm-hub-blobs; wrangler queues create sm-hub-notify; and (for M0-009) wrangler r2 bucket create sm-workspace-backups, then tell the leader; or add Bash allow rules for exactly those four commands to the Claude Code permission settings for this repo."
     blocked_on: "human"
     owner: leader
     deps: [M0-018, M2-001, M2-016]

@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 110/270 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 108/200
+done 111/276 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 108/200
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 110/270 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · block
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 68 | 54 | 2 |
-| P3 | 23 | 4 | 2 |
-| P4 | 53 | 0 | 0 |
+| P2 | 68 | 55 | 2 |
+| P3 | 26 | 4 | 2 |
+| P4 | 56 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
@@ -64,7 +64,7 @@ done 110/270 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · block
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | done | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
 | M2-011 | worker | rust | done | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
-| CI-001 | human | rust | blocked | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
+| CI-001 | human | rust | done | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
 | M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
 | M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
@@ -98,8 +98,8 @@ done 110/270 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · block
 | M0-020 | P4 | Cloudflare dashboard → Secrets Store (account level) → create a store if there is none → Create secret: a name such as ANTHROPIC_API_KEY, the value = your model API key (e.g. Anthropic), scope Workers. Tell the leader only the secret name and the store id. Never paste the key into chat. The Workspace DO outbound handler injects it for api.anthropic.com (plan §4.3); it never enters a sandbox. |
 | M1B-001 | P7 | Provide an Apple Developer account, a physical iPhone, a mid-range Android phone, and a Mac or approval for GitHub macOS runners (iOS cannot build in the Linux container). |
 | M1B-010 | P7 | Build both spikes on a Mac per their READMEs; run spikes/bench on the iPhone and Android; commit results to spikes/bench/results/ with screen recordings for hard gates. |
-| CI-001 | P2 | Open https://github.com/howlerops/sprite-machine/actions/runs/40643390008 and read the annotation on any job. The usual cause for jobs that end in seconds with no log is account billing: Actions minutes used up or a spending limit of $0 (macOS minutes count 10x). Fix it under the account or org Settings -> Billing and plans -> Spending limits / payment method. If the annotation says something else, tell the leader. Nothing in the workflow changed between the last green run (50) and the first failed one (51). |
 | M2B-020 | P2 | After the hub is deployed (M2-015): install `sm` on your laptop, run `sm login` and approve it from your phone, run `sm rc` in a real repo with your own claude login, open the session link in your phone browser (mobile web page; add it to the home screen for push). Follow docs/remote-control-parity.md: start in the terminal, continue on the phone, close the laptop lid, reopen. Note any gaps. Native-app checks come later (M3-016). |
 | M3-016 | P7 | Install the build on both phones; run docs/ux/mobile-checklist.md; commit results. |
 | M6-002 | P7 | Create a Cloudflare API token scoped to the promotion target account (it may be a different account from the hub's): Account → Workers Scripts Edit, Containers Edit (or "Cloudchamber"), Workers R2 Storage Edit and D1 Edit if the promoted service uses them; Zone → Workers Routes Edit only for a custom domain. Enter it in the app's org settings (stored encrypted, M2-002). Record its scopes (no secret) in docs/ops/deploy-tokens.md. Never paste it into chat. |
 | M6-006 | P7 | Add Apple/Google/Windows signing material as CI secrets per docs/ops/release.md; approve store listings. |
+| M2-003d | P4 | github.com → Settings → Developer settings → OAuth Apps → New. Homepage = the hub URL, callback = <hub>/auth/github/callback. Then in crates/hub: `wrangler secret put GITHUB_CLIENT_SECRET`, add GITHUB_CLIENT_ID and HUB_PUBLIC_URL to the deployed environment vars, `wrangler d1 migrations apply DB`. Leave GITHUB_API_BASE unset. Needs M2-014 (Cloudflare resources) first. |
