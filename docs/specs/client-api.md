@@ -118,6 +118,21 @@ them when absent. Threads started on the runner itself (TUI, `/rc`) appear throu
 **`GET /v1/threads?machine_id=&status=&q=&cursor=`** → 200 `{ "threads": [ { "thread_id", "title", "machine_id", "agent", "status": "idle|running|needs_you|done", "updated_at", "last_seq" } ], "next_cursor": null }`
 (the D1 task index; `q` is FTS search, M2-\*).
 
+- `status`: `idle` (no task started, or the last run ended in an error or cancel), `running`,
+  `needs_you` (an approval is open), `done` (the last task ended in `RunFinished{success}` and
+  no task is running or queued). `done` lasts until the next prompt, which makes the thread
+  `running` again.
+- `updated_at` and `last_seq` are the time and the event sequence of the **last index-changing
+  event**, not of the last event: a new prompt, a run start or end, an approval opening or
+  being answered, a title change, archive or delete. Streamed output and session-state changes
+  (`StateDelta{session}`, usage) do not move them, so the list never costs a write per token.
+  A client that needs the live head uses `head_seq` from `GET /v1/threads/{thread_id}` or the
+  subscription's `hello`. The list is ordered by `updated_at`, newest first.
+- A thread hosted before the index existed, or whose index write failed, appears after the
+  hub's hourly reconcile (or at its next index-changing event).
+- A deleted thread (`DELETE /v1/threads/{thread_id}`) is `404 not_found` on every
+  `/v1/threads/{thread_id}/...` route, the same answer as an unknown thread, and is not listed.
+
 **`GET /v1/threads/{thread_id}`** → 200 `{ "thread_id", "title", "machine_id", "agent", "workspace", "head_seq", "states": { "session": {…}, "usage": {…}, "thread": {…} } }`
 (same `states` as the subscription `snapshot` message).
 

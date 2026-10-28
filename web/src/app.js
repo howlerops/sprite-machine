@@ -4,7 +4,7 @@
 //                QR link            /pair?code=  redeem, then confirm
 //                device code        /pair/device the page's own code, polled, then confirm
 //   signed in:   session list       /            machines, presence, threads (sessions.js)
-//                thread             /#/t/<id>    the thread view is WEB-002; a stub for now
+//                thread             /#/t/<id>    the transcript, live over the subscription (thread.js)
 //
 // The session token is stored only after the person confirms the user and org it names.
 
@@ -19,6 +19,7 @@ import {
 } from '/src/api.js';
 import { pollDevice, redeemLink, startDevice } from '/src/pairing.js';
 import { mountSessions } from '/src/sessions.js';
+import { clearThreadCaches, mountThread } from '/src/thread.js';
 
 const root = document.getElementById('app');
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -27,9 +28,12 @@ let teardown = () => {};
 let notice = '';
 // A code in /pair?code= is single use: it is read once, then the address is cleaned.
 let linkCode = null;
+// The thread on screen: a hash change fires both hashchange and popstate, one mount is enough.
+let shownThread = null;
 
 function screen(html, stop = () => {}) {
   teardown();
+  shownThread = null;
   teardown = stop;
   root.innerHTML = html;
   const heading = root.querySelector('h1');
@@ -156,17 +160,21 @@ function showSessions(session) {
   teardown = mountSessions(root.querySelector('#list'));
   root.querySelector('#signout').addEventListener('click', async () => {
     await signOut();
+    clearThreadCaches();
     go('/');
   });
 }
 
 function showThread(id) {
+  if (shownThread === id) return;
   screen(`
     <header class="bar">
       <div><h1 tabindex="-1">Session</h1><p class="who-line">${esc(id)}</p></div>
       <a class="button" href="#/" id="back">Back</a>
     </header>
-    <main><p class="empty">The thread view is coming soon.</p></main>`);
+    <main id="thread" aria-label="Transcript"></main>`);
+  teardown = mountThread(root.querySelector('#thread'), id);
+  shownThread = id;
 }
 
 // ---- routing --------------------------------------------------------------------------------
@@ -201,6 +209,7 @@ function route() {
 
 setUnauthorizedHandler(() => {
   clearSession();
+  clearThreadCaches();
   notice = 'Your session ended. Sign in again.';
   go('/');
 });

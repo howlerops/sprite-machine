@@ -75,10 +75,11 @@ async fn queue(
 }
 
 /// The Cron Trigger (wrangler.toml `[triggers]`): purges expired device pairings and old
-/// attempt counters.
+/// attempt counters, and reconciles the task index (M2-010a).
 #[event(scheduled)]
 async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     crate::devices::routes::purge_scheduled(&env).await;
+    crate::tasks::reconcile::run(&env).await;
 }
 
 async fn healthz() -> Json<serde_json::Value> {

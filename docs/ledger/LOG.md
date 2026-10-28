@@ -214,3 +214,13 @@
 - M2B-009a attempt 1 (haiku) rejected: pump thread holds stdin lock forever, trust asker deadlocks on dispatch to an untrusted dir. Attempt 2 (sonnet) builds on it
 - M2B-009a attempt 2 (sonnet) back: Prompt routes stdin to the trust question; merged, runner 177 passed → done. M2B-009b not filed (autoConnect is on M2B-010)
 - verify17 green (workspace 836/0 incl. the sidecar kill test that timed out under load in verify16) → M2B-002b, M2B-012, M2-008h, M2-011a, M2B-005c done
+2026-10-28T15:07Z assign CI-002 (haiku), WEB-002 attempt 2 (sonnet; ticket now exists), M2B-005f (sonnet, security), M2-010a (sonnet, medium)
+2026-10-28T15:12Z disk hit 245 MB free (CI-002 worker-build failed ENOSPC; other workers at risk). Leader cleared stale test exes (debug/deps 23 GB) → 9.5 GB free; background janitor deletes stale test exes whenever free < 5 GB. CI-002 resumed on the same attempt with one wasm profile (its CI-002b proposal)
+2026-10-28T15:39Z CI-002 done (merged; smoke + tracer on merged tree; janitor now removes wasm-<hash> dirs of removed worktrees). WEB-002 attempt 2 back (sonnet) → merged, playwright transcript+pairing 18/18 → done. M2-010a back (sonnet) → merged; verify18 running. Follow-ups: M2-010f (live reconcile test), M2-010g (reconcile paging), WEB-005 (answer interrupts/send prompts from the thread view)
+2026-10-28T15:40Z assign WEB-003 (sonnet), M2B-014 (haiku). Added M2-010f, M2-010g (P4)
+2026-10-28T15:40Z budget max_total_attempts 120 → 200 (user: drive it all the way through)
+2026-10-28T15:44Z M2B-014 blocked on paths (my scoping again: notify Kind/prefs + machine DO call site not listed). Leader decisions: Kind machine_back, default on, one job per comeback, debounce persisted in DO storage, leading edge; paths widened; worker resumed on the same attempt. Lesson re-noted: list the call site and the enum an item must extend
+2026-10-28T15:53Z verify18 green → M2-010a done
+2026-10-28T15:54Z P2 left: M2B-014, WEB-003, M2B-005f in flight; WEB-004, M2B-010 wait on WEB-003; M1B-008c leader. Started P3 in parallel within caps: M3-001b, M3-017 (haiku)
+2026-10-28T16:00Z M3-001b back (haiku): next_persisted + Connectivity::combine; its own M3-001g (view advances before the cache append) is a defect in the new function → worker fixes it on the same attempt. Added M3-001h (banner owner)
+2026-10-28T16:01Z M2B-005f back (sonnet): DO disconnect without revoke. Review: it closes with auth_revoked, which tunnel.md says means wipe the credential, so a real runner would not come back after the flip. SPEC-007 written (device_untrusted 4009 close + 403 device_untrusted at upgrade; keep credential, reconnect with backoff); worker continues on the same attempt with protocol/runner paths

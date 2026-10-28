@@ -443,3 +443,122 @@ fn a_list_needs_a_session_and_a_valid_query() {
     assert_eq!(bad_status.status, 400, "{}", bad_status.body);
     assert_eq!(bad_status.json()["error"], "invalid_request");
 }
+
+/// A runner event on `thread` through the dev append route (needs `DEV_FIXTURES=1`).
+fn runner_event(thread: &str, task: &str, run: &str, event: Value) {
+    let envelope = json!({
+        "v": 1, "seq": 0, "thread_id": thread, "task_id": task, "run_id": run,
+        "ts": "2026-10-28T10:00:00.000Z", "event": event,
+    });
+    let reply = http(
+        "POST",
+        &format!("/v1/dev/threads/{thread}/events"),
+        Some("dev"),
+        &[],
+        Some(&envelope),
+    );
+    assert_eq!(reply.status, 200, "dev append: {}", reply.body);
+}
+
+fn prompt(thread: &str, task: &str) -> Reply {
+    let key = unique("idk");
+    http(
+        "POST",
+        &format!("/v1/threads/{thread}/prompts"),
+        Some("dev"),
+        &[("Idempotency-Key", &key)],
+        Some(&json!({ "task_id": task, "parts": [{ "type": "text", "text": "go" }] })),
+    )
+}
+
+#[test]
+fn a_thread_whose_last_task_succeeded_is_done_until_the_next_prompt() {
+    let dev = "dev";
+    let mch = machine(dev);
+    let thread = create_thread(dev, &mch, Some("Finishes"), None);
+    let query = format!("machine_id={mch}");
+    let status = |wanted: &str| listed(dev, &format!("{query}&status={wanted}")).contains(&thread);
+    assert!(status("idle"));
+
+    let task = unique("tk");
+    assert_eq!(prompt(&thread, &task).status, 202);
+    runner_event(
+        &thread,
+        &task,
+        "run_a",
+        json!({ "type": "RunStarted", "reason": "prompt" }),
+    );
+    assert!(status("running") && !status("done"));
+
+    runner_event(
+        &thread,
+        &task,
+        "run_a",
+        json!({ "type": "RunFinished", "outcome": { "type": "success", "stop_reason": "end_turn" } }),
+    );
+    assert!(status("done"), "a finished last task is done");
+    assert!(!status("running") && !status("idle"));
+
+    // The next prompt starts the thread again.
+    assert_eq!(prompt(&thread, &unique("tk")).status, 202);
+    assert!(status("running") && !status("done"));
+}
+
+#[test]
+fn a_deleted_thread_is_404_on_every_thread_route_like_an_unknown_one() {
+    let dev = "dev";
+    let admin = issue("admin");
+    let mch = machine(dev);
+    let thread = create_thread(dev, &mch, Some("To delete"), Some("hello"));
+    let base = format!("/v1/threads/{thread}");
+
+    // Alive: the routes answer.
+    assert_eq!(http("GET", &base, Some(dev), &[], None).status, 200);
+    let ticket = http(
+        "POST",
+        &format!("{base}/subscribe-ticket"),
+        Some(dev),
+        &[],
+        None,
+    );
+    assert_eq!(ticket.status, 201, "{}", ticket.body);
+
+    assert_eq!(delete(&admin, &thread).status, 204);
+
+    let key = unique("idk");
+    let keyed = [("Idempotency-Key", key.as_str())];
+    let upgrade = [("Upgrade", "websocket"), ("Connection", "Upgrade")];
+    let task_body = json!({ "task_id": "tk_x", "parts": [{ "type": "text", "text": "hi" }] });
+    type Route<'a> = (&'a str, String, &'a [(&'a str, &'a str)], Option<Value>);
+    let routes: Vec<Route> = vec![
+        ("GET", base.clone(), &[], None),
+        ("PATCH", base.clone(), &[], Some(json!({ "title": "x" }))),
+        ("DELETE", base.clone(), &keyed, None),
+        ("GET", format!("{base}/pending"), &[], None),
+        ("DELETE", format!("{base}/pending/tk_x"), &keyed, None),
+        ("POST", format!("{base}/prompts"), &keyed, Some(task_body)),
+        (
+            "POST",
+            format!("{base}/interrupts/int_x"),
+            &keyed,
+            Some(json!({ "outcome": { "kind": "cancelled" } })),
+        ),
+        (
+            "POST",
+            format!("{base}/cancel"),
+            &keyed,
+            Some(json!({ "task_id": "tk_x" })),
+        ),
+        ("POST", format!("{base}/session"), &keyed, Some(json!({}))),
+        ("POST", format!("{base}/subscribe-ticket"), &[], None),
+        ("GET", format!("{base}/subscribe?after=0"), &upgrade, None),
+    ];
+    for (method, path, headers, body) in routes {
+        let reply = http(method, &path, Some(dev), headers, body.as_ref());
+        assert_eq!(reply.status, 404, "{method} {path}: {}", reply.body);
+        assert_eq!(reply.json()["error"], "not_found", "{method} {path}");
+    }
+    // The same answer as a thread that never existed.
+    let unknown = http("GET", "/v1/threads/th_never_existed", Some(dev), &[], None);
+    assert_eq!(unknown.status, 404);
+}

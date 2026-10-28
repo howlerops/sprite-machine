@@ -27,7 +27,7 @@ VAPID_SUBJECT = "mailto:push@sprite-machine.invalid"
 # `strip` breaks worker-build 0.8.7, see docs/spikes/cloudflare.md). Then `cli wasm strip-names`
 # drops the `name` and `producers` custom sections (MVP-000f, docs/spikes/hub-size.md). The cli
 # builds with the same command first, with RUSTFLAGS unset; wrangler dev reruns this command.
-command = "worker-build --profile wasm-release && cargo run -q -p cli -- wasm strip-names build/index_bg.wasm"
+command = "env ${HUB_WASM_TARGET_DIR:+CARGO_TARGET_DIR=$HUB_WASM_TARGET_DIR} worker-build --profile wasm-release && cargo run -q -p cli -- wasm strip-names build/index_bg.wasm"
 
 # ---- Durable Objects (SQLite-backed: a class cannot switch storage later) -------------------
 

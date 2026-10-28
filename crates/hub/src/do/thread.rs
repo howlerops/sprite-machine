@@ -117,7 +117,9 @@ impl DurableObject for Thread {
         for envelope in &appended {
             self.broadcast(&event_message(envelope).to_string());
         }
-        if changes_index(&request.method, &request.path, &appended) {
+        if request.path.ends_with("/reindex") {
+            self.reconcile_index(&thread_id).await;
+        } else if changes_index(&request.method, &request.path, &appended) {
             self.sync_index(&thread_id).await;
         }
         // M2-011: an Interrupt, a finished run or a failed run notifies; the NOTIFY queue job
@@ -317,6 +319,17 @@ impl Thread {
         };
         if let Err(message) = crate::tasks::sync::upsert_thread(&self.env, &row).await {
             worker::console_log!("thread {thread_id}: task index: {message}");
+        }
+    }
+
+    /// The cron reconcile (`tasks::reconcile`): writes this thread's index row only when D1's is
+    /// missing or differs.
+    async fn reconcile_index(&self, thread_id: &str) {
+        let Ok(Ok(row)) = self.with_core(thread_id, |core| core.index_row(now_ms())) else {
+            return;
+        };
+        if let Err(message) = crate::tasks::sync::reconcile_thread(&self.env, &row).await {
+            worker::console_log!("thread {thread_id}: task index reconcile: {message}");
         }
     }
 

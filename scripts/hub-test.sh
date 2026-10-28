@@ -14,9 +14,15 @@ set -euo pipefail
 name=${1:?usage: scripts/hub-test.sh <test-name>, e.g. smoke}
 [[ $name =~ ^[a-z0-9_-]+$ ]] || { echo "FAIL: bad test name: $name" >&2; exit 2; }
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 HUB_DIR=$REPO/crates/hub
 [[ -f $HUB_DIR/tests/$name.rs ]] || { echo "FAIL: no such test: crates/hub/tests/$name.rs" >&2; exit 2; }
+
+# CI-002: the wasm32 build goes to a target dir keyed by this worktree's root (wasm-<hash> under the
+# shared CARGO_TARGET_DIR), so two worktrees never share hub wasm artifacts. Only worker-build and the
+# wrangler dev that reruns the [build] command use it. The native cargo test below keeps the shared dir.
+SHARED_TARGET_DIR=${CARGO_TARGET_DIR:-$REPO/target}
+WASM_TARGET_DIR=$SHARED_TARGET_DIR/wasm-$(printf '%s' "$REPO" | sha256sum | cut -c1-16)
 
 # RUSTFLAGS (lld) is for the native target only. `strip` breaks worker-build 0.8.7
 # (docs/spikes/cloudflare.md caveat 2), so it stays off.
@@ -69,11 +75,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "== worker-build --release ($HUB_DIR)"
+echo "== worker-build --profile wasm-release ($HUB_DIR, wasm target $WASM_TARGET_DIR)"
 start=$(date +%s)
-(cd "$HUB_DIR" && worker-build --release) >"$STATE/build.log" 2>&1 \
-  || { tail -n 40 "$STATE/build.log" >&2; fail "worker-build --release"; }
+# CARGO_TERM_VERBOSE makes cargo name the hub package path for fresh builds too ("Fresh hub v0.1.0 (path)").
+(cd "$HUB_DIR" && CARGO_TARGET_DIR=$WASM_TARGET_DIR CARGO_TERM_VERBOSE=true worker-build --profile wasm-release) >"$STATE/build.log" 2>&1 \
+  || { tail -n 40 "$STATE/build.log" >&2; fail "worker-build --profile wasm-release"; }
 echo "built in $(( $(date +%s) - start ))s"
+# CI-002: the bundle must come from this tree: the build log names this worktree's crates/hub.
+grep -qF "($HUB_DIR)" "$STATE/build.log" \
+  || { tail -n 20 "$STATE/build.log" >&2; fail "worker-build log does not name $HUB_DIR (bundle not built from this tree)"; }
 
 echo "== d1 migrations (local)"
 (cd "$HUB_DIR" && wrangler d1 migrations apply DB --local --persist-to "$STATE/persist") \
@@ -101,13 +111,23 @@ VAPID_PRIVATE_KEY=${VAPID_KEYS% *}
 VAPID_PUBLIC_KEY=${VAPID_KEYS#* }
 [[ -n $VAPID_PRIVATE_KEY && -n $VAPID_PUBLIC_KEY ]] || fail "could not generate a VAPID key"
 
+# M2-010a: harmless test values for the app-link vars (a made-up team, bundle, package and
+# fingerprint, not a real app), so tests/links.rs can check the configured documents live.
+export APPLE_TEAM_ID=ABCDE12345 APPLE_BUNDLE_ID=dev.sprite.machine.test
+export ANDROID_PACKAGE_NAME=dev.sprite.machine.test
+ANDROID_SHA256_CERT_FINGERPRINTS=$(printf 'AB:%.0s' $(seq 1 31))AB
+export ANDROID_SHA256_CERT_FINGERPRINTS
+
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
-(cd "$HUB_DIR" && exec setsid wrangler dev --local --test-scheduled --ip 127.0.0.1 --port "$PORT" \
+(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --test-scheduled --inspector-port 0 --ip 127.0.0.1 --port "$PORT" \
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" "${dev_fixtures_args[@]}" \
   --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
+  --var "APPLE_TEAM_ID:$APPLE_TEAM_ID" --var "APPLE_BUNDLE_ID:$APPLE_BUNDLE_ID" \
+  --var "ANDROID_PACKAGE_NAME:$ANDROID_PACKAGE_NAME" \
+  --var "ANDROID_SHA256_CERT_FINGERPRINTS:$ANDROID_SHA256_CERT_FINGERPRINTS" \
   --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 

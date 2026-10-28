@@ -8,7 +8,7 @@ models: { default: haiku, high_risk_or_retry: sonnet, never: opus } # user cost 
 max_parallel: 3 # Rust workers; the docs and client lanes add their own slots (see lanes)
 lanes: { rust: 3, docs: 1, client: 1, ts: 1 } # per-lane in-flight caps; client (GPUI) is serialized
 budget: # sized for P0–P2; the leader re-raises max_total_attempts at each phase review
-  max_total_attempts: 120
+  max_total_attempts: 200 # raised 2026-10-28 under the user's go-ahead to drive the plan through (P2 still open)
   max_worker_minutes: 45
   max_worker_minutes_client: 60 # lane: client items
 env:
@@ -2290,6 +2290,10 @@ items:
     title: 'scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree''s hub.wasm stand in)'
     milestone: M0
     phase: P2
+    status: "done"
+    evidence: "merged a45e280; on merged tree: cargo test -p cli 15 passed, hub-test smoke PASS, tracer PASS; per-worktree wasm dir 538 MB, janitor removes dirs of removed worktrees"
+    assignee: "haiku"
+    attempt: 1
     lane: docs
     size: S
     risk: low
@@ -2776,6 +2780,10 @@ items:
     title: 'Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check'
     milestone: M2
     phase: P2
+    status: "done"
+    evidence: "merged; verify18: fmt, clippy live+wasm, cargo test -p hub 283/0, live tasks/links/thread_do/authz/subscribe_ticket/smoke PASS, playwright transcript+pairing 18/18"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
@@ -3533,6 +3541,9 @@ items:
     title: 'Presence + reconnect notifications on the phone'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     deps: [M2B-002, M2-011]
     paths:
       - 'crates/hub/src/notify/presence*'
@@ -3655,9 +3666,10 @@ items:
     title: 'web: transcript rendering for every TurnEvent variant'
     milestone: M2b
     phase: P2
-    status: "todo"
-    attempt: 1
-    assignee: "worker:haiku"
+    status: "done"
+    evidence: "merged; on merged tree: hub clippy clean, playwright transcript+pairing 18/18"
+    attempt: 2
+    assignee: "sonnet"
     deps:
       - "WEB-001"
       - "M2-008"
@@ -3686,6 +3698,9 @@ items:
     title: 'web: composer with attachments + Allow/Deny + Stop'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     deps: [WEB-002, M2-009]
     paths:
       - 'web/src/composer*'
@@ -3769,6 +3784,9 @@ items:
     title: 'client-core: persist live events as raw frame text; one connectivity banner state (subscription + outbox)'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     priority: 3
     deps: [M3-001a]
     paths:
@@ -4088,6 +4106,9 @@ items:
     title: 'cli e2e app: drive a task from client-core against hub + fixture agent'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: client
     deps: [M3-001, M2-008]
     paths:
@@ -5304,6 +5325,9 @@ items:
     title: 'hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
@@ -5435,3 +5459,58 @@ items:
       - 'When stdin is a TTY, sm rc reads keys in raw mode and space shows/hides the QR of the latest session URL; with no TTY nothing changes (test drives the key handler through an injected reader)'
     verify:
       - 'cargo test -p runner'
+
+  - id: M2-010f
+    title: 'hub: live test for the cron task-index reconcile (dev fixture drops a tasks row; /__scheduled; the thread is listed again)'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-010a]
+    paths:
+      - 'crates/hub/src/dev_fixtures*'
+      - 'crates/hub/tests/tasks.rs'
+    context:
+      - 'docs/ledger/reports/M2-010a.md (Discovered work)'
+    acceptance:
+      - 'Live test: a hosted thread whose index row was dropped is listed again after one scheduled run; the dev route exists only with DEV_FIXTURES=1'
+    verify:
+      - 'bash scripts/hub-test.sh tasks'
+
+  - id: M2-010g
+    title: 'hub: page the task-index reconcile through all hosted threads (cursor or checked_at), so large orgs are fully visited'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-010a]
+    paths:
+      - 'crates/hub/src/tasks/**'
+      - 'crates/hub/migrations/**'
+      - 'crates/hub/src/db/mod.rs'
+    context:
+      - 'docs/ledger/reports/M2-010a.md (Notes and limits)'
+    acceptance:
+      - 'Successive passes visit every hosted thread (native test with 450 threads and 200 per pass: all visited within 3 passes)'
+    verify:
+      - 'cargo test -p hub'
+
+  - id: M3-001h
+    title: 'client-core: one owner holds the Subscription and the Outbox and publishes the combined connectivity (Connectivity::combine) for the app banner'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-001b]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/banner.rs'
+    context:
+      - 'docs/ledger/reports/M3-001b.md (Discovered work)'
+    acceptance:
+      - 'A client-core type owns both links and exposes a watch/stream of the combined state; test drives subscription and outbox state changes and asserts the published banner sequence'
+    verify:
+      - 'cargo test -p client-core'

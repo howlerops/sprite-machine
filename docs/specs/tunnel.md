@@ -358,8 +358,17 @@ Sent just before the WebSocket close frame. The WebSocket close code is 4000 + t
 | `heartbeat_timeout`   | 4006 | both   | Reconnect with backoff.                                                      |
 | `server_restart`      | 4007 | hub    | Reconnect with backoff (no penalty: start at the minimum delay).             |
 | `going_to_sleep`      | 4008 | runner | (Runner → hub) presence becomes `asleep`.                                    |
+| `device_untrusted`    | 4009 | hub    | Keep the credential; reconnect with backoff. The org requires trusted devices and this machine is not vouched for (SPEC-007). |
 
 Any close without a `close` frame (network loss) is treated like `heartbeat_timeout`.
+
+**SPEC-007 (`device_untrusted`)**: when an org turns `require_trusted_devices` on, the hub closes
+the live tunnels of machines that are not vouched for with `device_untrusted`, without revoking
+them. While the setting stays on, the upgrade of such a machine is refused with HTTP `403` and the
+JSON error code `device_untrusted` (not `401`, which means a missing or bad credential). The
+runner keeps its credential in both cases, says once that the machine must be vouched for (or
+the setting turned off), and retries with the normal backoff; it connects again as soon as the
+hub lets it.
 **Backoff**: exponential from 500 ms, factor 2, cap 30 s, full jitter; reset after a
 connection has stayed up for 60 s.
 

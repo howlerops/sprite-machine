@@ -38,7 +38,7 @@ use super::store::{
     TaskRecord, TaskStatus, ThreadStore,
 };
 use super::timestamp::parse_timestamp;
-use crate::tasks::index::{IndexRow, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING};
+use crate::tasks::index::{IndexRow, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING};
 use crate::tasks::title::derive_title;
 
 /// The longest title a client may set (`POST /v1/threads`, `PATCH /v1/threads/{id}`).
@@ -423,6 +423,8 @@ impl<S: ThreadStore> ThreadCore<S> {
                     });
                 task.status = TaskStatus::Running;
                 self.store.put_task(&task)?;
+                // A new prompt starts the thread again: it is no longer `done`.
+                self.store.put_meta("finished_ok", &json!(false))?;
                 // The auto-title comes from the first prompt (tasks::title); it is kept once.
                 let first_text = message.parts.iter().find_map(|part| match part {
                     ContentPart::Text { text } => Some(text.as_str()),
@@ -457,6 +459,10 @@ impl<S: ThreadStore> ThreadCore<S> {
                     task.status = TaskStatus::Finished;
                     self.store.put_task(&task)?;
                 }
+                // `done` is a run that finished with success; an error leaves the thread idle.
+                let succeeded =
+                    matches!(envelope.event, Event::RunFinished(_)) && ends_task(&envelope.event);
+                self.store.put_meta("finished_ok", &json!(succeeded))?;
             }
             Event::Interrupt(interrupt) => {
                 self.store.put_interrupt(&InterruptRecord {
@@ -557,6 +563,7 @@ impl<S: ThreadStore + Clone> ThreadCore<S> {
     /// `live`. Built without reading the log, so the caller reads it after the core is released;
     /// it is safe because nothing is appended between this call and the drain.
     pub fn catch_up(&self, after: u64) -> Result<CatchUp<S>, ApiError> {
+        self.ensure_live()?;
         let replay_from = self.replay_from(after)?;
         let hello = json!({ "type": "hello", "head_seq": self.head, "replay_from": replay_from });
         let snapshot = json!({
@@ -844,6 +851,17 @@ impl<S: ThreadStore> ThreadCore<S> {
                 break;
             }
         }
+        // `done`: the last task ended in success and nothing is running or queued. It lasts
+        // until the next prompt (`finished_ok` is cleared by the next `UserMessage`).
+        if status == STATUS_OPEN
+            && self.flag("finished_ok")?
+            && self
+                .store
+                .tasks_with_status(TaskStatus::Pending)?
+                .is_empty()
+        {
+            status = STATUS_DONE;
+        }
         Ok(IndexRow {
             thread_id: self.thread_id.clone(),
             machine_id: text_of(&info, "machine_id"),
@@ -899,6 +917,16 @@ impl<S: ThreadStore> ThreadCore<S> {
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_default();
         Ok((derived, "derived"))
+    }
+
+    /// `404` for a soft-deleted thread, the same answer as for an unknown one. Every
+    /// `/v1/threads/{id}/...` route and the subscription check it (the Worker checks the D1 index
+    /// first, `auth::service::authorize_thread`; this is the source of truth).
+    pub fn ensure_live(&self) -> Result<(), ApiError> {
+        if self.flag("deleted")? {
+            return Err(ApiError::not_found(format!("no thread {}", self.thread_id)));
+        }
+        Ok(())
     }
 
     /// `404` unless something was recorded for the thread (the same test as `thread_info`).
