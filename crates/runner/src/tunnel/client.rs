@@ -14,6 +14,7 @@ use protocol::tunnel::{
     Verdict, parse_command_frame, parse_frame,
 };
 use protocol::turn_event::{Envelope, Event, RunError, RunErrorReason, format_timestamp};
+use rustls::{ClientConfig, RootCertStore};
 use serde_json::{Value, json};
 use sidecar::bridge::IncomingCommand;
 use sidecar::store::{OutboxState, Store, StoreError};
@@ -24,10 +25,11 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
 use tokio_tungstenite::tungstenite::{self, Message};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 
 use super::backoff::{Backoff, Jitter, RandomJitter};
 use super::io::{Shared, TunnelCommands, TunnelSink, frame_text};
+use super::tls;
 use super::{SystemWallClock, TunnelConfig, WallClock};
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -81,6 +83,8 @@ pub struct TunnelClient<C> {
     shared: Arc<Shared>,
     credentials: C,
     wall: Arc<dyn WallClock>,
+    /// TLS for `wss://` hubs: the webpki roots unless [`TunnelClient::with_tls_roots`] replaced them.
+    tls: Arc<ClientConfig>,
     backoff: Backoff,
     commands: mpsc::UnboundedSender<IncomingCommand>,
     processed: mpsc::UnboundedReceiver<String>,
@@ -112,6 +116,7 @@ pub(crate) fn build<C: CredentialSource>(
         shared: Arc::clone(&shared),
         credentials,
         wall: Arc::new(SystemWallClock),
+        tls: tls::client_config(tls::webpki_roots()),
         backoff,
         commands: command_tx,
         processed: processed_rx,
@@ -197,6 +202,13 @@ impl<C: CredentialSource> TunnelClient<C> {
         self
     }
 
+    /// Trusts `roots` for `wss://` hubs instead of the webpki roots. Production does not call
+    /// this; tests use it to trust a generated CA.
+    pub fn with_tls_roots(mut self, roots: RootCertStore) -> Self {
+        self.tls = tls::client_config(roots);
+        self
+    }
+
     /// Replaces the backoff jitter source.
     pub fn with_jitter(mut self, jitter: Box<dyn Jitter>) -> Self {
         let timing = self.config.timing;
@@ -263,7 +275,8 @@ impl<C: CredentialSource> TunnelClient<C> {
             Err(error) => return Ok(Ended::Failed(format!("credential: {error:#}"))),
         };
         let timeout = self.config.timing.welcome_timeout;
-        let connected = tokio::time::timeout(timeout, connect(&self.config, &credential)).await;
+        let connected =
+            tokio::time::timeout(timeout, connect(&self.config, &credential, &self.tls)).await;
         drop(credential);
         let ws = match connected {
             Err(_) => return Ok(Ended::Failed("connect timed out".to_owned())),
@@ -818,12 +831,14 @@ enum ConnectError {
     Retry(String),
 }
 
-async fn connect(config: &TunnelConfig, credential: &str) -> Result<Ws, ConnectError> {
-    let url = format!(
-        "{}/v1/machines/{}/tunnel",
-        config.hub_ws_base.trim_end_matches('/'),
-        config.machine_id
-    );
+async fn connect(
+    config: &TunnelConfig,
+    credential: &str,
+    tls: &Arc<ClientConfig>,
+) -> Result<Ws, ConnectError> {
+    // A refused scheme or host fails here, before any socket is opened.
+    let hub = tls::hub_url(&config.hub_ws_base).map_err(ConnectError::Fatal)?;
+    let url = format!("{}/v1/machines/{}/tunnel", hub.url, config.machine_id);
     let mut request = url
         .as_str()
         .into_client_request()
@@ -837,7 +852,8 @@ async fn connect(config: &TunnelConfig, credential: &str) -> Result<Ws, ConnectE
         .map_err(|_| ConnectError::Fatal("machine credential is not a header value".to_owned()))?;
     bearer.set_sensitive(true);
     request.headers_mut().insert(AUTHORIZATION, bearer);
-    match tokio_tungstenite::connect_async(request).await {
+    let connector = hub.tls.then(|| Connector::Rustls(Arc::clone(tls)));
+    match tokio_tungstenite::connect_async_tls_with_config(request, None, false, connector).await {
         Ok((ws, _)) => Ok(ws),
         Err(tungstenite::Error::Http(response)) => {
             let status = response.status().as_u16();
