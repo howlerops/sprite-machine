@@ -9,14 +9,17 @@ use axum::{
 };
 use protocol::turn_event::is_valid_id;
 use serde_json::{Value, json};
+use worker::Method;
 
 use crate::auth::routes::error_response;
 use crate::auth::service::parse_body;
 use crate::auth::token::new_id;
 use crate::auth::{authenticate, dev_fixtures_enabled};
 use crate::db::d1::D1;
+use crate::db::queries::claim_thread_host;
 use crate::db::{Db, Role};
 use crate::devices::signin::iso;
+use crate::machines::internal::{THREAD_BINDING, call};
 use crate::tasks::index::IndexRow;
 use crate::tasks::store;
 use crate::threads::ApiError;
@@ -164,6 +167,34 @@ async fn upsert_thread(State(env): State<AppState>, req: Request) -> Response {
         store::upsert(&D1::new(&database), &org_id, &row)
             .await
             .map_err(db_failure)?;
+        // `"init": true` also makes it a real thread of the caller's org (the host row and the
+        // Thread DO init hook that thread creation runs), so it can be subscribed to and written
+        // to through `/v1/dev/threads/{id}/events`.
+        if body.get("init").and_then(Value::as_bool) == Some(true) {
+            let hosted = claim_thread_host(&D1::new(&database), &thread_id, &org_id, machine_id)
+                .await
+                .map_err(db_failure)?;
+            if !hosted {
+                return Err(ApiError::not_found("no such thread"));
+            }
+            let info = json!({ "machine_id": machine_id, "agent": "claude", "title": title });
+            let path = format!("/internal/threads/{thread_id}/init");
+            let (status, text) = call(
+                &env,
+                THREAD_BINDING,
+                &thread_id,
+                Method::Post,
+                &path,
+                Some(&info),
+            )
+            .await
+            .map_err(|error| ApiError::internal(format!("dev fixtures: {error}")))?;
+            if status != 200 {
+                return Err(ApiError::internal(format!(
+                    "dev fixtures: init answered {status}: {text}"
+                )));
+            }
+        }
         Ok(json!({ "thread_id": thread_id, "updated_at": updated_at }))
     }
     .await;
