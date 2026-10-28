@@ -173,3 +173,4 @@
 2026-10-28T10:30Z M2B-007a assigned (sonnet, priority 1), M2B-005a assigned (sonnet, priority 1 security; paths += migration 0007, cron, DELETE /v1/devices/self)
 2026-10-28T10:37Z M2B-007 → done, MVP-000f → done (verify8: runner+cli 137, hub-test thread_do/machine_do, tracer)
 2026-10-28T10:37Z M2-010 assigned (haiku); aligned to client-api §5.2 (GET /v1/threads, not v1's /api/tasks), org-scoped list; paths += threads sync hook, policy
+2026-10-28T10:38Z SPEC-005 done 1c2c2b0 (leader): browser sign-in (runner QR link + browser device code). Added M2-003c (priority 1, hub routes + sm rc QR); WEB-001 deps += M2-003c, pairing criterion follows §5.7

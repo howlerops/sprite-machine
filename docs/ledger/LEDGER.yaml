@@ -2634,6 +2634,52 @@ items:
       - 'bash scripts/hub-test.sh smoke'
       - 'cargo run -p cli -- e2e tracer'
 
+  - id: SPEC-005
+    title: 'Spec: browser sign-in for the mobile web page (runner QR link; browser device code)'
+    milestone: M2b
+    phase: P2
+    lane: docs
+    owner: leader
+    status: "done"
+    evidence: "1c2c2b0 (leader): client-api.md §5.7"
+    deps: []
+    paths:
+      - 'docs/specs/client-api.md'
+    acceptance:
+      - 'client-api.md §5.7 defines both sign-in paths, their codes, lifetimes, binding and errors'
+    verify:
+      - 'grep -q "5.7 Browser sign-in" docs/specs/client-api.md'
+
+  - id: M2-003c
+    title: 'hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR'
+    milestone: M2
+    phase: P2
+    priority: 1
+    lane: rust
+    size: M
+    risk: high
+    deps: [SPEC-005, M2B-005a, M2B-007]
+    paths:
+      - 'crates/hub/src/auth/**'
+      - 'crates/hub/src/devices/**'
+      - 'crates/hub/migrations/0009_signin_links.sql'
+      - 'crates/hub/src/db/mod.rs'
+      - 'crates/hub/tests/signin.rs'
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/src/login/**'
+      - 'crates/runner/tests/server_mode.rs'
+    context:
+      - 'docs/specs/client-api.md §5.7, §2'
+      - 'docs/ledger/reports/M2B-005.md, M2B-005a.md'
+    acceptance:
+      - 'POST /v1/devices/signin-links (machine credential; device-origin machines only) mints a 5-minute single-use link bound to the approving user and the machine''s org (hash stored); POST /v1/auth/links/redeem issues a member-capped session, 410 for used/expired/unknown alike, audited; live tests incl. reuse, expiry (injected clock natively), admin-origin machine 403'
+      - 'Browser device-code flow (code, approve by a signed-in member, token once) reusing the M2B-005 machinery and M2B-005a rate limits; live tests'
+      - 'sm rc prints the sign-in QR (unicode, as sm login) and the URL at start and on SIGUSR1 / a `sm rc --qr` call; the code is never logged (test asserts the log)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh signin'
+      - 'cargo test -p runner --test server_mode'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -3278,7 +3324,11 @@ items:
     title: 'web: mobile web page — pairing (QR / device code) + session list with presence'
     milestone: M2b
     phase: P2
-    deps: [M2B-005, M2B-002, M2-008]
+    deps:
+      - "M2B-005"
+      - "M2B-002"
+      - "M2-008"
+      - "M2-003c"
     paths:
       - 'web/index.html'
       - 'web/src/app*'
@@ -3295,10 +3345,10 @@ items:
       - 'docs/specs/turn-event.md'
       - 'https://developers.cloudflare.com/workers/static-assets/'
     acceptance:
-      - 'Plain HTML + JS modules (no TypeScript, no bundler) served by the hub via Workers Static Assets at /'
-      - 'Pairing: approve a runner device code (typed, or from a scanned QR link /pair?code=) and sign this page in by device code; the session list shows machines with presence (online/asleep/offline) and their threads, updating live'
-      - 'Test-only hub routes (inject TurnEvents, create device codes, fake runner) exist only when the dev var DEV_FIXTURES=1 is set'
-      - 'web/playwright.config.js starts the hub with `wrangler dev` (webServer) and uses the preinstalled Chromium (@playwright/test pinned to 1.63.0); tests/pairing.spec.js covers pairing + list at a 390×844 viewport'
+      - "Plain HTML + JS modules (no TypeScript, no bundler) served by the hub via Workers Static Assets at /"
+      - "Pairing per client-api §5.7: /pair?code= redeems a runner QR link; the page can also show its own device code and poll; it shows the approving user/org before storing the session; the session list shows machines with presence (online/asleep/offline) and their threads (GET /v1/threads, GET /v1/machines), updating live"
+      - "Test-only hub routes (inject TurnEvents, create device codes, fake runner) exist only when the dev var DEV_FIXTURES=1 is set"
+      - "web/playwright.config.js starts the hub with `wrangler dev` (webServer) and uses the preinstalled Chromium (@playwright/test pinned to 1.63.0); tests/pairing.spec.js covers pairing + list at a 390×844 viewport"
     verify:
       - 'cd web && npm ci && npx playwright test tests/pairing.spec.js'
 
