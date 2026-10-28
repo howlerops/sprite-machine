@@ -171,6 +171,13 @@ tunnel `cancel` command; the runner emits `InterruptResolved{cancelled}` for ope
 `RunError{cancelled}` (turn-event.md §5 rule 6). Cancelling a task that already ended → 200 with
 `{ "status": "already_finished" }` (no effect). To drop a pending task use §5.3 DELETE.
 
+### 5.5a Session mode and config
+
+**`POST /v1/threads/{thread_id}/session`** `{ "mode_id": "plan", "config": { "id": "model", "value": "opus" } }`
+→ 202. Member role. The hub queues a tunnel `session_config` command (tunnel.md §3.5); the result
+appears as `StateDelta{session}` on the subscription. Values must come from the thread's current
+`session` state (`modes`, `config_options`), else 400 `invalid_request`.
+
 ### 5.6 Attachments
 
 **`POST /v1/attachments`** `{ "name", "mime_type", "size" }` → 201 `{ "upload_url", "url", "expires_at" }`:

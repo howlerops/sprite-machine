@@ -247,6 +247,22 @@ code:"invalid"}`.
 { "kind": "cancel", "thread_id": "th_1", "task_id": "tk_1" }
 ```
 
+**`session_config`**: change the thread's ACP session mode and/or a config option (ACP
+`session/set_mode`, `session/set_config_option`). Allowed while the thread is idle or running;
+the runner applies it immediately and the change shows up as `StateDelta{session}` (the agent's
+`current_mode_update` / `config_option_update`). At least one of `mode_id` / `config` is set.
+
+```json
+{
+  "kind": "session_config",
+  "thread_id": "th_1",
+  "mode_id": "plan",
+  "config": { "id": "model", "value": "opus" }
+}
+```
+
+An unknown `mode_id` or option id → `command_result{ok:false, code:"invalid"}`.
+
 Unknown `kind`: the runner replies `command_result{ok: false, code: "unsupported"}`.
 
 ### 3.6 `command_result` (up)
