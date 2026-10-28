@@ -191,6 +191,9 @@ items:
     title: 'Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip)'
     milestone: M0
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 3
     deps: [MVP-000a]
     paths:

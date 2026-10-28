@@ -90,3 +90,4 @@
 2026-10-28T04:13Z M2B-003 assigned (haiku)
 2026-10-28T04:25Z M2B-003 assigned→done merged 99b65cc (haiku; one denied archive_session call)
 2026-10-28T04:25Z leader: shared CARGO_TARGET_DIR gives workspace members the same metadata in every worktree, so parallel worktrees overwrite each other's member artifacts (seen: sidecar compiled against another branch's protocol). Verifies now touch crates/*/src/{lib,main}.rs first; briefs say the same
+2026-10-28T04:26Z MVP-000c assigned (haiku)
