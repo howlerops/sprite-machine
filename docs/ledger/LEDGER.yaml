@@ -2239,7 +2239,8 @@ items:
     title: 'hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration'
     milestone: M2b
     phase: P1
-    status: "review"
+    status: "done"
+    evidence: "merged 6d2d634 + fix c8d9b4d; cargo test --workspace 0 failed; hub wasm clippy clean; no tokio runtime; hub-test machine_do 9 + thread_do + authz PASS; tracer PASS on real Machine DO (bundle 643 KiB gzip); leader read credential (sha256 + ct_eq) and tunnel routing (/internal not reachable)"
     assignee: "worker:sonnet"
     attempt: 1
     size: M

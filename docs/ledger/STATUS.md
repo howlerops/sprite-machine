@@ -2,14 +2,14 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 48/210 (3 dropped) · in-flight M1B-004d,M1B-008a,M2B-002,M2B-004,M2B-011 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 48/120
+done 49/210 (3 dropped) · in-flight M1B-004d,M1B-008a,M2B-004,M2B-011 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 48/120
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 38 | 30 | 5 |
+| P1 | 38 | 31 | 4 |
 | P2 | 30 | 2 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
@@ -53,7 +53,7 @@ done 48/210 (3 dropped) · in-flight M1B-004d,M1B-008a,M2B-002,M2B-004,M2B-011 �
 | M2-008 | worker | rust | done | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
 | M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
 | M2B-001a | worker | rust | done | protocol: strict tunnel frame parsing + unknown command kind helper |
-| M2B-002 | worker | rust | review | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
+| M2B-002 | worker | rust | done | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
 | M2B-003 | worker | rust | done | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
 | M2B-004 | worker | rust | assigned | runner: tunnel client with reconnect/backoff/resume |
 | M2B-011 | worker | rust | assigned | runner: local checkpoints as shadow git commits |

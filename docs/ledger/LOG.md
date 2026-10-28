@@ -107,3 +107,4 @@
 2026-10-28T05:18Z M1B-008 assigned→done merged 13a70f1 (haiku); added M1B-008a/b/c/d (spike instrumentation, workload, real run, xdotool); M1B-009 deps += M1B-008c
 2026-10-28T05:18Z M2B-002 merged (sonnet; out-of-path edits accepted: sidecar runtime.rs match arm — superseded by v2's permission.rs on merge — and d1_schema test); leader fixed semantic merge conflict c8d9b4d (SessionConfig arms in machines/core.rs). Added M2-008c, MVP-000d, M2B-002a
 2026-10-28T05:18Z M2B-004 paths += runner tracer.rs/lib/main + protocol Sender::from_parts; assigned (sonnet). M2B-011 assigned (haiku). M1B-008a assigned (haiku)
+2026-10-28T05:37Z M2B-002 review→done (workspace tests, live machine_do/thread_do/authz, tracer green on merged tree)
