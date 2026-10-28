@@ -324,6 +324,26 @@ fn a_viewer_session_can_mint_and_a_revoked_session_loses_its_ticket() {
 }
 
 #[test]
+fn the_ticket_is_stripped_wherever_it_sits_in_the_query() {
+    // The Worker strips `ticket=` before the Thread DO; the forwarded query must still parse
+    // and the DO must still answer `hello`, for a ticket first, in the middle, last and repeated.
+    let thread = hosted_thread("tkt_strip");
+    let forms = [
+        "ticket={t}&after=0",
+        "after=0&ticket={t}",
+        "after=0&ticket={t}&x=1",
+        "ticket={t}",
+    ];
+    for form in forms {
+        let ticket = mint(&thread, "dev");
+        let query = form.replace("{t}", &ticket);
+        let (status, frame) = upgrade(&format!("/v1/threads/{thread}/subscribe?{query}"), None);
+        assert_eq!(status, 101, "{form}: {frame}");
+        assert!(frame.contains("hello"), "{form}: first frame: {frame}");
+    }
+}
+
+#[test]
 fn the_authorization_header_subscribe_still_works_and_wins_over_a_ticket() {
     let thread = hosted_thread("tkt_header");
     let (status, frame) = upgrade(&format!("/v1/threads/{thread}/subscribe"), Some("dev"));

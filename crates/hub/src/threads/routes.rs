@@ -51,7 +51,7 @@ use crate::auth::{
     Principal, authenticate, policy::thread_policy, routes::authorize_thread_request, ticket,
 };
 use crate::db::{Db, d1::D1, queries};
-use crate::router::{REQUEST_ID_HEADER, request_id};
+use crate::router::{REQUEST_ID_HEADER, path_and_query_without_ticket, request_id};
 use crate::worker::AppState;
 
 /// The Durable Object binding of the Thread DO (wrangler.toml).
@@ -168,19 +168,11 @@ async fn forward_inner(
 
 /// Removes `ticket=` from the request's query, so neither the DO nor any log downstream of the
 /// Worker sees it.
+/// The rewrite itself is `router::path_and_query_without_ticket` (native, tested there).
 fn strip_ticket_from_uri(req: &mut Request) -> Result<(), ApiError> {
-    let Some(query) = req.uri().query() else {
+    let Some(path_and_query) = path_and_query_without_ticket(req.uri().path(), req.uri().query())
+    else {
         return Ok(());
-    };
-    if ticket::ticket_in_query(Some(query)).is_none() {
-        return Ok(());
-    }
-    let cleaned = ticket::strip_ticket(query);
-    let path = req.uri().path();
-    let path_and_query = if cleaned.is_empty() {
-        path.to_owned()
-    } else {
-        format!("{path}?{cleaned}")
     };
     let mut parts = req.uri().clone().into_parts();
     parts.path_and_query = Some(
