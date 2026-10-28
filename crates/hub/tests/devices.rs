@@ -674,13 +674,13 @@ fn the_tunnel_refuses_a_machine_that_is_not_vouched_for_when_the_org_requires_tr
     ws.send_text(&hello(&device_id).to_string());
     assert_eq!(ws.json()["t"], "welcome");
 
-    // The Machine DO revoked the unvouched machine when the setting turned on; an admin-issued
-    // or paired machine was left alone (above), and turning the setting off does not undo that.
+    // The flip only disconnected the unvouched machine (M2B-005f): it was not revoked, so with
+    // the setting off again the same machine and credential connect.
     policy(false);
-    let mut revoked = Ws::open_tunnel(&machine, &credential);
-    revoked.send_text(&hello(&machine).to_string());
-    let close = revoked.json();
-    assert_eq!(close["code"], "auth_revoked", "{close}");
+    let mut again = Ws::open_tunnel(&machine, &credential);
+    again.send_text(&hello(&machine).to_string());
+    let first = again.json();
+    assert_eq!(first["t"], "welcome", "{first}");
 }
 
 #[test]

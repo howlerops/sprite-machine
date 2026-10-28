@@ -1349,6 +1349,7 @@ impl Db for Fake {
 struct FakeControl {
     provisioned: RefCell<Vec<(String, String, String)>>,
     revoked: RefCell<Vec<String>>,
+    disconnected: RefCell<Vec<String>>,
     fail_provision: bool,
 }
 
@@ -1373,6 +1374,11 @@ impl MachineControl for FakeControl {
 
     fn revoke(&self, machine_id: &str) -> impl Future<Output = Result<(), ApiError>> {
         self.revoked.borrow_mut().push(machine_id.to_owned());
+        ready(Ok(()))
+    }
+
+    fn disconnect(&self, machine_id: &str) -> impl Future<Output = Result<(), ApiError>> {
+        self.disconnected.borrow_mut().push(machine_id.to_owned());
         ready(Ok(()))
     }
 }

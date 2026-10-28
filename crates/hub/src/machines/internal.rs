@@ -364,4 +364,8 @@ impl MachineControl for DoControl<'_> {
     async fn revoke(&self, machine_id: &str) -> Result<(), ApiError> {
         self.post(machine_id, "revoke", &json!({})).await
     }
+
+    async fn disconnect(&self, machine_id: &str) -> Result<(), ApiError> {
+        self.post(machine_id, "disconnect", &json!({})).await
+    }
 }
