@@ -5377,3 +5377,24 @@ items:
     verify:
       - 'cargo test -p hub'
       - 'bash scripts/hub-test.sh notify'
+
+  - id: M2B-005g
+    title: 'runner: sm logout revokes the machine at the hub before wiping (DELETE /v1/devices/self with the stored credential; wipe anyway if the hub is unreachable and say an admin must revoke)'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-005b]
+    paths:
+      - 'crates/runner/src/login/**'
+      - 'crates/runner/tests/login.rs'
+      - 'crates/hub/src/devices/**'
+      - 'crates/hub/tests/devices.rs'
+    context:
+      - 'docs/ledger/reports/M2B-005b.md (Discovered work)'
+    acceptance:
+      - 'sm logout calls the hub to revoke the machine, then wipes; fake-hub test for both the reachable and unreachable case; if DELETE /v1/devices/self does not exist the hub route is added with a live test'
+    verify:
+      - 'cargo test -p runner'
+      - 'cargo test -p hub'

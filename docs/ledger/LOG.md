@@ -207,3 +207,4 @@
 - merged M2B-002b (+ leader fix devices.rs machines[].machine_id) and M2B-012; verify16 running on the merged tree
 - verify16 hit the 30 min background limit after smoke/machine_do/devices/notify (all PASS); verify17 runs the rest. Workspace test: sidecar kill_reaches_children_in_the_process_group timed out under load (re-checked in verify17 --no-fail-fast)
 - assign M2B-005b, M2B-009 (haiku; runner only, no live hub runs while verify17 holds wrangler)
+- M2B-005b back (haiku): sm logout/status, Linux persistence = 0600 file (keyutils dropped; reboot-lost), sm rc dials with stored login (fake-hub test). Accepted: KeychainCredentials::new(CredentialStore::from_env) is the same store as ::from_env. Follow-up M2B-005g; Options type change and secret-service backend not filed (no behaviour gain). Merge held until verify17 finishes
