@@ -14,10 +14,12 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use protocol::tunnel::{Receiver, Verdict};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(15);
@@ -67,13 +69,24 @@ fn http(
     idempotency_key: Option<&str>,
     body: Option<&Value>,
 ) -> Reply {
+    http_as(method, path, auth.then_some("dev"), idempotency_key, body)
+}
+
+/// As [`http`], with `Authorization: Bearer <token>` when `token` is given.
+fn http_as(
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    idempotency_key: Option<&str>,
+    body: Option<&Value>,
+) -> Reply {
     let mut stream = connect();
     let mut request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
         authority()
     );
-    if auth {
-        request.push_str("Authorization: Bearer dev\r\n");
+    if let Some(token) = token {
+        request.push_str(&format!("Authorization: Bearer {token}\r\n"));
     }
     if let Some(key) = idempotency_key {
         request.push_str(&format!("Idempotency-Key: {key}\r\n"));
@@ -320,20 +333,74 @@ fn unique(name: &str) -> String {
     format!("{name}_{}_{nanos:x}", std::process::id())
 }
 
-/// A machine for the Machine DO named `machine`, through the DEV_FIXTURES credential route.
-fn dev_credential(machine: &str) -> String {
-    let reply = http(
+/// A machine of the dev org, created through `POST /v1/machines` (so it has a D1 row, which
+/// `POST /v1/threads` requires): `(machine id, credential)`.
+fn dev_machine() -> (String, String) {
+    machine_of(Some("dev"))
+}
+
+fn machine_of(token: Option<&str>) -> (String, String) {
+    let reply = http_as(
         "POST",
-        &format!("/v1/dev/machines/{machine}/credential"),
+        "/v1/machines",
+        token,
+        None,
+        Some(&json!({ "name": unique("test-machine") })),
+    );
+    assert_eq!(reply.status, 201, "create machine: {}", reply.body);
+    let out = reply.json();
+    (
+        out["machine"]["id"]
+            .as_str()
+            .expect("machine id")
+            .to_owned(),
+        out["credential"].as_str().expect("credential").to_owned(),
+    )
+}
+
+/// An owner session of a second org (the hub's one-time bootstrap; this test binary runs against
+/// its own hub, so nothing else has used it): `(token, machine id, credential)` of a machine there.
+fn foreign_org_machine() -> (String, String) {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    let token = TOKEN.get_or_init(|| {
+        let secret = std::env::var("BOOTSTRAP_OWNER_TOKEN").unwrap_or_else(|_| {
+            panic!(
+                "BOOTSTRAP_OWNER_TOKEN is not set: run `bash scripts/hub-test.sh thread_create`."
+            )
+        });
+        let reply = http_as(
+            "POST",
+            "/v1/auth/bootstrap",
+            Some(&secret),
+            None,
+            Some(&json!({ "org_name": "Other Org", "user_name": "Other Owner" })),
+        );
+        assert_eq!(reply.status, 201, "bootstrap: {}", reply.body);
+        let out = reply.json();
+        assert_ne!(out["org"]["id"], "org_dev");
+        out["session"]["token"].as_str().expect("token").to_owned()
+    });
+    machine_of(Some(token))
+}
+
+/// The Machine DO's queued commands, through the dev state route.
+fn outbox_len(machine: &str) -> u64 {
+    let reply = http(
+        "GET",
+        &format!("/v1/dev/machines/{machine}/state"),
         true,
         None,
         None,
     );
-    assert_eq!(reply.status, 201, "dev credential: {}", reply.body);
-    reply.json()["credential"]
-        .as_str()
-        .expect("credential")
-        .to_owned()
+    assert_eq!(reply.status, 200, "machine state: {}", reply.body);
+    reply.json()["outbox_len"].as_u64().expect("outbox_len")
+}
+
+/// The thread id the hub derives for the dev user and `key` (`threads/routes.rs`).
+fn derived_thread_id(key: &str) -> String {
+    let digest = Sha256::digest(format!("usr_dev\n{key}").as_bytes());
+    let hex: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
+    format!("th_{hex}")
 }
 
 fn create_body(machine: &str, prompt: bool) -> Value {
@@ -362,8 +429,7 @@ fn create(key: &str, body: &Value) -> Reply {
 
 #[test]
 fn creating_a_thread_queues_its_dispatch_and_the_runner_gets_it_after_welcome() {
-    let machine = unique("mch_create");
-    let credential = dev_credential(&machine);
+    let (machine, credential) = dev_machine();
     let key = unique("idk_create");
     let body = create_body(&machine, true);
 
@@ -408,8 +474,7 @@ fn creating_a_thread_queues_its_dispatch_and_the_runner_gets_it_after_welcome() 
 
 #[test]
 fn an_idempotency_key_replay_returns_the_same_response_and_no_second_thread() {
-    let machine = unique("mch_replay");
-    let credential = dev_credential(&machine);
+    let (machine, credential) = dev_machine();
     let key = unique("idk_replay");
     let body = create_body(&machine, true);
 
@@ -442,8 +507,7 @@ fn an_idempotency_key_replay_returns_the_same_response_and_no_second_thread() {
 
 #[test]
 fn a_thread_created_without_a_prompt_is_idle_and_nothing_is_dispatched() {
-    let machine = unique("mch_idle");
-    let credential = dev_credential(&machine);
+    let (machine, credential) = dev_machine();
     let created = create(&unique("idk_idle"), &create_body(&machine, false));
     assert_eq!(created.status, 201, "create: {}", created.body);
     assert_eq!(created.json()["status"], "idle");
@@ -462,4 +526,97 @@ fn a_thread_created_without_a_prompt_is_idle_and_nothing_is_dispatched() {
         runner.ws.recv_within(Duration::from_millis(500)).is_none(),
         "an idle thread queues no command"
     );
+}
+
+/// Asserts the 404 `not_found` of a refused create and that nothing was written for it: no
+/// Thread DO state (head_seq 0), no `thread.create` audit row, nothing queued on `machines`.
+fn assert_refused_and_nothing_written(machine: &str, machines: &[&str]) {
+    let key = unique("idk_refused");
+    let reply = create(&key, &create_body(machine, true));
+    assert_eq!(reply.status, 404, "create: {}", reply.body);
+    assert_eq!(reply.json()["error"], "not_found", "{}", reply.body);
+
+    let thread = derived_thread_id(&key);
+    let info = http("GET", &format!("/v1/threads/{thread}"), true, None, None);
+    assert!(
+        info.status == 404 || info.json()["head_seq"] == 0,
+        "a Thread DO was written: {} {}",
+        info.status,
+        info.body
+    );
+    let audit = http("GET", "/v1/dev/audit?limit=1000", true, None, None);
+    assert_eq!(audit.status, 200, "audit: {}", audit.body);
+    assert!(
+        !audit.body.contains(&thread),
+        "a refused create was audited: {}",
+        audit.body
+    );
+    for id in machines {
+        assert_eq!(outbox_len(id), 0, "a dispatch was queued on {id}");
+    }
+}
+
+#[test]
+fn a_machine_that_does_not_exist_is_404_and_nothing_is_written() {
+    let machine = unique("mch_unknown");
+    assert_refused_and_nothing_written(&machine, &[&machine]);
+}
+
+#[test]
+fn a_revoked_machine_is_404_and_nothing_is_written() {
+    let (machine, _) = dev_machine();
+    let revoked = http(
+        "DELETE",
+        &format!("/v1/machines/{machine}"),
+        true,
+        None,
+        None,
+    );
+    assert_eq!(revoked.status, 200, "revoke: {}", revoked.body);
+    assert_refused_and_nothing_written(&machine, &[&machine]);
+}
+
+#[test]
+fn a_machine_of_another_org_is_404_like_an_unknown_one_and_nothing_is_written() {
+    let (foreign, credential) = foreign_org_machine();
+    // The caller (the dev org's owner) gets the same answer as for an unknown machine.
+    let unknown = create(&unique("idk_u"), &create_body(&unique("mch_none"), true));
+    assert_refused_and_nothing_written(&foreign, &[&foreign]);
+    let refused = create(&unique("idk_f"), &create_body(&foreign, true));
+    assert_eq!(refused.status, unknown.status);
+    assert_eq!(refused.json()["error"], unknown.json()["error"]);
+
+    // The foreign machine's runner never sees a dispatch.
+    let mut runner = Runner::connect(&foreign, &credential);
+    assert!(
+        runner.ws.recv_within(Duration::from_millis(500)).is_none(),
+        "no command reached the other org's machine"
+    );
+}
+
+#[test]
+fn a_viewer_cannot_create_a_thread() {
+    let issued = http(
+        "POST",
+        "/v1/auth/sessions",
+        true,
+        None,
+        Some(&json!({ "role": "viewer", "display_name": unique("viewer") })),
+    );
+    assert_eq!(issued.status, 201, "issue viewer: {}", issued.body);
+    let viewer = issued.json()["session"]["token"]
+        .as_str()
+        .expect("token")
+        .to_owned();
+    let (machine, _) = dev_machine();
+    let reply = http_as(
+        "POST",
+        "/v1/threads",
+        Some(&viewer),
+        Some(&unique("idk_viewer")),
+        Some(&create_body(&machine, true)),
+    );
+    assert_eq!(reply.status, 403, "viewer create: {}", reply.body);
+    assert_eq!(reply.json()["error"], "forbidden");
+    assert_eq!(outbox_len(&machine), 0, "nothing was queued");
 }
