@@ -18,6 +18,14 @@ command = "worker-build --profile wasm-release"
 name = "HUB"
 class_name = "TracerHub"
 
+# WORKSPACE: the Workspace DO of workers/workspace (M0-008a), bound from another Worker by
+# namespace (script_name). Its class has its own migrations there, so none here.
+# Rust side: crates/hub/src/workspace_do (M0-008b).
+[[durable_objects.bindings]]
+name = "WORKSPACE"
+class_name = "WorkspaceDO"
+script_name = "sm-workspace"
+
 # Skeletons (crates/hub/src/do/mod.rs), filled in by M2-008, M2B-002 and the flow item.
 [[durable_objects.bindings]]
 name = "THREAD"

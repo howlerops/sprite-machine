@@ -7,6 +7,7 @@
 pub mod db;
 pub mod router;
 pub mod tracer;
+pub mod workspace_do;
 
 /// The Worker entries: axum router, `fetch` and `queue`.
 #[cfg(target_arch = "wasm32")]
