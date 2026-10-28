@@ -511,7 +511,10 @@ items:
     blocked_on: "human"
     priority: 1
     owner: leader
-    deps: [M0-018, M0-008a]
+    deps:
+      - "M0-018"
+      - "M0-008a"
+      - "M0-008c"
     paths:
       - 'crates/cli/src/spikes/sandbox_smoke*'
       - 'workers/workspace/wrangler.jsonc'
