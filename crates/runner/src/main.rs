@@ -6,14 +6,17 @@ use anyhow::{Context, Result, anyhow, bail};
 use runner::login::flow::normalize_hub;
 use runner::login::{Confirm, CredentialStore, login, real_sleeper, terminal_prompter};
 use runner::server::{self, Options, RcArgs};
+use runner::trust::{self, Audit, TrustStore};
 use runner::tunnel::Timing;
 
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags] | sm rc close <thread id>";
+const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags] | sm rc close <thread id> | \
+sm trust <dir> | sm untrust <dir>";
 const LOGIN_USAGE: &str = "usage: sm login --hub <url> [--yes]";
 const CLOSE_USAGE: &str = "usage: sm rc close <thread id>";
+const TRUST_USAGE: &str = "usage: sm trust <dir> | sm untrust <dir>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,6 +27,8 @@ async fn main() -> Result<()> {
             run_close(&args[2..]).await
         }
         Some("rc" | "run") => run_rc(&args[1..]).await,
+        Some("trust") => run_trust(&args[1..], true),
+        Some("untrust") => run_trust(&args[1..], false),
         Some(other) => bail!("unknown command {other:?}\n{USAGE}"),
         None => {
             println!("{CRATE} {}", env!("CARGO_PKG_VERSION"));
@@ -74,9 +79,14 @@ async fn run_rc(args: &[String]) -> Result<()> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
+    let state_dir = state_dir()?;
+    // The trust question needs a terminal to ask at; a machine run without one refuses an
+    // untrusted directory.
+    let asker = std::io::IsTerminal::is_terminal(&std::io::stdin()).then(trust::terminal_asker);
     let options = Options {
         credentials,
-        state_dir: state_dir()?,
+        allow_remote_terminal: trust::remote_terminal_allowed(&state_dir, rc.allow_remote_terminal),
+        state_dir,
         cwd: std::env::current_dir().context("current directory")?,
         home,
         path_env: std::env::var_os("PATH").unwrap_or_default(),
@@ -94,11 +104,38 @@ async fn run_rc(args: &[String]) -> Result<()> {
             let _ = out.write_all(block.as_bytes());
             let _ = out.flush();
         })),
+        asker,
     };
     server::run(options, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await
+}
+
+/// `sm trust <dir>` / `sm untrust <dir>`: stores or forgets a trusted directory of this machine.
+fn run_trust(args: &[String], trusting: bool) -> Result<()> {
+    let [dir] = args else {
+        bail!("{TRUST_USAGE}");
+    };
+    let state = state_dir()?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let store = TrustStore::new(&state, &home);
+    let audit = Audit::new(&state);
+    let dir = PathBuf::from(dir);
+    if trusting {
+        let trusted = trust::grant(&store, &audit, &dir, "sm trust")
+            .with_context(|| format!("trust {}", dir.display()))?;
+        println!("trusted {}", trusted.display());
+    } else if trust::revoke(&store, &audit, &dir, "sm untrust")
+        .with_context(|| format!("untrust {}", dir.display()))?
+    {
+        println!("untrusted {}", dir.display());
+    } else {
+        println!("{} was not trusted", dir.display());
+    }
+    Ok(())
 }
 
 /// `sm rc close <thread id>`: asks the `sm rc` running on this machine to end the session of an

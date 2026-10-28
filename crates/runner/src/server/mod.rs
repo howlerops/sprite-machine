@@ -14,6 +14,8 @@
 //! - `--spawn worktree` runs each session in its own `git worktree` under
 //!   `<state dir>/worktrees`, removed when the session ends (kept when it has uncommitted
 //!   changes).
+//! - A directory must be trusted before a session starts in it ([`crate::trust`]): an untrusted
+//!   one is asked about at a terminal, and refused (`workspace_untrusted`) without one.
 //! - The spawn mode is saved per project in `<state dir>/projects.json` with the last session of
 //!   the directory, which `-c` / `--continue` picks up again and registers with the hub
 //!   (`thread_open`) as a session started on this runner.
@@ -51,6 +53,7 @@ use sidecar::store::Store;
 use crate::harness;
 use crate::login::{CredentialStore, KeychainCredentials};
 use crate::sleep;
+use crate::trust::{Asker, Audit, TrustStore};
 use crate::tunnel::{Timing, TunnelConfig, tunnel};
 
 pub use self::local::close_session;
@@ -151,6 +154,11 @@ pub struct Options {
     /// Where the phone sign-in link (QR and URL) is printed: at start and on `SIGUSR1`. `None`:
     /// no link is requested from the hub (see [`signin`]).
     pub signin: Option<Sink>,
+    /// The trust question of an untrusted directory. `None`: no terminal, so such a dispatch is
+    /// refused.
+    pub asker: Option<Asker>,
+    /// `--allow-remote-terminal` or the state dir setting (see [`trust::remote_terminal_allowed`]).
+    pub allow_remote_terminal: bool,
 }
 
 /// The flags of `sm rc`.
@@ -163,6 +171,8 @@ pub struct RcArgs {
     pub name_prefix: Option<String>,
     pub continue_last: bool,
     pub idle_timeout: Duration,
+    /// `--allow-remote-terminal`.
+    pub allow_remote_terminal: bool,
 }
 
 /// `90`, `90s`, `15m` or `2h`.
@@ -183,7 +193,7 @@ fn parse_duration(text: &str) -> Option<Duration> {
 
 pub const RC_USAGE: &str = "usage: sm rc [--hub <url>] [--spawn same-dir|worktree] [--capacity <n>] \
 [--permission-mode default|acceptEdits|plan|bypassPermissions] [--name-prefix <prefix>] \
-[--idle-timeout <n>[s|m|h]] [-c|--continue]";
+[--idle-timeout <n>[s|m|h]] [-c|--continue] [--allow-remote-terminal]";
 
 impl RcArgs {
     pub fn parse(args: &[String]) -> Result<Self> {
@@ -195,6 +205,7 @@ impl RcArgs {
             name_prefix: None,
             continue_last: false,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
+            allow_remote_terminal: false,
         };
         let mut args = args.iter();
         while let Some(flag) = args.next() {
@@ -239,6 +250,7 @@ impl RcArgs {
                     })?;
                 }
                 "-c" | "--continue" => parsed.continue_last = true,
+                "--allow-remote-terminal" => parsed.allow_remote_terminal = true,
                 other => bail!("unknown flag {other:?}\n{RC_USAGE}"),
             }
         }
@@ -304,6 +316,12 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
         let _ = stop_rx.await;
     }));
 
+    if options.allow_remote_terminal {
+        tracing::warn!("remote terminal is allowed on this machine");
+    }
+    let trust = TrustStore::new(&options.state_dir, &options.home);
+    let audit = Audit::new(&options.state_dir);
+
     let result = router::Router::new(
         router::Context {
             machine_id: login.machine_id,
@@ -316,6 +334,9 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
             permission_mode: options.permission_mode,
             name_prefix: options.name_prefix,
             idle_timeout: options.idle_timeout,
+            trust,
+            audit,
+            asker: options.asker,
         },
         sink,
         commands,

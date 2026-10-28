@@ -7,4 +7,5 @@ pub mod login;
 pub mod server;
 pub mod sleep;
 pub mod tracer;
+pub mod trust;
 pub mod tunnel;

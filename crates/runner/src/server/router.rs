@@ -3,12 +3,13 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use protocol::tunnel::{Command, CommandErrorCode, Workspace};
+use serde_json::json;
 use sidecar::bridge::{
     Bridge, CommandFailure, CommandSource, Config, EventSink, IncomingCommand, McpProvider, UlidIds,
 };
@@ -22,6 +23,7 @@ use super::session::{SessionCommands, SessionSink, SessionState};
 use super::worktree::Worktree;
 use super::{PermissionMode, SpawnMode, names, session_dir};
 use crate::harness::{self, Found};
+use crate::trust::{self, Asker, Audit, TrustStore, Verdict};
 use crate::tunnel::{Exit, TunnelCommands, TunnelSink};
 
 /// How long a session gets to wind down at shutdown.
@@ -38,6 +40,9 @@ pub(super) struct Context {
     pub permission_mode: PermissionMode,
     pub name_prefix: String,
     pub idle_timeout: Duration,
+    pub trust: TrustStore,
+    pub audit: Audit,
+    pub asker: Option<Asker>,
 }
 
 struct Session {
@@ -202,6 +207,12 @@ impl Router {
         message: String,
     ) -> Result<()> {
         tracing::warn!(key = %incoming.idempotency_key, ?code, %message, "command rejected");
+        if code == CommandErrorCode::WorkspaceUntrusted {
+            self.ctx.audit.record(
+                "dispatch_refused",
+                json!({ "thread_id": thread_of(&incoming.command), "code": "workspace_untrusted", "message": message }),
+            );
+        }
         self.sink
             .command_result(CommandFailure {
                 idempotency_key: incoming.idempotency_key.clone(),
@@ -272,6 +283,7 @@ impl Router {
                     format!("workspace {} is not a directory", requested.display()),
                 ));
             }
+            self.admit(&requested).await?;
             let mode = workspace
                 .spawn
                 .as_deref()
@@ -317,6 +329,33 @@ impl Router {
             };
         }
         self.send(thread_id, incoming, command)
+    }
+
+    /// The trust check before a session starts in `dir`: asks at a terminal, and refuses an
+    /// untrusted directory without one. The question may wait for the answer, so it runs off the
+    /// async runtime.
+    async fn admit(&self, dir: &Path) -> Result<(), Reject> {
+        let store = self.ctx.trust.clone();
+        let audit = self.ctx.audit.clone();
+        let asker: Option<Asker> = self.ctx.asker.clone();
+        let asked = dir.to_owned();
+        let verdict = tokio::task::spawn_blocking(move || {
+            trust::decide(&store, &audit, &asked, asker.as_ref())
+        })
+        .await
+        .map_err(|e| (CommandErrorCode::Invalid, format!("trust check: {e}")))?
+        .map_err(|e| (CommandErrorCode::Invalid, format!("trust store: {e}")))?;
+        match verdict {
+            Verdict::Refused => Err((
+                CommandErrorCode::WorkspaceUntrusted,
+                format!(
+                    "workspace {} is not trusted: run `sm trust {}` on this machine",
+                    dir.display(),
+                    dir.display()
+                ),
+            )),
+            Verdict::Trusted | Verdict::Granted | Verdict::Once => Ok(()),
+        }
     }
 
     async fn forward_existing(
@@ -387,6 +426,12 @@ impl Router {
             .ok_or_else(unknown)?;
         let found = self.find(&row.harness)?;
         let cwd = PathBuf::from(&row.cwd);
+        // The directory the hub asked for: a worktree session's repository, else its own
+        // directory. A missing directory is reported below.
+        let requested = Worktree::load(&dir).map_or_else(|| cwd.clone(), |worktree| worktree.repo);
+        if requested.is_dir() {
+            self.admit(&requested).await?;
+        }
         let gone = || {
             (
                 CommandErrorCode::Invalid,
@@ -423,6 +468,30 @@ impl Router {
             tracing::warn!("no earlier session for {}", self.ctx.cwd.display());
             return;
         };
+        match trust::decide(
+            &self.ctx.trust,
+            &self.ctx.audit,
+            &last.workspace,
+            self.ctx.asker.as_ref(),
+        ) {
+            Ok(Verdict::Refused) => {
+                tracing::warn!(
+                    "not continuing: {} is not trusted (run `sm trust {}`)",
+                    last.workspace.display(),
+                    last.workspace.display()
+                );
+                self.ctx.audit.record(
+                    "dispatch_refused",
+                    json!({ "thread_id": last.thread_id, "code": "workspace_untrusted", "by": "continue", "dir": last.workspace }),
+                );
+                return;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!("could not continue the last session: {error:#}");
+                return;
+            }
+        }
         let started = (|| -> Result<(), String> {
             let found = self.find(&last.harness).map_err(|(_, m)| m)?;
             // A worktree that was removed with its session: carry on in the project itself.
