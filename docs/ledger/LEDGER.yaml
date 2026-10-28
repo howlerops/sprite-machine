@@ -1022,16 +1022,19 @@ items:
     title: "runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume"
     milestone: M1a
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     priority: 2
     risk: high
     deps:
       - "M1A-006b"
       - "M1A-007"
     paths:
-      - crates/sidecar/src/bridge/**
-      - crates/sidecar/src/acp/client*
-      - crates/sidecar/src/acp/reattach*
-      - crates/sidecar/tests/bridge_robust.rs
+      - "crates/sidecar/src/bridge/**"
+      - "crates/sidecar/src/acp/client*"
+      - "crates/sidecar/src/acp/reattach*"
+      - "crates/sidecar/tests/bridge_robust.rs"
     context:
       - 'docs/ledger/reports/M1A-006b.md (Discovered work 1-7)'
       - 'docs/specs/tunnel.md §3.5 (approval outcomes incl. submitted/declined after SPEC-002a)'
@@ -1968,15 +1971,19 @@ items:
     title: 'hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: M
     risk: medium
     deps: [M2B-002, M2-008]
     paths:
-      - 'crates/hub/src/threads/**'
-      - 'crates/hub/src/do/thread.rs'
-      - 'crates/hub/tests/thread_do.rs'
-      - 'crates/hub/tests/thread_create.rs'
+      - "crates/hub/src/threads/**"
+      - "crates/hub/src/do/thread.rs"
+      - "crates/hub/tests/thread_do.rs"
+      - "crates/hub/tests/thread_create.rs"
+      - "crates/hub/src/machines/internal.rs (event_id pass-through only)"
     context:
       - 'docs/specs/tunnel.md §4.2 (last paragraph), §3.5 dispatch'
       - 'docs/specs/client-api.md §5.2'
@@ -2038,6 +2045,9 @@ items:
     title: 'Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     lane: rust
     size: M
     risk: high
