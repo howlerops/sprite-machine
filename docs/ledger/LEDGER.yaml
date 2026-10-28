@@ -1022,7 +1022,8 @@ items:
     title: "runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume"
     milestone: M1a
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged cbc26b7; bridge_robust 4 + bridge 10 passed, sidecar 130 passed 0 failed on merged tree, clippy clean, tracer PASS"
     attempt: 1
     assignee: "worker:sonnet"
     priority: 2
@@ -2138,6 +2139,48 @@ items:
       - 'cargo test -p sidecar --test bridge_durable_commands'
       - 'cargo test -p runner --test tunnel_client'
       - 'cargo test -p sidecar'
+      - 'cargo run -p cli -- e2e tracer'
+
+  - id: SPEC-004
+    title: 'Spec: dispatch/session carry per-thread MCP servers; an interrupt outcome / RunError code for "agent gone" (harness_exited) instead of expired'
+    milestone: M1a
+    phase: P2
+    lane: docs
+    owner: leader
+    deps: [M1A-006c]
+    paths:
+      - 'docs/specs/tunnel.md'
+      - 'docs/specs/turn-event.md'
+      - 'crates/protocol/schemas/turn-event/**'
+    context:
+      - 'docs/ledger/reports/M1A-006c.md (Discovered work 1, 4)'
+    acceptance:
+      - 'tunnel.md §3.5 says where MCP servers for a thread come from (dispatch field or loadout reference); turn-event.md says how an interrupt ends when the harness dies; schemas + examples updated and valid'
+    verify:
+      - 'python3 crates/protocol/schemas/turn-event/validate.py'
+
+  - id: M1A-006e
+    title: 'Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config'
+    milestone: M1a
+    phase: P2
+    lane: rust
+    size: M
+    risk: medium
+    deps: [M1A-006c, M1A-006d]
+    paths:
+      - 'crates/runner/src/tracer.rs'
+      - 'crates/sidecar/src/bridge/**'
+      - 'crates/acp-mock/**'
+      - 'crates/sidecar/tests/bridge_robust.rs'
+    context:
+      - 'docs/ledger/reports/M1A-006c.md (Discovered work 2, 3, 5)'
+    acceptance:
+      - 'The runner path used by the tracer (and later sm rc) builds the bridge with spawn_with, so killing the agent mid-run fails the task and the next prompt respawns and resumes (test)'
+      - 'An approval for an interrupt stored by a previous process for a thread this process has not loaded answers unknown_interrupt (hub maps to 409) (test)'
+      - 'acp-mock can record received requests (opt-in) and advertise modes/config_options in session/new; bridge_robust drops its hand-played agent where acp-mock now suffices'
+    verify:
+      - 'cargo test -p sidecar --test bridge_robust'
+      - 'cargo test -p acp-mock'
       - 'cargo run -p cli -- e2e tracer'
 
   - id: M2-008a
