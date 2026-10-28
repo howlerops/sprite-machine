@@ -15,6 +15,7 @@ gpui-component.workspace = true
 gpui-kit.workspace = true
 intl-memoizer = "0.5.3"
 open = "5"
+protocol = { path = "../protocol" }
 qrcode = { version = "0.14", default-features = false }
 rand = "0.9"
 reqwest.workspace = true
@@ -27,6 +28,7 @@ unic-langid = "0.9"
 url = "2"
 
 [dev-dependencies]
+agui-fixture = { path = "../agui-fixture" }
 axum = { workspace = true, features = ["ws"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui-kit = { workspace = true, features = ["test-support"] }

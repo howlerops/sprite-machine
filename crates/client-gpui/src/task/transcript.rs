@@ -1,0 +1,420 @@
+//! The task transcript pane: a `v_virtual_list` over text rows built from `client-core` view
+//! models (`ThreadView` -> `TaskView` -> `Transcript` items).
+//!
+//! This file holds no decisions about the data. `client-core` decides what the items are; here
+//! every item is laid out as a run of fixed-height rows (so the virtual list knows every size up
+//! front, CONVENTIONS.md §8) and each row is drawn as plain text. Untrusted strings (messages,
+//! tool output, paths) only ever reach a `div().child(String)`, never a markup parser.
+//!
+//! Item bodies are wrapped at [`WRAP_COLS`] columns and long bodies are capped (see
+//! [`crate::task::tools`]). Row wrapping is by character count, not measured pixels.
+
+use std::rc::Rc;
+
+use client_core::TaskStatus;
+use client_core::view::{Item, TaskView, ThreadView};
+use gpui_kit::component::{
+    ActiveTheme as _, VirtualListScrollHandle,
+    scroll::{ScrollableElement, ScrollbarAxis},
+    v_flex, v_virtual_list,
+};
+use gpui_kit::prelude::*;
+use gpui_kit::*;
+use protocol::tunnel::ActorKind;
+use protocol::turn_event::MachinePresence;
+
+use crate::shell::i18n::{tr, tr_args};
+use crate::task::tools;
+
+/// Height of one transcript row.
+pub const ROW_HEIGHT: Pixels = px(22.);
+/// Element id of the pane (scroll target in tests).
+pub const PANE_ID: &str = "transcript";
+/// Element id carried by every laid-out row's text element.
+pub const ROW_ID: &str = "transcript-row";
+/// Characters per wrapped line.
+pub const WRAP_COLS: usize = 110;
+/// Lines shown from a tool input/output, a reasoning block or a diff before "N more lines".
+pub const MAX_BODY_LINES: usize = 12;
+/// Diff lines shown per file.
+pub const MAX_DIFF_LINES: usize = 30;
+/// Terminal output lines shown (the tail).
+pub const MAX_TERMINAL_LINES: usize = 20;
+
+/// What a row shows; decides its font and weight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowKind {
+    /// Thread title, machine presence, task status.
+    Header,
+    User,
+    Text,
+    Reasoning,
+    ToolTitle,
+    ToolDetail,
+    DiffTitle,
+    DiffLine,
+    Plan,
+    Terminal,
+    Policy,
+    Interrupt,
+    Checkpoint,
+    Error,
+    /// "... N more lines" after a capped body.
+    More,
+}
+
+/// Colour role of a row (resolved against the theme at draw time; no hex in views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Normal,
+    Muted,
+    Success,
+    Danger,
+    Warning,
+}
+
+/// One line of the transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub kind: RowKind,
+    pub tone: Tone,
+    /// Indent steps (one step is a small left padding).
+    pub indent: u8,
+    pub text: String,
+}
+
+impl Row {
+    pub fn new(kind: RowKind, tone: Tone, indent: u8, text: impl Into<String>) -> Self {
+        Self {
+            kind,
+            tone,
+            indent,
+            text: text.into(),
+        }
+    }
+
+    fn monospace(&self) -> bool {
+        matches!(
+            self.kind,
+            RowKind::ToolDetail | RowKind::DiffLine | RowKind::Terminal
+        )
+    }
+}
+
+/// Makes `text` safe to show on one line: tabs become spaces, other control characters are
+/// dropped (an escape sequence in tool output must not reach the renderer).
+pub fn sanitize(text: &str) -> String {
+    text.chars()
+        .filter_map(|c| match c {
+            '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
+}
+
+/// `text` split on newlines and hard-wrapped at `cols` characters, sanitized.
+pub fn wrap_lines(text: &str, cols: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for raw in text.split('\n') {
+        let line = sanitize(raw.trim_end_matches('\r'));
+        if line.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let chars: Vec<char> = line.chars().collect();
+        for chunk in chars.chunks(cols.max(1)) {
+            lines.push(chunk.iter().collect());
+        }
+    }
+    lines
+}
+
+/// Pushes at most `max` wrapped lines of `text`, then a "N more lines" row when capped.
+pub fn push_body(
+    out: &mut Vec<Row>,
+    text: &str,
+    max: usize,
+    kind: RowKind,
+    tone: Tone,
+    indent: u8,
+) {
+    let lines = wrap_lines(text, WRAP_COLS);
+    let total = lines.len();
+    for line in lines.into_iter().take(max) {
+        out.push(Row::new(kind, tone, indent, line));
+    }
+    if total > max {
+        push_more(out, total - max, indent);
+    }
+}
+
+/// The "... N more lines" row.
+pub fn push_more(out: &mut Vec<Row>, hidden: usize, indent: u8) {
+    out.push(Row::new(
+        RowKind::More,
+        Tone::Muted,
+        indent,
+        tr_args("transcript-more-lines", &[("detail", &hidden.to_string())]),
+    ));
+}
+
+/// The rows of one transcript item.
+pub fn item_rows(item: &Item, out: &mut Vec<Row>) {
+    match item {
+        Item::User(user) => {
+            let who = if user.author.kind == ActorKind::User {
+                tr("transcript-you")
+            } else {
+                sanitize(user.author.name.as_deref().unwrap_or(&user.author.id))
+            };
+            let start = out.len();
+            push_body(out, &user.text, usize::MAX, RowKind::User, Tone::Normal, 0);
+            match out.get_mut(start) {
+                Some(first) => first.text = format!("{who}: {}", first.text),
+                None => out.push(Row::new(RowKind::User, Tone::Normal, 0, format!("{who}:"))),
+            }
+        }
+        Item::Text(text) => {
+            let start = out.len();
+            push_body(out, &text.text, usize::MAX, RowKind::Text, Tone::Normal, 0);
+            if out.len() == start || (out.len() == start + 1 && out[start].text.is_empty()) {
+                out.truncate(start);
+                out.push(Row::new(
+                    RowKind::Text,
+                    Tone::Muted,
+                    0,
+                    tr("transcript-empty-message"),
+                ));
+            }
+        }
+        Item::Reasoning(text) => {
+            out.push(Row::new(
+                RowKind::Reasoning,
+                Tone::Muted,
+                0,
+                tr("transcript-reasoning"),
+            ));
+            push_body(
+                out,
+                &text.text,
+                MAX_BODY_LINES,
+                RowKind::Reasoning,
+                Tone::Muted,
+                1,
+            );
+        }
+        Item::Tool(tool) => tools::tool_rows(tool, out),
+        Item::Activity(activity) => tools::activity_rows(activity, out),
+        Item::Interrupt(interrupt) => tools::interrupt_rows(interrupt, out),
+        Item::Checkpoint(checkpoint) => tools::checkpoint_rows(checkpoint, out),
+        Item::Error { code, message } => {
+            let message = sanitize(message);
+            let text = match code {
+                Some(code) => tr_args(
+                    "transcript-error-code",
+                    &[("code", &sanitize(code)), ("detail", &message)],
+                ),
+                None => tr_args("transcript-error", &[("detail", &message)]),
+            };
+            out.push(Row::new(RowKind::Error, Tone::Danger, 0, text));
+        }
+    }
+}
+
+/// The status line of a task.
+pub fn status_row(status: TaskStatus) -> Row {
+    let (id, tone) = match status {
+        TaskStatus::Starting => ("task-status-starting", Tone::Muted),
+        TaskStatus::Running => ("task-status-running", Tone::Muted),
+        TaskStatus::NeedsYou => ("task-status-needs-you", Tone::Warning),
+        TaskStatus::Succeeded => ("task-status-succeeded", Tone::Success),
+        TaskStatus::Failed => ("task-status-failed", Tone::Danger),
+        TaskStatus::Cancelled => ("task-status-cancelled", Tone::Warning),
+    };
+    Row::new(RowKind::Header, tone, 0, tr(id))
+}
+
+/// The rows of one task: its items, then its status.
+pub fn task_rows(task: &TaskView, out: &mut Vec<Row>) {
+    for item in task.transcript().items() {
+        item_rows(item, out);
+    }
+    out.push(status_row(task.status()));
+}
+
+/// The rows of a whole thread: title and machine presence, then each task in order.
+pub fn thread_rows(thread: &ThreadView) -> Vec<Row> {
+    let mut out = Vec::new();
+    let title = thread
+        .title()
+        .map(sanitize)
+        .unwrap_or_else(|| tr("task-untitled"));
+    out.push(Row::new(RowKind::Header, Tone::Normal, 0, title));
+    if let Some(mode) = thread
+        .state("session")
+        .and_then(|session| session.get("current_mode_id"))
+        .and_then(|mode| mode.as_str())
+    {
+        out.push(Row::new(
+            RowKind::Header,
+            Tone::Muted,
+            0,
+            tr_args("task-mode", &[("detail", &sanitize(mode))]),
+        ));
+    }
+    if let Some(usage) = thread.state("usage")
+        && let (Some(used), Some(window)) = (
+            usage.get("context_used").and_then(|v| v.as_u64()),
+            usage.get("context_size").and_then(|v| v.as_u64()),
+        )
+    {
+        out.push(Row::new(
+            RowKind::Header,
+            Tone::Muted,
+            0,
+            tr_args(
+                "task-context",
+                &[
+                    ("detail", &used.to_string()),
+                    ("choice", &window.to_string()),
+                ],
+            ),
+        ));
+    }
+    if let (Some(machine), Some(presence)) = (thread.machine_id(), thread.presence()) {
+        let state = match presence.state {
+            MachinePresence::Online => "task-presence-online",
+            MachinePresence::Asleep => "task-presence-asleep",
+            MachinePresence::Offline => "task-presence-offline",
+        };
+        out.push(Row::new(
+            RowKind::Header,
+            if presence.state == MachinePresence::Online {
+                Tone::Muted
+            } else {
+                Tone::Warning
+            },
+            0,
+            tr_args(
+                "task-machine-presence",
+                &[("detail", &sanitize(machine)), ("choice", &tr(state))],
+            ),
+        ));
+    }
+    for task in thread.tasks() {
+        task_rows(task, &mut out);
+    }
+    out
+}
+
+/// The transcript pane. Call [`TranscriptPane::set_thread`] whenever the thread view changes.
+pub struct TranscriptPane {
+    rows: Vec<Row>,
+    item_sizes: Rc<Vec<Size<Pixels>>>,
+    scroll_handle: VirtualListScrollHandle,
+    follow_tail: bool,
+}
+
+impl Default for TranscriptPane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TranscriptPane {
+    pub fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            item_sizes: Rc::new(Vec::new()),
+            scroll_handle: VirtualListScrollHandle::new(),
+            follow_tail: false,
+        }
+    }
+
+    pub fn rows(&self) -> &[Row] {
+        &self.rows
+    }
+
+    /// Keep the newest row in view when the thread changes.
+    pub fn set_follow_tail(&mut self, follow: bool) {
+        self.follow_tail = follow;
+    }
+
+    /// Rebuilds the rows from `thread` and repaints.
+    pub fn set_thread(&mut self, thread: &ThreadView, cx: &mut Context<Self>) {
+        self.rows = thread_rows(thread);
+        if self.item_sizes.len() != self.rows.len() {
+            self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); self.rows.len()]);
+        }
+        if self.follow_tail && !self.rows.is_empty() {
+            self.scroll_handle
+                .scroll_to_item(self.rows.len() - 1, ScrollStrategy::Bottom);
+        }
+        cx.notify();
+    }
+
+    fn render_row(&self, ix: usize, cx: &App) -> impl IntoElement + use<> {
+        let row = &self.rows[ix];
+        let text = SharedString::from(row.text.clone());
+        let theme = cx.theme();
+        let color = match row.tone {
+            Tone::Normal => theme.foreground,
+            Tone::Muted => theme.muted_foreground,
+            Tone::Success => theme.success,
+            Tone::Danger => theme.danger,
+            Tone::Warning => theme.warning,
+        };
+        let mono = row.monospace().then(|| theme.mono_font_family.clone());
+        let bold = matches!(
+            row.kind,
+            RowKind::User | RowKind::ToolTitle | RowKind::DiffTitle | RowKind::Header
+        );
+        let shaded = matches!(row.kind, RowKind::User);
+        let background = theme.secondary;
+        div().id(("row", ix)).w_full().h(ROW_HEIGHT).child(
+            div()
+                .id(ROW_ID)
+                .test_support()
+                .aria_label(text.clone())
+                .size_full()
+                .px_3()
+                .pl(px(12. + 16. * f32::from(row.indent)))
+                .text_sm()
+                .text_color(color)
+                .when_some(mono, |el, family| el.font_family(family))
+                .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
+                .when(shaded, |el| el.bg(background))
+                .child(div().truncate().child(text)),
+        )
+    }
+}
+
+impl Render for TranscriptPane {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id(PANE_ID)
+            .test_support()
+            .aria_label(tr("task-label"))
+            .relative()
+            .size_full()
+            .child(
+                v_flex()
+                    .id("transcript-scroll")
+                    .relative()
+                    .size_full()
+                    .child(
+                        v_virtual_list(
+                            cx.entity().clone(),
+                            "transcript-list",
+                            self.item_sizes.clone(),
+                            |pane, visible_range, _, cx| {
+                                visible_range.map(|ix| pane.render_row(ix, cx)).collect()
+                            },
+                        )
+                        .track_scroll(&self.scroll_handle),
+                    )
+                    .scrollbar(&self.scroll_handle, ScrollbarAxis::Vertical),
+            )
+    }
+}
