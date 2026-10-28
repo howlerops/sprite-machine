@@ -184,6 +184,35 @@ appears as `StateDelta{session}` on the subscription. Values must come from the 
 the client PUTs the bytes to the signed R2 `upload_url` (≤ 20 MB) and uses `url` in a
 `{type:"file"}` part. (Implemented with WEB-003 / M1A-014.)
 
+### 5.7 Browser sign-in (mobile web page)
+
+> SPEC-005. The phone page (WEB-001) needs a user session before GitHub OAuth (M2-003b, P3)
+> exists. Two ways, both ending in an ordinary session token (§2) stored by the page.
+
+**A. QR from the runner (the usual path).** `sm rc` prints a QR code for a one-time link.
+
+1. The runner calls **`POST /v1/devices/signin-links`** with its machine credential
+   (`Authorization: Bearer smm_…`, tunnel.md §2) → 201
+   `{ "url": "https://<hub>/pair?code=<link code>", "expires_at" }`. The link code is 256 random
+   bits, single use, valid **5 minutes**; the hub stores only its SHA-256. It is bound to the org
+   of the machine and to the user who **approved** the machine (M2B-005); a machine created by
+   the admin API (no approving user) gets 403 `forbidden`.
+2. The page at `/pair?code=…` calls **`POST /v1/auth/links/redeem`** `{ "code" }` (no auth) →
+   201 `{ "token", "expires_at", "user", "org" }`: a session for that user in that org, with the
+   user's role capped at `member`, `device_name` "web". A used, expired or unknown code → 410
+   `expired` (same answer for all three). Audited (`session.link_redeem`).
+3. The runner never sees the session; the link code never appears in logs, the audit detail or
+   the tunnel.
+
+**B. Device code shown by the page.** For a phone with no runner in sight, the page runs the
+same RFC 8628 flow as `sm login` (§ M2B-005), for a user session instead of a machine:
+**`POST /v1/auth/device/code`** → `{ device_code, user_code, verification_uri, interval,
+expires_in }`; a signed-in member approves the user code (desktop app, another browser, or
+`POST /v1/auth/device/approve` `{ user_code }`); the page polls **`POST /v1/auth/device/token`**
+`{ device_code }` → the session token once. The same rate limits as device pairing apply
+(M2B-005a), and the token response names the approving user and org, which the page shows
+before it stores the token.
+
 ## 6. Who emits what
 
 | Event                                             | Emitted by | When                                                                                                                  |
