@@ -437,6 +437,15 @@ fn envelope(task_id: &str, delta: &str) -> Envelope {
     .unwrap()
 }
 
+fn envelope_on(thread_id: &str, task_id: &str, delta: &str) -> Envelope {
+    serde_json::from_value(json!({
+        "v": 1, "seq": 0, "thread_id": thread_id, "task_id": task_id, "run_id": "run_1",
+        "ts": "2026-10-27T22:00:03.000Z",
+        "event": { "type": "TextMessageContent", "message_id": "msg_a1", "delta": delta }
+    }))
+    .unwrap()
+}
+
 fn cancel(task: &str) -> Value {
     json!({ "kind": "cancel", "thread_id": "th_1", "task_id": task })
 }
@@ -1059,6 +1068,83 @@ async fn thread_open_is_renumbered_first_after_a_fresh_stream() {
     assert_eq!(open["thread_id"], "th_1");
     let events = again.events(1).await;
     assert_eq!(events[0].0, 2);
+}
+
+#[tokio::test]
+async fn thread_open_is_queued_at_most_once_per_thread() {
+    let mut rig = Rig::new().await;
+    rig.sink
+        .thread_open("th_1", "fix flaky test", "claude", &workspace())
+        .unwrap();
+    assert!(
+        rig.sink
+            .thread_open("th_1", "fix flaky test", "claude", &workspace())
+            .is_err(),
+        "a second thread_open for the same thread must be refused"
+    );
+    assert_eq!(rig.store.outbox_state().unwrap().unacked.len(), 1);
+
+    let mut conn = rig.connect(20_000).await;
+    assert_eq!(conn.recv().await["t"], "thread_open");
+    assert!(
+        conn.recv_within(Duration::from_millis(300)).await.is_none(),
+        "only one thread_open goes out"
+    );
+}
+
+#[tokio::test]
+async fn an_event_for_a_local_thread_before_its_thread_open_is_refused() {
+    let mut rig = Rig::new().await;
+    // The runner started th_1 itself (a local session), but has not opened it yet.
+    rig.sink.mark_local_thread("th_1");
+    let early = rig.sink.send(vec![envelope("tk_1", "too early")]).await;
+    assert!(
+        early.is_err(),
+        "an event before thread_open must be refused"
+    );
+    assert!(
+        rig.store.outbox_state().unwrap().unacked.is_empty(),
+        "a refused event is not queued"
+    );
+
+    rig.sink
+        .thread_open("th_1", "fix flaky test", "claude", &workspace())
+        .unwrap();
+    rig.sink
+        .send(vec![envelope("tk_1", "in time")])
+        .await
+        .expect("events are accepted once the thread is open");
+    let mut conn = rig.connect(20_000).await;
+    assert_eq!(conn.recv().await["t"], "thread_open");
+    let events = conn.events(1).await;
+    assert_eq!(events[0].0, 2, "the accepted event follows thread_open");
+}
+
+#[tokio::test]
+async fn hub_dispatched_threads_send_events_without_thread_open() {
+    let mut rig = Rig::new().await;
+    // A local thread that is not open yet; th_hub was dispatched by a command (no thread_open).
+    rig.sink.mark_local_thread("th_local");
+    rig.sink
+        .send(vec![envelope_on("th_hub", "tk_9", "dispatched")])
+        .await
+        .expect("a hub-dispatched thread needs no thread_open");
+    assert!(
+        rig.sink
+            .send(vec![envelope_on("th_local", "tk_1", "refused")])
+            .await
+            .is_err()
+    );
+
+    let mut conn = rig.connect(20_000).await;
+    let events = conn.events(1).await;
+    assert_eq!(events[0].0, 1);
+    let state = rig.store.outbox_state().unwrap();
+    assert_eq!(
+        state.unacked.len(),
+        1,
+        "only the dispatched event is queued"
+    );
 }
 
 #[tokio::test]
