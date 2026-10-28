@@ -31,6 +31,10 @@ const AGENT_ID: &str = "agt_acp_mock";
 const READY_TIMEOUT: Duration = Duration::from_secs(240);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+/// Cargo profile for the hub bundle; the same name is in `crates/hub/wrangler.toml` `[build]`.
+const WASM_PROFILE: &str = "wasm-release";
+/// The gzip'd hub bundle must stay under this (MVP-000a acceptance: gzip < 1 MiB).
+const BUNDLE_LIMIT_GZIP: u64 = 1024 * 1024;
 
 /// The acp-mock script: one prompt turn with text, a tool call that needs permission (the
 /// client must answer an allow option), the tool call completing, more text, `end_turn`.
@@ -97,11 +101,14 @@ async fn interrupted() {
 async fn tracer(work: &TempDir) -> Result<()> {
     let hub_dir = hub_dir()?;
 
-    println!("== worker-build --release ({})", hub_dir.display());
+    println!(
+        "== worker-build --profile {WASM_PROFILE} ({})",
+        hub_dir.display()
+    );
     let build_log = work.path.join("worker-build.log");
     let build_started = Instant::now();
     let status = wasm_command("worker-build", &hub_dir)
-        .arg("--release")
+        .args(["--profile", WASM_PROFILE])
         .stdout(log_file(&build_log)?)
         .stderr(log_file_append(&build_log)?)
         .kill_on_drop(true)
@@ -113,6 +120,7 @@ async fn tracer(work: &TempDir) -> Result<()> {
         bail!("worker-build failed: {status}");
     }
     println!("built in {:.1}s", build_started.elapsed().as_secs_f64());
+    report_bundle(&hub_dir)?;
 
     let port = free_port()?;
     let base = format!("http://127.0.0.1:{port}");
@@ -348,21 +356,83 @@ fn shape_of(envelope: &Envelope) -> String {
 
 // ---- processes ----------------------------------------------------------------------------
 
+/// The hub crate of the checkout the cli runs in, found at run time. Not from
+/// `CARGO_MANIFEST_DIR`: with a shared `CARGO_TARGET_DIR` a cached cli binary built in another
+/// (since deleted) checkout would point at a missing tree.
 fn hub_dir() -> Result<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../hub");
+    let cwd = std::env::current_dir().context("current dir")?;
+    let dir = find_hub_dir(&cwd).ok_or_else(|| {
+        anyhow!(
+            "no crates/hub/wrangler.toml above {}; run `cargo run -p cli -- e2e tracer` inside the repository",
+            cwd.display()
+        )
+    })?;
     dir.canonicalize()
         .with_context(|| format!("hub crate at {}", dir.display()))
 }
 
-/// A command for the wasm toolchain: the native lld `RUSTFLAGS` must not reach the wasm build,
-/// and `strip` breaks worker-build 0.8.7 (docs/spikes/cloudflare.md caveat 2).
+/// Walks up from `start` to the first directory that holds the workspace `Cargo.toml` and
+/// `crates/hub/wrangler.toml`, and returns `crates/hub` under it.
+fn find_hub_dir(start: &Path) -> Option<PathBuf> {
+    start.ancestors().find_map(|dir| {
+        (dir.join("Cargo.toml").is_file() && dir.join("crates/hub/wrangler.toml").is_file())
+            .then(|| dir.join("crates/hub"))
+    })
+}
+
+/// Prints the hub bundle size as the Worker ships it: `gzip -9` of `build/index.js` and
+/// `build/index_bg.wasm`, each compressed on its own and summed. Fails over the limit.
+fn report_bundle(hub_dir: &Path) -> Result<()> {
+    let build = hub_dir.join("build");
+    let mut total = 0_u64;
+    for name in ["index.js", "index_bg.wasm"] {
+        let path = build.join(name);
+        let raw = fs::metadata(&path)
+            .with_context(|| format!("bundle file {}", path.display()))?
+            .len();
+        let gzipped = gzip_size(&path)?;
+        println!("{name}: {raw} bytes, gzip -9 {gzipped} bytes");
+        total += gzipped;
+    }
+    println!(
+        "bundle gzip -9: {total} bytes ({:.1} KiB), limit {} bytes",
+        total as f64 / 1024.0,
+        BUNDLE_LIMIT_GZIP
+    );
+    ensure!(
+        total < BUNDLE_LIMIT_GZIP,
+        "hub bundle is {total} bytes gzip'd, over the {BUNDLE_LIMIT_GZIP} byte limit"
+    );
+    Ok(())
+}
+
+/// Size of `path` after `gzip -9 -n` (no name or timestamp in the header). Shells out to
+/// `gzip`: the cli has no compression crate.
+fn gzip_size(path: &Path) -> Result<u64> {
+    let input = File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let output = Command::new("gzip")
+        .args(["-9", "-n", "-c"])
+        .stdin(input)
+        .stderr(Stdio::inherit())
+        .output()
+        .context("run gzip (is gzip installed?)")?;
+    ensure!(
+        output.status.success(),
+        "gzip {} failed: {}",
+        path.display(),
+        output.status
+    );
+    u64::try_from(output.stdout.len()).context("gzip size")
+}
+
+/// A command for the wasm toolchain: the native lld `RUSTFLAGS` must not reach the wasm build.
+/// The size settings live in the `wasm-release` profile (root Cargo.toml).
 fn wasm_command(program: &str, dir: &Path) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(program);
     command
         .current_dir(dir)
         .env_remove("RUSTFLAGS")
         .env_remove("RUSTC_WRAPPER")
-        .env("CARGO_PROFILE_RELEASE_STRIP", "false")
         .env("WRANGLER_SEND_METRICS", "false")
         .stdin(Stdio::null());
     command
@@ -379,16 +449,13 @@ struct Wrangler {
     child: Option<Child>,
     pgid: i32,
     log: PathBuf,
-    /// `crates/hub/.wrangler` (wrangler's bundling scratch), removed after wrangler stops when
-    /// this run created it, so the checkout stays clean.
-    scratch: Option<PathBuf>,
 }
 
 impl Wrangler {
+    /// wrangler's bundling scratch `crates/hub/.wrangler` stays in the checkout; it is ignored by
+    /// `crates/hub/.gitignore`.
     fn start(hub_dir: &Path, port: u16, work: &TempDir) -> Result<Self> {
         let log = work.path.join("wrangler.log");
-        let scratch = hub_dir.join(".wrangler");
-        let scratch = (!scratch.exists()).then_some(scratch);
         let persist = work.path.join("persist");
         let mut command = Command::new("wrangler");
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -401,7 +468,6 @@ impl Wrangler {
             .arg("--show-interactive-dev-session=false")
             .env_remove("RUSTFLAGS")
             .env_remove("RUSTC_WRAPPER")
-            .env("CARGO_PROFILE_RELEASE_STRIP", "false")
             .env("WRANGLER_SEND_METRICS", "false")
             .stdin(Stdio::null())
             .stdout(std::process::Stdio::from(
@@ -416,7 +482,6 @@ impl Wrangler {
             child: Some(child),
             pgid,
             log,
-            scratch,
         })
     }
 
@@ -482,9 +547,6 @@ impl Wrangler {
         let deadline = Instant::now() + STOP_TIMEOUT;
         while group_alive(self.pgid) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
-        }
-        if let Some(scratch) = self.scratch.take() {
-            let _ = fs::remove_dir_all(scratch);
         }
     }
 }
@@ -556,5 +618,52 @@ fn print_tail(path: &Path, lines: usize) {
     eprintln!("---- {} (tail) ----", path.display());
     for line in &all[all.len().saturating_sub(lines)..] {
         eprintln!("{line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fake checkout: workspace `Cargo.toml`, `crates/hub/wrangler.toml`, `crates/cli/src/e2e`.
+    fn fake_checkout(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("sm-hub-lookup-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("crates/hub")).unwrap();
+        fs::create_dir_all(root.join("crates/cli/src/e2e")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("crates/hub/wrangler.toml"), "name = \"sm-hub\"\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn hub_dir_is_found_from_a_nested_directory() {
+        let root = fake_checkout("nested");
+        let found = find_hub_dir(&root.join("crates/cli/src/e2e"));
+        assert_eq!(found, Some(root.join("crates/hub")));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn hub_dir_is_found_from_the_checkout_root() {
+        let root = fake_checkout("root");
+        assert_eq!(find_hub_dir(&root), Some(root.join("crates/hub")));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn hub_dir_lookup_fails_without_a_hub_above() {
+        let root =
+            std::env::temp_dir().join(format!("sm-hub-lookup-{}-no-hub", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("a/b")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        assert_eq!(find_hub_dir(&root.join("a/b")), None);
+        fs::remove_dir_all(&root).unwrap();
     }
 }

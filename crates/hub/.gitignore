@@ -1,0 +1,4 @@
+# wrangler dev scratch (bundling), written by `wrangler dev` in this directory
+/.wrangler
+# worker-build output (index.js, index_bg.wasm); rebuilt by worker-build and wrangler dev
+/build

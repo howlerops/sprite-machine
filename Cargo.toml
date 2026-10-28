@@ -31,5 +31,16 @@ gpui-kit = { git = "https://github.com/longbridge/gpui-component", rev = "c8917c
 [profile.dev]
 debug = "line-tables-only"
 
+# The hub Worker bundle (`worker-build --profile wasm-release`, see crates/hub/wrangler.toml).
+# Size settings from docs/spikes/cloudflare.md: 487,908-byte wasm in the spike against
+# 1.49 MB with plain release. A named profile, not [profile.release], so native release builds
+# of the other crates keep their settings. `strip = true` breaks worker-build 0.8.7.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = false
+
 [profile.dev.package."*"]
 opt-level = 1
