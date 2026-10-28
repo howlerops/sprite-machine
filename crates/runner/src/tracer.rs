@@ -8,8 +8,13 @@
 //! `idempotency_key`, handed to the bridge and acked at once. A `{"t":"ping"}` goes out every
 //! `heartbeat_ms` from `welcome`.
 //!
+//! Auth (M2B-002): the hub's tunnel needs a machine credential (`Authorization: Bearer smm_...`).
+//! The tracer has no pairing yet (M2B-005), so it asks the hub's DEV_FIXTURES route
+//! `POST /v1/dev/machines/{id}/credential` (`Bearer dev`) for one before it connects. Inbound
+//! frames are parsed with the strict `parse_frame`.
+//!
 //! Stub limits: in-memory outbox, no reconnect (a lost socket ends the run with an error), no
-//! resume token persistence, no credential (the tracer hub has no auth), no `command_result`.
+//! resume token persistence, a dev credential instead of pairing, no `command_result`.
 
 use std::future::Future;
 use std::time::Duration;
@@ -18,7 +23,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use futures_util::{SinkExt, StreamExt};
 use protocol::tunnel::{
     Capabilities, CloseCode, Command, DedupeWindow, Disposition, Frame, PROTO_VERSION, Receiver,
-    SUBPROTOCOL, Sender, Verdict,
+    SUBPROTOCOL, Sender, Verdict, parse_frame,
 };
 use protocol::turn_event::Envelope;
 use serde_json::Value;
@@ -26,7 +31,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
+use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
 
 /// How long the runner waits for `welcome` after `hello` (tunnel.md §3.1).
 pub const WELCOME_TIMEOUT: Duration = Duration::from_secs(10);
@@ -60,6 +65,7 @@ pub async fn run(
         config.hub_ws_base.trim_end_matches('/'),
         config.machine_id
     );
+    let credential = fetch_dev_credential(&config).await?;
     let mut request = url
         .as_str()
         .into_client_request()
@@ -68,6 +74,11 @@ pub async fn run(
         SEC_WEBSOCKET_PROTOCOL,
         HeaderValue::from_static(SUBPROTOCOL),
     );
+    // The credential only ever travels in this header (tunnel.md §2).
+    let mut bearer = HeaderValue::from_str(&format!("Bearer {credential}"))
+        .context("machine credential is not a header value")?;
+    bearer.set_sensitive(true);
+    request.headers_mut().insert(AUTHORIZATION, bearer);
     let (socket, _) = tokio_tungstenite::connect_async(request)
         .await
         .with_context(|| format!("connect tunnel {url}"))?;
@@ -189,6 +200,34 @@ pub async fn run(
     Ok(())
 }
 
+/// Asks the hub's DEV_FIXTURES route for a credential for this machine (replacing any earlier
+/// one). TRACER STUB: the real runner gets its credential from pairing (M2B-005).
+async fn fetch_dev_credential(config: &TunnelConfig) -> Result<String> {
+    let http_base = config
+        .hub_ws_base
+        .trim_end_matches('/')
+        .replacen("ws", "http", 1);
+    let url = format!(
+        "{http_base}/v1/dev/machines/{}/credential",
+        config.machine_id
+    );
+    let response = reqwest::Client::new()
+        .post(&url)
+        .header("Authorization", "Bearer dev")
+        .send()
+        .await
+        .with_context(|| format!("request a dev credential from {url}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        bail!("{url} answered HTTP {status} (is the hub running with DEV_FIXTURES=1?)");
+    }
+    let body: Value = response.json().await.context("dev credential answer")?;
+    body.get("credential")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow!("the dev credential answer has no `credential`"))
+}
+
 /// Reads the next tunnel frame, skipping WebSocket control messages.
 async fn next_frame<S>(stream: &mut S) -> Result<Frame>
 where
@@ -202,7 +241,7 @@ where
             .context("tunnel read")?;
         match message {
             Message::Text(body) => {
-                return serde_json::from_str(body.as_str())
+                return parse_frame(body.as_str())
                     .with_context(|| format!("invalid frame from the hub: {}", body.as_str()));
             }
             Message::Close(reason) => bail!("tunnel closed by the hub: {reason:?}"),

@@ -470,7 +470,8 @@ impl<S: ThreadStore> ThreadCore<S> {
         ))
     }
 
-    fn machine_id(&self) -> Result<Option<String>, ApiError> {
+    /// The machine that hosts the thread (set by `init_thread`), if known.
+    pub fn machine_id(&self) -> Result<Option<String>, ApiError> {
         Ok(self.store.get_meta("info")?.and_then(|info| {
             info.get("machine_id")
                 .and_then(Value::as_str)
@@ -901,11 +902,13 @@ impl<S: ThreadStore> ThreadCore<S> {
     ) -> Result<Reply, ApiError> {
         let resolved =
             self.resolve_interrupt(interrupt_id, outcome.clone(), actor.clone(), now_ms)?;
-        // The tunnel `Outcome` only knows selected / cancelled (tunnel.md §3.5); a submitted
-        // form or a decline reaches the runner as the event, not in this command.
+        // The tunnel `Outcome` is the `InterruptResolved` outcome minus `expired` (SPEC-002a,
+        // tunnel.md §3.5). Clients cannot send `expired` (`check_outcome`); it maps to cancelled.
         let tunnel_outcome = match outcome {
             ResolvedOutcome::Selected { option_id } => Outcome::Selected { option_id },
-            _ => Outcome::Cancelled,
+            ResolvedOutcome::Submitted { data } => Outcome::Submitted { data },
+            ResolvedOutcome::Declined => Outcome::Declined,
+            ResolvedOutcome::Cancelled | ResolvedOutcome::Expired => Outcome::Cancelled,
         };
         let command = Command::Approval {
             thread_id: self.thread_id.clone(),

@@ -42,12 +42,19 @@ pub enum ContentPart {
     },
 }
 
-/// The answer to an interrupt: an option the user picked, or cancelled (ACP
-/// `RequestPermissionOutcome`).
+/// The answer to an interrupt, carried by an `approval` command (§3.5, SPEC-002a): the
+/// `InterruptResolved.outcome` union of turn-event.md §4.5 minus `expired` (expiry is decided
+/// by the runner and never sent down).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Outcome {
+    /// An option the user picked (ACP `RequestPermissionOutcome::Selected`).
     Selected { option_id: String },
+    /// A filled form (elicitation `accept`).
+    Submitted { data: serde_json::Value },
+    /// A form or auth interrupt that was declined (elicitation `decline`).
+    Declined,
+    /// Cancelled (ACP `Cancelled` / elicitation `cancel`).
     Cancelled,
 }
 

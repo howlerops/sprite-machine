@@ -246,7 +246,7 @@ fn embedded_migrations_are_the_files_in_the_migrations_directory() {
 }
 
 #[test]
-fn org_wide_tables_triggers_and_no_machines_table() {
+fn org_wide_tables_and_triggers_exist() {
     let db = Fake::new();
     let names: BTreeSet<String> = db
         .run_query(
@@ -277,8 +277,7 @@ fn org_wide_tables_triggers_and_no_machines_table() {
     ] {
         assert!(names.contains(expected), "missing {expected}");
     }
-    // The `machines` table is M2B-002's migration, not this one.
-    assert!(!names.contains("machines"));
+    // The `machines` table is M2B-002's migration (0004), checked in `src/machines/tests.rs`.
 }
 
 #[test]

@@ -19,7 +19,8 @@
 use std::cell::RefCell;
 
 use protocol::tunnel::Actor;
-use serde_json::Value;
+use protocol::turn_event::{Envelope, Event};
+use serde_json::{Value, json};
 // `#[durable_object]` expands to wasm-bindgen code that expects `wasm_bindgen` in scope.
 use worker::wasm_bindgen;
 use worker::{
@@ -27,6 +28,8 @@ use worker::{
     WebSocketPair, WebSocketRequestResponsePair, durable_object,
 };
 
+use crate::machines::internal::{push_body, push_to_machine};
+use crate::machines::store::HostKind;
 use crate::threads::api::{self, ApiRequest, ApiResponse, thread_id_of};
 use crate::threads::auth::dev_fixtures_enabled;
 use crate::threads::sqlite::SqlStore;
@@ -42,6 +45,9 @@ pub struct Thread {
     env: Env,
     /// Built on the first request after construction, from the stored log.
     core: RefCell<Option<ThreadCore<SqlStore>>>,
+    /// The command ids last pushed to the Machine DO (M2B-002), so an unchanged outbox is not
+    /// pushed again. `None` after construction: the first push after a wake is unconditional.
+    last_pushed: RefCell<Option<Vec<u64>>>,
 }
 
 impl DurableObject for Thread {
@@ -50,6 +56,7 @@ impl DurableObject for Thread {
             state,
             env,
             core: RefCell::new(None),
+            last_pushed: RefCell::new(None),
         }
     }
 
@@ -109,6 +116,9 @@ impl DurableObject for Thread {
         for envelope in &appended {
             self.broadcast(&event_message(envelope).to_string());
         }
+        if pushes_commands(&request.method, &request.path, &appended) {
+            self.push_commands(&thread_id).await;
+        }
         respond(&response)
     }
 
@@ -150,6 +160,24 @@ impl DurableObject for Thread {
     async fn websocket_error(&self, _ws: WebSocket, _error: worker::Error) -> worker::Result<()> {
         Ok(())
     }
+}
+
+/// Most commands one push carries (a longer outbox is pushed without withdrawing anything).
+const COMMAND_PUSH_LIMIT: usize = 500;
+
+/// `true` for the requests that can change the commands outbox: every write, except the Machine
+/// DO's own ack of a delivered command (which would only echo back). Appended events only start
+/// the next pending task when a run ends, so only those are checked.
+fn pushes_commands(method: &str, path: &str, appended: &[Envelope]) -> bool {
+    if method == "GET" || path.ends_with("/commands/ack") {
+        return false;
+    }
+    if path.ends_with("/events") {
+        return appended
+            .iter()
+            .any(|e| matches!(e.event, Event::RunFinished(_) | Event::RunError(_)));
+    }
+    true
 }
 
 const PING: &str = r#"{"type":"ping"}"#;
@@ -223,6 +251,54 @@ impl Thread {
             pair.server.send_with_str(message.to_string())?;
         }
         Response::from_websocket(pair.client)
+    }
+
+    /// Tells the Machine DO about this thread's unacked commands (M2B-002, tunnel.md §5): the
+    /// full set, oldest first, so the Machine DO queues the new ones in order and withdraws the
+    /// ones that are gone (a prompt retracted by a cancel). The push is a notification, not the
+    /// source of truth: a failed push leaves the commands here, and the Machine DO pulls them
+    /// (`GET /internal/threads/{id}/commands`) when its runner reconnects.
+    async fn push_commands(&self, thread_id: &str) {
+        let listed = self.with_core(thread_id, |core| {
+            Ok::<_, ApiError>((
+                core.machine_id()?,
+                core.pending_commands(COMMAND_PUSH_LIMIT)?,
+            ))
+        });
+        let Ok(Ok((Some(machine_id), commands))) = listed else {
+            return;
+        };
+        let ids: Vec<u64> = commands
+            .iter()
+            .filter_map(|command| command.get("id").and_then(Value::as_u64))
+            .collect();
+        let unchanged = self.last_pushed.borrow().as_deref() == Some(ids.as_slice());
+        // Nothing pushed yet and nothing to push: there is nothing to withdraw either.
+        let nothing = self.last_pushed.borrow().is_none() && ids.is_empty();
+        if unchanged || nothing {
+            return;
+        }
+        let pushed: Vec<Value> = commands
+            .iter()
+            .map(|command| {
+                json!({
+                    "source_id": command
+                        .get("id")
+                        .and_then(Value::as_u64)
+                        .map(|id| id.to_string()),
+                    "idempotency_key": command.get("idempotency_key"),
+                    "issued_at": command.get("issued_at"),
+                    "command": command.get("command"),
+                })
+            })
+            .collect();
+        // A list cut at the limit is not the whole outbox, so it must not withdraw anything.
+        let snapshot = commands.len() < COMMAND_PUSH_LIMIT;
+        let body = push_body(thread_id, HostKind::Thread, snapshot, pushed);
+        match push_to_machine(&self.env, &machine_id, &body).await {
+            Ok(()) => *self.last_pushed.borrow_mut() = Some(ids),
+            Err(message) => worker::console_log!("thread {thread_id}: {message}"),
+        }
     }
 
     /// Sends one text message to every subscriber. A socket that fails is closed by the

@@ -1,55 +1,53 @@
-// TRACER STUB: replaced by M2-008 + M2B-002 (Worker routes, Thread DO and Machine DO with SQLite storage; NO AUTH on any tracer route)
-//! Workers glue for the tracer hub (wasm32 only). Patterns copied from `spikes/cf`: an axum
-//! router with `SendWrapper<Env>` state and `#[worker::send]` handlers; requests (including
-//! WebSocket upgrades) forwarded unchanged to a Durable Object; hibernatable WebSockets with
-//! `setWebSocketAutoResponse` for the literal tunnel heartbeat.
+// TRACER STUB: replaced by M2B-002 follow-ups (Worker routes onto the Thread DO; NO AUTH on any tracer route)
+//! Workers glue for the tracer hub (wasm32 only). Patterns copied from `spikes/cf`: requests
+//! (including WebSocket upgrades) forwarded unchanged to a Durable Object; hibernatable
+//! WebSockets with `setWebSocketAutoResponse`.
 //!
 //! The routes (NO AUTH in the tracer; the real hub authenticates every one of them) are
 //! mounted by `crate::worker` and all forward to ONE Durable Object instance (`TracerHub`,
-//! name `tracer`) that keeps all machine and thread state in memory ([`HubState`]). An
-//! eviction loses it:
+//! name `tracer`) that keeps the tracer's threads in memory ([`HubState`]). An eviction loses
+//! them:
 //!
-//! - `GET /v1/machines/{machine_id}/tunnel` (WebSocket, subprotocol `sm.tunnel.v1`)
 //! - `GET /threads/{thread_id}/subscribe?after=<seq>` (WebSocket, turn-event.md §6)
 //! - `POST /threads/{thread_id}/prompts` (`Idempotency-Key` header, [`PromptRequest`] body)
 //! - `POST /threads/{thread_id}/interrupts/{interrupt_id}` (`Idempotency-Key`,
 //!   [`AnswerRequest`] body; 409 when another answer won)
+//! - `POST /internal/threads/{thread_id}/events` (only through a stub: the Machine DO appends
+//!   the runner's events here, the same route the Thread DO has)
+//!
+//! The runner's tunnel is not here: `GET /v1/machines/{id}/tunnel` ends at the Machine DO
+//! (M2B-002). Commands reach it by `push_to_machine`.
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::cell::RefCell;
 
-use protocol::tunnel::{CloseCode, Frame, SUBPROTOCOL};
 use serde::Serialize;
 // `#[durable_object]` expands to wasm-bindgen code that expects `wasm_bindgen` in scope.
 use worker::wasm_bindgen;
 use worker::{
-    DurableObject, Env, Method, WebSocket, WebSocketIncomingMessage, WebSocketPair,
-    WebSocketRequestResponsePair, durable_object,
+    DurableObject, Env, Method, WebSocket, WebSocketIncomingMessage, WebSocketPair, durable_object,
 };
 
 use super::state::{AnswerRequest, HttpError, HubState, Out, PromptRequest};
+use crate::machines::internal::{push_body, push_to_machine};
+use crate::machines::store::HostKind;
 
-/// Socket tags: `tunnel:<machine_id>` and `sub:<thread_id>`.
-const TUNNEL_TAG: &str = "tunnel:";
+/// Socket tag: `sub:<thread_id>`.
 const SUB_TAG: &str = "sub:";
 
-/// The tracer hub Durable Object: in-memory [`HubState`] plus hibernatable sockets.
+/// The tracer hub Durable Object: in-memory [`HubState`] plus hibernatable subscriber sockets.
 #[durable_object]
 pub struct TracerHub {
     state: worker::State,
+    env: Env,
     hub: RefCell<HubState>,
-    /// The current tunnel connection number per machine (also the socket's attachment).
-    tunnel_conns: RefCell<HashMap<String, u64>>,
-    next_conn: Cell<u64>,
 }
 
 impl DurableObject for TracerHub {
-    fn new(state: worker::State, _env: Env) -> Self {
+    fn new(state: worker::State, env: Env) -> Self {
         Self {
             state,
+            env,
             hub: RefCell::new(HubState::new()),
-            tunnel_conns: RefCell::new(HashMap::new()),
-            next_conn: Cell::new(1),
         }
     }
 
@@ -62,9 +60,6 @@ impl DurableObject for TracerHub {
             .collect();
         let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
         match (req.method(), segments.as_slice()) {
-            (Method::Get, ["v1", "machines", machine_id, "tunnel"]) => {
-                self.accept_tunnel(&req, machine_id)
-            }
             (Method::Get, ["threads", thread_id, "subscribe"]) => {
                 let after = req
                     .url()?
@@ -86,7 +81,7 @@ impl DurableObject for TracerHub {
                     .hub
                     .borrow_mut()
                     .submit_prompt(thread_id, &key, body, now_ms());
-                self.answer(result)
+                self.answer(result).await
             }
             (Method::Post, ["threads", thread_id, "interrupts", interrupt_id]) => {
                 let Some(key) = idempotency_key(&req)? else {
@@ -103,7 +98,18 @@ impl DurableObject for TracerHub {
                     body,
                     now_ms(),
                 );
-                self.answer(result)
+                self.answer(result).await
+            }
+            (Method::Post, ["internal", "threads", thread_id, "events"]) => {
+                let body: serde_json::Value = match req.json().await {
+                    Ok(body) => body,
+                    Err(error) => return json_response(400, &error_body(&error.to_string())),
+                };
+                let result = self
+                    .hub
+                    .borrow_mut()
+                    .append_event(thread_id, body, now_ms());
+                self.answer(result).await
             }
             _ => worker::Response::error("not found", 404),
         }
@@ -116,19 +122,12 @@ impl DurableObject for TracerHub {
     ) -> worker::Result<()> {
         let text = match msg {
             WebSocketIncomingMessage::String(text) => text,
-            // Both protocols are text-only (tunnel.md §2): binary is a protocol error.
+            // The subscription protocol is text-only.
             WebSocketIncomingMessage::Binary(_) => {
                 return ws.close(Some(1003), Some("binary not supported"));
             }
         };
-        let tags = self.state.get_tags(&ws);
-        if let Some(machine_id) = tag_value(&tags, TUNNEL_TAG) {
-            let out = self
-                .hub
-                .borrow_mut()
-                .tunnel_message(&machine_id, &text, now_ms());
-            self.deliver(out);
-        } else if tag_value(&tags, SUB_TAG).is_some() {
+        if tag_value(&self.state.get_tags(&ws), SUB_TAG).is_some() {
             // Clients send nothing but `{"type":"ping"}` (turn-event.md §6).
             let is_ping = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
@@ -147,14 +146,6 @@ impl DurableObject for TracerHub {
         _reason: String,
         _clean: bool,
     ) -> worker::Result<()> {
-        if let Some(machine_id) = tag_value(&self.state.get_tags(&ws), TUNNEL_TAG) {
-            // Only the machine's current socket marks it offline; a superseded one does not.
-            let conn: Option<u64> = ws.deserialize_attachment().ok().flatten();
-            let current = self.tunnel_conns.borrow().get(&machine_id).copied();
-            if conn.is_some() && conn == current {
-                self.hub.borrow_mut().tunnel_closed(&machine_id);
-            }
-        }
         // Complete the close handshake. 1005/1006 cannot be sent, so always answer 1000.
         let _ = ws.close(Some(1000), Some("bye"));
         Ok(())
@@ -166,52 +157,6 @@ impl DurableObject for TracerHub {
 }
 
 impl TracerHub {
-    fn accept_tunnel(
-        &self,
-        req: &worker::Request,
-        machine_id: &str,
-    ) -> worker::Result<worker::Response> {
-        if !is_upgrade(req)? {
-            return worker::Response::error("expected Upgrade: websocket", 426);
-        }
-        let protocols = req
-            .headers()
-            .get("Sec-WebSocket-Protocol")?
-            .unwrap_or_default();
-        if !protocols.split(',').any(|p| p.trim() == SUBPROTOCOL) {
-            return worker::Response::error(format!("subprotocol {SUBPROTOCOL} required"), 426);
-        }
-        // One tunnel per machine: the new connection supersedes the old one (tunnel.md §2).
-        let tag = format!("{TUNNEL_TAG}{machine_id}");
-        for old in self.state.get_websockets_with_tag(&tag) {
-            close_with(
-                &old,
-                CloseCode::Superseded,
-                "a newer connection for this machine was accepted",
-            );
-        }
-        self.hub.borrow_mut().tunnel_closed(machine_id);
-        let pair = WebSocketPair::new()?;
-        self.state.accept_websocket_with_tags(&pair.server, &[&tag]);
-        let conn = self.next_conn.get();
-        self.next_conn.set(conn + 1);
-        pair.server.serialize_attachment(conn)?;
-        self.tunnel_conns
-            .borrow_mut()
-            .insert(machine_id.to_owned(), conn);
-        // Answered by the runtime without waking the DO (tunnel.md §3.7).
-        self.state
-            .set_websocket_auto_response(&WebSocketRequestResponsePair::new(
-                r#"{"t":"ping"}"#,
-                r#"{"t":"pong"}"#,
-            )?);
-        let mut response = worker::Response::from_websocket(pair.client)?;
-        response
-            .headers_mut()
-            .set("Sec-WebSocket-Protocol", SUBPROTOCOL)?;
-        Ok(response)
-    }
-
     fn accept_subscriber(
         &self,
         req: &worker::Request,
@@ -230,48 +175,25 @@ impl TracerHub {
         worker::Response::from_websocket(pair.client)
     }
 
-    fn answer(
+    async fn answer(
         &self,
         result: Result<(u16, serde_json::Value, Vec<Out>), HttpError>,
     ) -> worker::Result<worker::Response> {
         match result {
             Ok((status, body, out)) => {
-                self.deliver(out);
+                self.deliver(out).await;
                 json_response(status, &body)
             }
             Err(error) => json_response(error.status, &error.body),
         }
     }
 
-    /// Sends every [`Out`] on the sockets it names. A socket that fails to send is closed by the
-    /// runtime; the tracer does not retry (the tunnel outbox resends after a reconnect).
-    fn deliver(&self, out: Vec<Out>) {
+    /// Sends every [`Out`]: subscription messages on their sockets, commands to the Machine DO.
+    /// A socket that fails to send is closed by the runtime; a command that cannot be pushed is
+    /// logged and lost (a stub limit, see `state.rs`).
+    async fn deliver(&self, out: Vec<Out>) {
         for item in out {
             match item {
-                Out::Tunnel { machine_id, frame } => {
-                    let Ok(text) = serde_json::to_string(&frame) else {
-                        continue;
-                    };
-                    for ws in self
-                        .state
-                        .get_websockets_with_tag(&format!("{TUNNEL_TAG}{machine_id}"))
-                    {
-                        let _ = ws.send_with_str(&text);
-                    }
-                }
-                Out::CloseTunnel {
-                    machine_id,
-                    code,
-                    message,
-                } => {
-                    for ws in self
-                        .state
-                        .get_websockets_with_tag(&format!("{TUNNEL_TAG}{machine_id}"))
-                    {
-                        close_with(&ws, code, &message);
-                    }
-                    self.hub.borrow_mut().tunnel_closed(&machine_id);
-                }
                 Out::Subscribers { thread_id, message } => {
                     let text = message.to_string();
                     for ws in self
@@ -281,21 +203,26 @@ impl TracerHub {
                         let _ = ws.send_with_str(&text);
                     }
                 }
+                Out::Command {
+                    machine_id,
+                    thread_id,
+                    queued,
+                } => {
+                    // The idempotency key is the command's id here: it is unique per command.
+                    let command = serde_json::json!({
+                        "source_id": queued.idempotency_key,
+                        "idempotency_key": queued.idempotency_key,
+                        "issued_at": queued.issued_at,
+                        "command": queued.command,
+                    });
+                    let body = push_body(&thread_id, HostKind::Tracer, false, vec![command]);
+                    if let Err(message) = push_to_machine(&self.env, &machine_id, &body).await {
+                        worker::console_log!("tracer: {message}");
+                    }
+                }
             }
         }
     }
-}
-
-/// Sends `close{code}` then closes the socket with `4000 + n` (tunnel.md §3.8).
-fn close_with(ws: &WebSocket, code: CloseCode, message: &str) {
-    let frame = Frame::Close {
-        code,
-        message: message.to_owned(),
-    };
-    if let Ok(text) = serde_json::to_string(&frame) {
-        let _ = ws.send_with_str(&text);
-    }
-    let _ = ws.close(Some(code.ws_code()), Some(message));
 }
 
 fn tag_value(tags: &[String], prefix: &str) -> Option<String> {

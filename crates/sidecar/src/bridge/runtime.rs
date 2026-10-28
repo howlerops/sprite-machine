@@ -414,7 +414,12 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             Outcome::Selected { option_id } => {
                 RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id))
             }
-            Outcome::Cancelled => RequestPermissionOutcome::Cancelled,
+            // This bridge only raises approvals. A `submitted` / `declined` outcome does not fit
+            // one (tunnel.md §3.5), so it is answered `cancelled`; form and auth interrupts
+            // (elicitation) are M1A-006c.
+            Outcome::Cancelled | Outcome::Submitted { .. } | Outcome::Declined => {
+                RequestPermissionOutcome::Cancelled
+            }
         };
         if pending
             .reply

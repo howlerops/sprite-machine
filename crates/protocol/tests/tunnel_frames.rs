@@ -271,6 +271,62 @@ fn approval_command_roundtrips() {
     }
 }
 
+/// An `approval` command carrying `outcome` (SPEC-002a table in §3.5).
+fn approval_with(outcome: &str) -> String {
+    format!(
+        r#"{{
+  "kind": "approval",
+  "thread_id": "th_1",
+  "task_id": "tk_1",
+  "interrupt_id": "int_1",
+  "outcome": {outcome},
+  "resolved_by": {{ "kind": "user", "id": "usr_1", "device_id": "dev_phone" }}
+}}"#
+    )
+}
+
+#[test]
+fn approval_outcome_carries_every_interrupt_outcome() {
+    let cases = [
+        (
+            r#"{ "type": "selected", "option_id": "allow" }"#,
+            Outcome::Selected {
+                option_id: "allow".to_owned(),
+            },
+        ),
+        (
+            r#"{ "type": "submitted", "data": { "name": "x" } }"#,
+            Outcome::Submitted {
+                data: serde_json::json!({ "name": "x" }),
+            },
+        ),
+        (r#"{ "type": "declined" }"#, Outcome::Declined),
+        (r#"{ "type": "cancelled" }"#, Outcome::Cancelled),
+    ];
+    for (json, expected) in cases {
+        match roundtrip_command(&approval_with(json)) {
+            Command::Approval { outcome, .. } => assert_eq!(outcome, expected),
+            other => panic!("expected approval, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn approval_outcome_refuses_expired_and_unknown_shapes() {
+    // `expired` is decided by the runner and never sent down (§3.5).
+    for bad in [
+        r#"{ "type": "expired" }"#,
+        r#"{ "type": "submitted" }"#,
+        r#"{ "type": "selected" }"#,
+    ] {
+        let value: Value = serde_json::from_str(&approval_with(bad)).expect("json");
+        assert!(
+            serde_json::from_value::<Command>(value).is_err(),
+            "outcome {bad} must be refused"
+        );
+    }
+}
+
 #[test]
 fn dispatch_command_roundtrips() {
     let command = roundtrip_command(
