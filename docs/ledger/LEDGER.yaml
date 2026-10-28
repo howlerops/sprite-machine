@@ -5947,7 +5947,8 @@ items:
     title: 'web: GitHub sign-in (PKCE verifier in sessionStorage, /#/auth/github?code= handling) and a members/invites settings screen'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; playwright full suite 49 passed + pwa.spec 9/9 re-run (the 1 failure was ERR_INSUFFICIENT_RESOURCES with the disk full, not code)"
     assignee: "sonnet"
     attempt: 1
     lane: client

@@ -249,3 +249,4 @@
 2026-10-28T20:09Z M2B-019 back (sonnet): e2e rc (sm --rc session + headless phone, tunnel cut via TCP proxy: seq 1..51 gap-free, no dups), rc.spec.js 4/4, docs/remote-control-parity.md → merged; merged-tree run going. Finding: a TUI line typed during a running task is dropped → M2B-019a (P2). M2B-010b dropped (covered); M2B-019b (P4) for the rendered screen
 2026-10-28T20:14Z M2B-019 verify green → done
 2026-10-28T20:18Z WEB-006 back (sonnet): PKCE sign-in (verifier only in sessionStorage, fragment cleaned before use), members screen with role caps; full playwright 46/46 → merged; merged-tree playwright next. Added WEB-006a (P4)
+2026-10-28T20:42Z WEB-006 done. Disk hit 31 MB free (spike-gpui debug 5.8 GB from M1B-008e + bench release build) → bench pre-build and a pwa run failed; freed to 11 GB, pwa 9/9. Starting M1B-008c real run on the idle machine
