@@ -5675,3 +5675,45 @@ items:
       - 'A file picked offline is kept and uploaded on reconnect, then sent once; Playwright setOffline test'
     verify:
       - 'cd web && npx playwright test tests/composer.spec.js'
+
+  - id: WEB-005
+    title: 'web: push settings screen (classes incl. machine_back, muted threads, quiet hours via GET/PUT /v1/push/prefs), turn notifications off without signing out; drop the {key} fallback in push.js (spec now says public_key)'
+    milestone: M2b
+    phase: P4
+    lane: client
+    size: S
+    risk: low
+    deps: [WEB-004]
+    paths:
+      - 'web/src/push*'
+      - 'web/src/settings*'
+      - 'web/src/app.js'
+      - 'web/styles.css'
+      - 'web/tests/pwa.spec.js'
+      - 'web/tests/settings.spec.js'
+    context:
+      - 'docs/ledger/reports/WEB-004.md (Discovered work)'
+      - 'docs/specs/client-api.md §5.8'
+    acceptance:
+      - 'Settings screen reads and writes push prefs; turning notifications off unsubscribes and deletes the hub subscription; Playwright tests'
+    verify:
+      - 'cd web && npx playwright test tests/settings.spec.js tests/pwa.spec.js'
+
+  - id: WEB-004a
+    title: 'web: generate the sw.js shell list and cache version from the files in web/ (a check fails when a shell file is missing from it)'
+    milestone: M2b
+    phase: P4
+    lane: client
+    size: S
+    risk: low
+    deps: [WEB-004]
+    paths:
+      - 'web/sw.js'
+      - 'web/tests/pwa.spec.js'
+      - 'scripts/**'
+    context:
+      - 'docs/ledger/reports/WEB-004.md (Discovered work)'
+    acceptance:
+      - 'A test fails if a file under web/src or the page files is not in the shell list; the cache version changes when any shell file changes'
+    verify:
+      - 'cd web && npx playwright test tests/pwa.spec.js'
