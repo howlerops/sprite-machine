@@ -79,3 +79,5 @@
 2026-10-28T03:28Z M1A-004 assigned→done merged 50d7c45 (haiku)
 2026-10-28T03:28Z M1A-009 assigned→done merged 18aaec8 (sonnet; additive client.rs resume/load methods accepted; leader resolved acp/mod.rs)
 2026-10-28T03:28Z added M1A-004a (terminal/fs hardening, sonnet); M2B-004 + M1A-006b context += Store/Workspace/Terminals APIs
+2026-10-28T03:37Z M2-003a merged 827a41c (sonnet; out-of-path edits db/mod.rs MIGRATIONS, threads/routes.rs gate, hub-test.sh random bootstrap var — accepted); leader wiped the shared target (disk 3.8→23 GB) and runs a clean-rebuild verify
+2026-10-28T03:37Z M1A-006b paths += sidecar/src/tracer*.rs (it replaces those stubs); assigned (sonnet); M2B-001a assigned (haiku)

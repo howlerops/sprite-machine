@@ -895,10 +895,15 @@ items:
     title: 'runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink)'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
     deps: [M1A-006a, M1A-004, M2B-001]
     paths:
-      - 'crates/sidecar/src/bridge/**'
-      - 'crates/sidecar/tests/bridge.rs'
+      - "crates/sidecar/src/bridge/**"
+      - "crates/sidecar/tests/bridge.rs"
+      - "crates/sidecar/src/tracer.rs"
+      - "crates/sidecar/src/tracer_mapping.rs"
     context:
       - "docs/PLAN-v2-ade.md §4.1 (Common core)"
       - "crates/protocol/src/mapping/acp_turn*"
@@ -1542,7 +1547,8 @@ items:
     title: 'hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner'
     milestone: M2
     phase: P1
-    status: "assigned"
+    status: "review"
+    evidence: "merged 827a41c; leader clean-rebuild verify running"
     assignee: "worker:sonnet"
     attempt: 1
     risk: "high"
@@ -1891,6 +1897,9 @@ items:
     title: 'protocol: strict tunnel frame parsing + unknown command kind helper'
     milestone: M2b
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 2
     deps: [M2B-001]
     paths:

@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 35/196 (3 dropped) · in-flight M2-003a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 31/120
+done 35/196 (3 dropped) · in-flight M1A-006b,M2-003a,M2B-001a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 33/120
 
-P1 running.
+P1 running; clean rebuild in progress.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 32 | 18 | 1 |
+| P1 | 32 | 18 | 3 |
 | P2 | 24 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -34,7 +34,7 @@ P1 running.
 | M1A-003 | worker | rust | done | sidecar (runner core): ACP client + session table (concurrency, pending tasks) |
 | M1A-004 | worker | rust | done | sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal}) |
 | M1A-006a | worker | rust | done | protocol::mapping ACP→TurnEvent + golden tests |
-| M1A-006b | worker | rust | todo | runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink) |
+| M1A-006b | worker | rust | assigned | runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink) |
 | M1A-007 | worker | rust | todo | Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms) |
 | M1A-009 | worker | rust | done | Durable store (SQLite) + ACP session re-attach after restart |
 | M1A-013 | worker | rust | todo | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
@@ -45,10 +45,10 @@ P1 running.
 | M1B-008 | worker | rust | todo | Benchmark scripts per gates.yaml |
 | M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
 | M2-016 | worker | rust | done | hub: D1 schema + migrations (org-wide metadata) |
-| M2-003a | worker | rust | assigned | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
+| M2-003a | worker | rust | review | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
 | M2-008 | worker | rust | done | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
 | M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
-| M2B-001a | worker | rust | todo | protocol: strict tunnel frame parsing + unknown command kind helper |
+| M2B-001a | worker | rust | assigned | protocol: strict tunnel frame parsing + unknown command kind helper |
 | M2B-002 | worker | rust | todo | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
 | M2B-003 | worker | rust | todo | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
 | M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
