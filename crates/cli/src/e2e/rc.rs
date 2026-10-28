@@ -1285,6 +1285,12 @@ async fn ui_loop(
                     return;
                 }
             }
+            () = tokio::time::sleep(app.settle_window()), if app.settling() => {
+                let actions = app.settled();
+                if !execute(actions, app, session).await {
+                    return;
+                }
+            }
             feed = session.next() => {
                 let Some(feed) = feed else { return };
                 match feed {

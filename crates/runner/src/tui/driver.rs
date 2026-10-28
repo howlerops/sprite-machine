@@ -80,6 +80,12 @@ where
                     return Ok(());
                 }
             }
+            () = tokio::time::sleep(app.settle_window()), if app.settling() => {
+                let actions = app.settled();
+                if !execute(actions, app, backend).await {
+                    return Ok(());
+                }
+            }
             feed = backend.next() => {
                 let Some(feed) = feed else { return Ok(()) };
                 match feed {
