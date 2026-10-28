@@ -5820,3 +5820,46 @@ items:
     verify:
       - 'cargo test -p client-core'
       - 'cargo run -p cli -- e2e attachments'
+
+  - id: M2B-010d
+    title: 'tunnel: interrupt_answer_result survives a reconnect (the hub re-sends the stored verdict for a duplicate answer_id; no 10 s timeout in the TUI)'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-010a]
+    paths:
+      - 'docs/specs/tunnel.md'
+      - 'crates/hub/src/machines/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/src/tui/**'
+      - 'crates/hub/tests/machine_do.rs'
+      - 'crates/runner/tests/tui.rs'
+    context:
+      - 'docs/ledger/reports/M2B-010a.md (Limits, Discovered work)'
+    acceptance:
+      - 'A runner that reconnects after the hub processed its interrupt_answer gets the verdict on retransmit; live test drops the socket between answer and result'
+    verify:
+      - 'bash scripts/hub-test.sh machine_do'
+      - 'cargo test -p runner --test tui'
+
+  - id: M2B-010e
+    title: 'hub: a terminal answer is attributed to the paired user (resolved_by carries the user id, name "terminal") instead of local:<machine_id>'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-010a]
+    paths:
+      - 'crates/hub/src/machines/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/tests/machine_do.rs'
+    context:
+      - 'docs/ledger/reports/M2B-010a.md (Discovered work)'
+    acceptance:
+      - 'InterruptResolved.resolved_by for a terminal answer names the user who paired the machine; live test'
+    verify:
+      - 'bash scripts/hub-test.sh machine_do'

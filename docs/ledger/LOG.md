@@ -236,3 +236,4 @@
 2026-10-28T17:34Z M2B-014d back (haiku): every subscription + machine_id OK; it flagged that my 'title names the machine' criterion breaks plan §4.2 (ids + generic title). Plan wins: worker drops the name lookup on the same attempt; criterion 2 struck
 2026-10-28T17:45Z M2B-014d fixed (generic title) → merged, verify running. Assign M2-003b (sonnet, auth)
 2026-10-28T17:50Z M2B-014d merged: hub 290/0, presence_notify PASS, notify hit 'wrangler dev exited early' (re-run pending). M3-017a back (haiku) → merged; verify running. Added M3-017c (P4)
+2026-10-28T18:01Z M2B-010a back (sonnet): tunnel.md §3.6a interrupt_answer up frame + interrupt_answer_result; Thread DO reuses answer_interrupt (first wins); shared TUI waits for the verdict; reviewed: actor set by the hub, machine must host the thread. Merge after the running verify. Added M2B-010d, M2B-010e (P4)
