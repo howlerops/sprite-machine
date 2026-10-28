@@ -262,7 +262,22 @@ impl RcArgs {
 /// Runs the server until `shutdown` completes (or the tunnel stops for good). Attachments are
 /// fetched under [`FilePolicy::default`].
 pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result<()> {
-    run_with(options, FilePolicy::default(), shutdown).await
+    run_with(options, FilePolicy::default(), None, shutdown).await
+}
+
+/// [`run`], and `session_started` gets the link (`<hub>/t/<thread id>`) of each session as it starts.
+pub async fn run_announcing(
+    options: Options,
+    session_started: Sink,
+    shutdown: impl Future<Output = ()>,
+) -> Result<()> {
+    run_with(
+        options,
+        FilePolicy::default(),
+        Some(session_started),
+        shutdown,
+    )
+    .await
 }
 
 /// TEST ONLY: [`run`] with another attachment policy, such as
@@ -273,12 +288,13 @@ pub async fn run_with_file_policy(
     file_policy: FilePolicy,
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
-    run_with(options, file_policy, shutdown).await
+    run_with(options, file_policy, None, shutdown).await
 }
 
 async fn run_with(
     options: Options,
     file_policy: FilePolicy,
+    session_started: Option<Sink>,
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
     let login = options
@@ -345,6 +361,7 @@ async fn run_with(
 
     let result = router::Router::new(
         router::Context {
+            hub: login.hub.clone(),
             machine_id: login.machine_id,
             state_dir: options.state_dir,
             cwd: options.cwd,
@@ -359,6 +376,7 @@ async fn run_with(
             audit,
             asker: options.asker,
             file_policy,
+            session_started,
         },
         sink,
         commands,

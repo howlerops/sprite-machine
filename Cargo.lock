@@ -6717,6 +6717,7 @@ dependencies = [
  "futures-util",
  "jsonschema",
  "keyring",
+ "libc",
  "protocol",
  "qrcode",
  "rand 0.9.5",

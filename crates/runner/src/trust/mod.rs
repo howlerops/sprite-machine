@@ -113,10 +113,11 @@ pub fn ask_on(dir: &Path, input: &mut impl BufRead, out: &mut impl Write) -> io:
 }
 
 /// The asker of a machine with a terminal: the question goes to stderr (stdout carries the
-/// sign-in code) and the answer is read from stdin.
-pub fn terminal_asker() -> Asker {
-    Arc::new(|dir: &Path| {
-        let mut input = io::stdin().lock();
+/// sign-in code) and the answer comes through `prompt` from the key reader, the only reader of
+/// stdin (the terminal is in raw mode, so the key reader echoes and edits the answer).
+pub fn terminal_asker(prompt: crate::qr::Prompt) -> Asker {
+    Arc::new(move |dir: &Path| {
+        let mut input = prompt.listen();
         ask_on(dir, &mut input, &mut io::stderr()).unwrap_or(false)
     })
 }

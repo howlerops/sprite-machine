@@ -108,7 +108,33 @@ async fn run_rc(args: &[String]) -> Result<()> {
     let state_dir = state_dir()?;
     // The trust question needs a terminal to ask at; a machine run without one refuses an
     // untrusted directory.
-    let asker = std::io::IsTerminal::is_terminal(&std::io::stdin()).then(trust::terminal_asker);
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let prompt = qr::Prompt::default();
+    let asker = terminal.then(|| trust::terminal_asker(prompt.clone()));
+    // On a terminal the spacebar shows the QR of the latest session. The raw mode lasts until this
+    // returns, errors included.
+    let _raw = qr::keys::RawMode::enable(terminal)?;
+    let latest = qr::Latest::default();
+    if _raw.is_some() {
+        let latest = latest.clone();
+        // Detached: a read blocked on stdin does not hold the process up at exit.
+        std::thread::spawn(move || {
+            let _ = qr::keys::pump(
+                std::io::stdin().lock(),
+                &latest,
+                &prompt,
+                &mut std::io::stdout(),
+            );
+        });
+    }
+    let session_latest = latest;
+    let session_started: server::Sink = std::sync::Arc::new(move |url: &str| {
+        use std::io::Write;
+        session_latest.set(url);
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, "session: {url}");
+        let _ = out.flush();
+    });
     let options = Options {
         credentials,
         allow_remote_terminal: trust::remote_terminal_allowed(&state_dir, rc.allow_remote_terminal),
@@ -132,7 +158,7 @@ async fn run_rc(args: &[String]) -> Result<()> {
         })),
         asker,
     };
-    server::run(options, async {
+    server::run_announcing(options, session_started, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await

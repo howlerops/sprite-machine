@@ -6,7 +6,10 @@
 //! - [`mobile_url`] is the hub's mobile web page, the QR for `sm mobile` (install the app).
 //! - [`QrToggle`] is the spacebar: it shows or hides the QR of the session URL.
 //!
-//! The QR is rendered by [`crate::login::flow::qr_text`] (the same renderer as `sm login`).
+//! The QR is rendered by [`crate::login::flow::qr_text`] (the same renderer as `sm login`). The
+//! keys that drive it, and the raw mode they need, are in [`keys`].
+
+pub mod keys;
 
 use anyhow::{Result, bail};
 use protocol::turn_event::is_valid_id;
@@ -14,6 +17,7 @@ use protocol::turn_event::is_valid_id;
 use crate::login::flow::normalize_hub;
 
 pub use crate::login::flow::qr_text as render;
+pub use keys::{Latest, Prompt};
 
 /// The deep link of a session: `https://<hub>/t/<id>`. The hub is checked the way `sm login` checks
 /// it (https, or http on loopback); the id must be a valid thread id.
