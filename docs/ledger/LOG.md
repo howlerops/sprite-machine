@@ -84,3 +84,4 @@
 2026-10-28T04:07Z M1A-006b assigned→done merged 11112cd (sonnet); added M1A-006c (bridge robustness, P2) and SPEC-002a (done by leader: approval outcome union)
 2026-10-28T04:07Z M2B-002 paths += tracer/**, threads/** (push hook), worker.rs, db/mod.rs, protocol tunnel Outcome, runner tracer (tunnel client adapter); deps += SPEC-002a; assigned (sonnet)
 2026-10-28T04:07Z M1B-004d (haiku, client) + M3-001a (haiku) assigned
+2026-10-28T04:12Z M3-001a assigned→done merged a09751c (haiku; one denied create_session call); added M3-001b (P3)

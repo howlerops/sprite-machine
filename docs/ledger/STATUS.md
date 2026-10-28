@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 39/198 (3 dropped) · in-flight M1B-004d,M2B-002,M3-001a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 37/120
+done 40/199 (3 dropped) · in-flight M1B-004d,M2B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 37/120
 
 P1 running.
 
@@ -11,9 +11,9 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 33 | 22 | 3 |
+| P1 | 33 | 23 | 2 |
 | P2 | 25 | 1 | 0 |
-| P3 | 19 | 1 | 0 |
+| P3 | 20 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
@@ -55,7 +55,7 @@ P1 running.
 | M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
 | M2B-011 | worker | rust | todo | runner: local checkpoints as shadow git commits |
 | M3-001 | worker | rust | done | client-core: TurnEvent subscription client, view models, cache, outbound queue |
-| M3-001a | worker | rust | assigned | client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner |
+| M3-001a | worker | rust | done | client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner |
 
 ## Waiting on the human
 

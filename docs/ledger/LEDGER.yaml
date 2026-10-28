@@ -2429,11 +2429,31 @@ items:
     verify:
       - 'cargo test -p client-core --test sync --test queue --test view_models'
 
+  - id: M3-001b
+    title: 'client-core: persist live events as raw frame text; one connectivity banner state (subscription + outbox)'
+    milestone: M3
+    phase: P3
+    priority: 3
+    deps: [M3-001a]
+    paths:
+      - crates/client-core/src/sync*
+      - crates/client-core/src/connectivity*
+      - crates/client-core/tests/sync.rs
+      - crates/client-core/tests/banner.rs
+    context:
+      - 'docs/ledger/reports/M3-001a.md (discovered M3-001e/f)'
+    acceptance:
+      - 'Subscription hands each applied event''s raw frame text to the cache (Cache::append_raw), so live unknown events survive a restart byte-identically'
+      - 'A single banner state: Offline if either subscription or outbox is offline, Connecting if either is connecting, else Online; unit-tested'
+    verify:
+      - cargo test -p client-core --test sync --test banner
+
   - id: M3-001a
     title: 'client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner'
     milestone: M3
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged a09751c; verify: cache_unknown 3, client-core 28, clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     priority: 3
