@@ -73,7 +73,13 @@ trap cleanup EXIT
 node "$REPO/web/tests/helpers-ghmock.mjs" "$MOCK_GITHUB_PORT" "$GITHUB_CLIENT_ID" "$GITHUB_CLIENT_SECRET" &
 MOCK_PID=$!
 
-(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --ip 127.0.0.1 --port "$SM_PORT" \
+# MVP-000h: the wrangler [build] strip step runs a prebuilt cli binary by path, never cargo. Build
+# cli before wrangler starts and give wrangler a per-run copy (as scripts/hub-test.sh does).
+(cd "$REPO" && cargo build -q -p cli) || { echo "FAIL: cargo build -p cli" >&2; exit 1; }
+STRIP_BIN=$STATE/cli-strip
+cp "${CARGO_TARGET_DIR:-$REPO/target}/debug/cli" "$STRIP_BIN" || { echo "FAIL: copy the cli binary" >&2; exit 1; }
+
+(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" HUB_STRIP_BIN="$STRIP_BIN" setsid wrangler dev --local --ip 127.0.0.1 --port "$SM_PORT" \
   --persist-to "$STATE/persist" \
   --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" \
