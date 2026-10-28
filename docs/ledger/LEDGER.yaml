@@ -2298,7 +2298,8 @@ items:
       - 'scripts/hub-test.sh'
       - 'crates/cli/src/e2e/tracer*'
     context:
-      - 'docs/ledger/reports/M2-008c.md (Spec issues 3), docs/ledger/reports/M2B-002.md (Spec issues 11)'
+      - "docs/ledger/reports/M2-008c.md (Spec issues 3), docs/ledger/reports/M2B-002.md (Spec issues 11)"
+      - "docs/ledger/reports/M2-011a.md (INFRA-shared-target: worker-build in the shared dir produced a stale wasm after touch)"
     acceptance:
       - 'The wasm32 build used by hub-test.sh and the tracer goes to a target dir keyed by the worktree root (e.g. $CARGO_TARGET_DIR/wasm-<hash of repo root>), so two worktrees never share hub wasm artifacts; native builds keep the shared dir'
       - 'A check after the build asserts the bundle was built from this tree (e.g. the build log names this worktree''s crates/hub path)'
@@ -5284,3 +5285,89 @@ items:
       - 'Plan §5 M6 criteria with evidence'
     verify:
       - 'cargo test --workspace'
+
+  - id: M2B-005f
+    title: 'hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-005c]
+    paths:
+      - 'crates/hub/src/do/machine.rs'
+      - 'crates/hub/src/machines/**'
+      - 'crates/hub/src/devices/service.rs'
+      - 'crates/hub/tests/devices.rs'
+      - 'crates/hub/tests/machine_do.rs'
+    context:
+      - 'docs/ledger/reports/M2B-005c.md (Limitation, Discovered work)'
+    acceptance:
+      - 'POST /internal/machines/{id}/disconnect closes live sockets with auth_revoked and does not set the revoked state; revoke is unchanged'
+      - 'close_untrusted_tunnels uses disconnect; live test: flip on closes the tunnel, flip off, the same machine reconnects'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh devices'
+      - 'bash scripts/hub-test.sh machine_do'
+
+  - id: M2-008i
+    title: 'hub: regression tests that the access log never records the query string and that the Thread DO never sees ticket='
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-008h]
+    paths:
+      - 'crates/hub/src/router.rs'
+      - 'crates/hub/src/worker.rs'
+      - 'crates/hub/src/threads/routes.rs'
+      - 'crates/hub/tests/subscribe_ticket.rs'
+    context:
+      - 'docs/ledger/reports/M2-008h.md (Discovered work)'
+    acceptance:
+      - 'A native test pins that the request log line is built from the path only; a test pins strip_ticket_from_uri on mixed queries (after=, ticket=, repeated keys)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh subscribe_ticket'
+
+  - id: M2-008j
+    title: 'hub: scheduled purge of expired subscribe_tickets (and of other short-lived rows in one place)'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-008h]
+    paths:
+      - 'crates/hub/src/auth/ticket.rs'
+      - 'crates/hub/src/devices/limits.rs'
+      - 'crates/hub/src/worker.rs'
+    context:
+      - 'docs/ledger/reports/M2-008h.md (Discovered work)'
+    acceptance:
+      - 'The hourly cron deletes subscribe_tickets past expiry; native test with an injected clock'
+    verify:
+      - 'cargo test -p hub'
+
+  - id: M2-011b
+    title: 'Push follow-ups 2: drop the VAPID_PUBLIC_KEY placeholder from wrangler.toml (no key = 503 on the vapid route); a failed re-queue of a follow-up job never re-sends delivered subscriptions'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-011a]
+    paths:
+      - 'crates/hub/wrangler.toml'
+      - 'crates/hub/src/notify/**'
+      - 'crates/hub/src/queues/notify.rs'
+      - 'crates/hub/tests/notify.rs'
+    context:
+      - 'docs/ledger/reports/M2-011a.md (Discovered work)'
+    acceptance:
+      - 'wrangler.toml has no VAPID key placeholder; GET /v1/push/vapid-public-key without the secret is a typed 503'
+      - 'When the follow-up send fails, the original message is retried carrying only the pending ids (or an equivalent durable record); native test'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh notify'

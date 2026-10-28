@@ -200,3 +200,8 @@
 2026-10-28T13:21Z M2B-002b back (haiku; tests/devices.rs:415 reads machines[].id → leader fixes on merge). verify15 (M2-008a): first workspace test pass 709/1 failed under 4 concurrent workers, second pass no failures (flaky under load; not a code failure)
 2026-10-28T13:26Z M2B-012 back (haiku, same attempt after path widening): cli e2e attachments PASS. Added M1A-014b (P4: private FilePolicy fields, sha256 end to end)
 - 13:28 assign M2-011a (haiku), M2B-005c (sonnet, security)
+- verify15 (post M2-008a): all green after re-running notify/tasks/tracer, which had failed on a shared-target build race (client-core rlibs missing) → M2-008a done
+- M2-008h back (sonnet): ticket mint/consume, 0013 migration, ticket stripped before the DO; reviewed consume path (conditional UPDATE, live principal, org re-check) → merged (MIGRATIONS conflict 0012/0013 resolved). Follow-ups M2-008i, M2-008j
+- M2-011a back (haiku): per-run VAPID key in hub-test.sh, follow-up jobs carry pending ids → merged (hub-test.sh conflict with M2B-002b dev_fixtures_args resolved). Follow-up M2-011b
+- M2B-005c back (sonnet): policy flip closes untrusted tunnels via the DO revoke action (permanent) + per-IP token limit → merged; accepted since it fails closed, M2B-005f (P2) adds a non-revoking disconnect
+- merged M2B-002b (+ leader fix devices.rs machines[].machine_id) and M2B-012; verify16 running on the merged tree
