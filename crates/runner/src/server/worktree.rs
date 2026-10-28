@@ -1,19 +1,27 @@
-//! `--spawn worktree`: one `git worktree add` per session under a runner-owned directory, removed
-//! when the session ends.
+//! `--spawn worktree`: one `git worktree add` per session under a runner-owned directory, on a
+//! branch of its own (`sm/<session name>`). The worktree is removed when the session ends; the
+//! branch stays, so the session's commits are kept. A prompt for the thread later adds the
+//! worktree back on that branch ([`Worktree::restore`]).
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use tokio::process::Command;
 
 /// A worktree this runner created.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worktree {
     /// The repository's top-level directory.
     pub repo: PathBuf,
     /// The worktree's root.
     pub path: PathBuf,
+    /// The branch the worktree is on.
+    pub branch: String,
 }
+
+/// The record of a session's worktree, in the session's directory.
+const RECORD: &str = "worktree.json";
 
 async fn git(dir: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
@@ -33,68 +41,97 @@ async fn git(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// Removes the worktree at `path` of `repo`; one with uncommitted changes is refused.
+async fn git_remove(repo: &Path, path: &Path) -> Result<()> {
+    let path = path.to_string_lossy().into_owned();
+    git(repo, &["worktree", "remove", &path]).await.map(|_| ())
+}
+
 impl Worktree {
-    /// Adds a detached worktree named `name` under `root` for the repository that holds `dir`
-    /// and returns it with the session's working directory in it (the same sub-directory of the
-    /// repository as `dir`).
+    /// Adds a worktree named `name` under `root`, on a new branch `sm/<name>`, for the repository
+    /// that holds `dir`. Returns it with the session's working directory in it (the same
+    /// sub-directory of the repository as `dir`).
     pub async fn add(dir: &Path, root: &Path, name: &str) -> Result<(Self, PathBuf)> {
         let top = git(dir, &["rev-parse", "--show-toplevel"])
             .await
             .with_context(|| format!("{} is not in a git repository", dir.display()))?;
         let prefix = git(dir, &["rev-parse", "--show-prefix"]).await?;
         std::fs::create_dir_all(root).with_context(|| format!("create {}", root.display()))?;
-        let path = root.join(name);
-        let repo = PathBuf::from(top);
+        let worktree = Self {
+            repo: PathBuf::from(top),
+            path: root.join(name),
+            branch: format!("sm/{name}"),
+        };
+        let path = worktree.path.to_string_lossy().into_owned();
         git(
-            &repo,
-            &[
-                "worktree",
-                "add",
-                "--detach",
-                &path.to_string_lossy(),
-                "HEAD",
-            ],
+            &worktree.repo,
+            &["worktree", "add", "-b", &worktree.branch, &path, "HEAD"],
         )
         .await?;
         let cwd = if prefix.is_empty() {
-            path.clone()
+            worktree.path.clone()
         } else {
-            path.join(prefix)
+            worktree.path.join(prefix)
         };
-        Ok((Self { repo, path }, cwd))
+        Ok((worktree, cwd))
     }
 
-    /// The worktree at `path`, found through git (its repository is the one it was added from).
-    async fn existing(path: &Path) -> Option<Self> {
-        let common = git(
-            path,
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )
-        .await
-        .ok()?;
-        let repo = PathBuf::from(common).parent()?.to_path_buf();
-        Some(Self {
-            repo,
-            path: path.to_path_buf(),
-        })
-    }
-
-    /// Removes the worktree unless it has changes; whether it is gone.
-    async fn try_remove(&self) -> bool {
+    /// Adds the worktree back at its path, on its existing branch: the session's commits are
+    /// there as they were when the session ended.
+    pub async fn restore(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create {}", parent.display()))?;
+        }
         let path = self.path.to_string_lossy().into_owned();
-        git(&self.repo, &["worktree", "remove", &path])
+        git(&self.repo, &["worktree", "add", &path, &self.branch])
             .await
-            .is_ok()
+            .map(|_| ())
+    }
+
+    /// Records the worktree in `session_dir`, so a later prompt for the session can add it back.
+    pub fn save(&self, session_dir: &Path) -> Result<()> {
+        std::fs::create_dir_all(session_dir)
+            .with_context(|| format!("create {}", session_dir.display()))?;
+        let record = json!({
+            "repo": self.repo,
+            "path": self.path,
+            "branch": self.branch,
+        });
+        let file = session_dir.join(RECORD);
+        std::fs::write(&file, record.to_string())
+            .with_context(|| format!("write {}", file.display()))
+    }
+
+    /// The worktree recorded in `session_dir`, if the session had one.
+    pub fn load(session_dir: &Path) -> Option<Self> {
+        let bytes = std::fs::read(session_dir.join(RECORD)).ok()?;
+        let record: Value = serde_json::from_slice(&bytes).ok()?;
+        Some(Self {
+            repo: PathBuf::from(record["repo"].as_str()?),
+            path: PathBuf::from(record["path"].as_str()?),
+            branch: record["branch"].as_str()?.to_owned(),
+        })
     }
 
     /// Removes the worktree. One with uncommitted changes is kept (and reported): the agent's
     /// work is not thrown away.
     pub async fn remove(&self) {
-        let path = self.path.to_string_lossy().into_owned();
-        if let Err(error) = git(&self.repo, &["worktree", "remove", &path]).await {
+        if let Err(error) = git_remove(&self.repo, &self.path).await {
             tracing::warn!(worktree = %self.path.display(), "worktree kept: {error:#}");
         }
     }
+}
+
+/// The repository a worktree at `path` was added from.
+async fn repo_of(path: &Path) -> Option<PathBuf> {
+    let common = git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await
+    .ok()?;
+    PathBuf::from(common).parent().map(Path::to_path_buf)
 }
 
 /// Removes the worktrees under `root` that no session owns: clean ones go, the rest (changes, or
@@ -109,8 +146,8 @@ pub async fn sweep(root: &Path, keep: &[PathBuf]) {
         if !path.is_dir() || keep.iter().any(|k| k.starts_with(&path)) {
             continue;
         }
-        let removed = match Worktree::existing(&path).await {
-            Some(worktree) => worktree.try_remove().await,
+        let removed = match repo_of(&path).await {
+            Some(repo) => git_remove(&repo, &path).await.is_ok(),
             None => false,
         };
         if !removed {

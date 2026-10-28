@@ -16,6 +16,7 @@ use sidecar::store::Store;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use super::local;
 use super::project::{LastSession, Projects};
 use super::session::{SessionCommands, SessionSink, SessionState};
 use super::worktree::Worktree;
@@ -60,6 +61,8 @@ pub(super) struct Router {
     processed_rx: mpsc::UnboundedReceiver<(u64, String)>,
     ended_tx: mpsc::UnboundedSender<(String, Option<String>)>,
     ended_rx: mpsc::UnboundedReceiver<(String, Option<String>)>,
+    /// `sm rc close` requests from the control socket.
+    local: mpsc::UnboundedReceiver<local::Request>,
 }
 
 /// A thread id is a directory name: nothing that could leave the sessions directory.
@@ -87,6 +90,7 @@ impl Router {
         sink: TunnelSink,
         commands: TunnelCommands,
         projects: Projects,
+        local: mpsc::UnboundedReceiver<local::Request>,
     ) -> Self {
         let (processed_tx, processed_rx) = mpsc::unbounded_channel();
         let (ended_tx, ended_rx) = mpsc::unbounded_channel();
@@ -100,6 +104,7 @@ impl Router {
             processed_rx,
             ended_tx,
             ended_rx,
+            local,
         }
     }
 
@@ -133,6 +138,7 @@ impl Router {
                     Some((thread_id, error)) = self.ended_rx.recv() => {
                         self.ended(&thread_id, error).await;
                     }
+                    Some(request) = self.local.recv() => self.local_close(request).await,
                     _ = idle_check.tick() => self.end_idle_sessions().await,
                     joined = &mut client_task => {
                         client_result = Some(joined);
@@ -360,7 +366,8 @@ impl Router {
     // ---- sessions ---------------------------------------------------------------------------
 
     /// Starts the session of a thread this runner has stored (after the session ended, or the
-    /// runner restarted).
+    /// runner restarted). A worktree session whose worktree was removed with it gets the worktree
+    /// back on its branch; the bridge then resumes the agent's session.
     async fn reopen(&mut self, thread_id: &str) -> Result<(), Reject> {
         let unknown = || {
             (
@@ -368,7 +375,8 @@ impl Router {
                 format!("unknown thread {thread_id}"),
             )
         };
-        if !session_dir(&self.ctx.state_dir, thread_id).is_dir() {
+        let dir = session_dir(&self.ctx.state_dir, thread_id);
+        if !dir.is_dir() {
             return Err(unknown());
         }
         let store = open_store(&self.ctx.state_dir, thread_id)?;
@@ -378,13 +386,32 @@ impl Router {
             .ok_or_else(unknown)?;
         let found = self.find(&row.harness)?;
         let cwd = PathBuf::from(&row.cwd);
-        if !cwd.is_dir() {
-            return Err((
+        let gone = || {
+            (
                 CommandErrorCode::Invalid,
                 format!("workspace {} is gone", cwd.display()),
-            ));
-        }
-        self.start_session(thread_id, &found, cwd, None, store)
+            )
+        };
+        let worktree = if cwd.is_dir() {
+            None
+        } else {
+            let worktree = Worktree::load(&dir).ok_or_else(gone)?;
+            worktree.restore().await.map_err(|error| {
+                (
+                    CommandErrorCode::Invalid,
+                    format!(
+                        "workspace {} is gone and its worktree could not be added back: {error:#}",
+                        cwd.display()
+                    ),
+                )
+            })?;
+            if !cwd.is_dir() {
+                worktree.remove().await;
+                return Err(gone());
+            }
+            Some(worktree)
+        };
+        self.start_session(thread_id, &found, cwd, worktree, store)
             .await
     }
 
@@ -437,7 +464,20 @@ impl Router {
         worktree: Option<Worktree>,
         store: Arc<Store>,
     ) -> Result<(), Reject> {
-        match self.spawn_session(thread_id, found, cwd, worktree.clone(), store) {
+        // The record lets a prompt after the session ends add the worktree back.
+        let started = match &worktree {
+            Some(worktree) => worktree
+                .save(&session_dir(&self.ctx.state_dir, thread_id))
+                .map_err(|e| {
+                    (
+                        CommandErrorCode::Invalid,
+                        format!("save the worktree: {e:#}"),
+                    )
+                }),
+            None => Ok(()),
+        }
+        .and_then(|()| self.spawn_session(thread_id, found, cwd, worktree.clone(), store));
+        match started {
             Ok(()) => Ok(()),
             Err(error) => {
                 if let Some(worktree) = worktree {
@@ -568,6 +608,24 @@ impl Router {
         if let Some(worktree) = worktree {
             worktree.remove().await;
         }
+    }
+
+    /// `sm rc close`: ends the idle session of the thread, as an idle close does. A session with
+    /// a task running is left alone.
+    async fn local_close(&mut self, request: local::Request) {
+        let thread_id = request.thread_id;
+        let outcome = if !valid_thread_id(&thread_id) {
+            Err(format!("invalid thread id {thread_id:?}"))
+        } else if !self.sessions.contains_key(&thread_id) {
+            Err(format!("no open session for {thread_id}"))
+        } else if !self.is_idle(&thread_id) {
+            Err(format!("{thread_id} has a task running"))
+        } else {
+            tracing::info!(%thread_id, "session closed by `sm rc close`");
+            self.close(&thread_id).await;
+            Ok(())
+        };
+        let _ = request.reply.send(outcome);
     }
 
     /// Ends the sessions that have had no task for `--idle-timeout`.

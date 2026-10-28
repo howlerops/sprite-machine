@@ -17,7 +17,7 @@ use runner::server::{self, Options, PermissionMode, Projects, RcArgs, SpawnMode}
 use runner::tunnel::Timing;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -67,35 +67,8 @@ async fn mock_agent_child() {
             }
         })
     };
-    // The mock cannot advertise http / sse MCP servers: when `advertise-mcp` exists, the
-    // `initialize` response is patched on its way out.
-    let advertise = dir.join("advertise-mcp").exists();
-    let (mock_out, relay_in) = tokio::io::duplex(1 << 16);
-    let agent = tokio::spawn(acp_mock::run_recorded(
-        script,
-        recorder,
-        tokio::io::stdin(),
-        mock_out,
-    ));
-    let mut lines = tokio::io::BufReader::new(relay_in).lines();
-    let mut stdout = tokio::io::stdout();
-    while let Some(line) = lines.next_line().await.expect("read the agent") {
-        let mut line = line;
-        if advertise
-            && let Ok(mut message) = serde_json::from_str::<Value>(&line)
-            && message["result"]["agentCapabilities"].is_object()
-        {
-            message["result"]["agentCapabilities"]["mcpCapabilities"] =
-                json!({ "http": true, "sse": true });
-            line = message.to_string();
-        }
-        stdout.write_all(line.as_bytes()).await.unwrap();
-        stdout.write_all(b"\n").await.unwrap();
-        stdout.flush().await.unwrap();
-    }
-    agent
+    acp_mock::run_recorded(script, recorder, tokio::io::stdin(), tokio::io::stdout())
         .await
-        .unwrap()
         .expect("agent serves until stdin closes");
     dumper.abort();
 }
@@ -520,7 +493,12 @@ fn plan_modes(script: &mut Value) {
 /// What the first agent received, in order, as `method` (`method:modeId` for `session/set_mode`),
 /// once `until` holds for it.
 async fn received(rig: &Rig, until: impl Fn(&[String]) -> bool) -> Vec<String> {
-    let path = rig.root.join("mock/recorded-1.json");
+    received_by(rig, 1, until).await
+}
+
+/// [`received`] for agent process `agent` (counted from 1 in start order).
+async fn received_by(rig: &Rig, agent: usize, until: impl Fn(&[String]) -> bool) -> Vec<String> {
+    let path = rig.root.join(format!("mock/recorded-{agent}.json"));
     let mut methods = Vec::new();
     for _ in 0..500 {
         methods = fs::read_to_string(&path)
@@ -591,8 +569,9 @@ async fn a_mode_the_agent_does_not_advertise_fails_the_dispatch_without_a_prompt
 
 #[tokio::test]
 async fn http_and_sse_mcp_servers_are_passed_when_the_agent_advertises_them() {
-    let rig = Rig::new(&[one("x")]).await;
-    fs::write(rig.root.join("mock/advertise-mcp"), "").unwrap();
+    let mut script = one("x");
+    script["mcp_capabilities"] = json!({ "http": true, "sse": true });
+    let rig = Rig::new(&[script]).await;
     fs::write(
         rig.work().join(".mcp.json"),
         json!({ "mcpServers": {
@@ -715,6 +694,156 @@ async fn a_cancel_of_an_idle_thread_ends_the_session_and_removes_its_worktree() 
     // The slot is free, and the thread can be prompted again (a new session over its store).
     conn.dispatch("th_2", "tk_2", "opencode", &repo).await;
     conn.until(run_finished("tk_2")).await;
+    running.stop().await;
+}
+
+/// The one worktree under `state/worktrees`.
+fn session_worktree(rig: &Rig) -> PathBuf {
+    let made: Vec<PathBuf> = fs::read_dir(rig.state().join("worktrees"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(made.len(), 1, "{made:?}");
+    made[0].clone()
+}
+
+/// The output of `git -C dir args`, trimmed.
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let out = Process::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}");
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// Whether the agent process `pid` has gone (within a few seconds).
+async fn process_gone(pid: u32) -> bool {
+    for _ in 0..200 {
+        if !Path::new(&format!("/proc/{pid}")).exists() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn a_prompt_after_an_idle_close_adds_the_worktree_back_on_its_branch_and_resumes_the_session()
+{
+    let rig = Rig::new(&[one("a"), one("b")]).await;
+    let repo = rig.repo();
+    let mut options = rig.options();
+    options.spawn = Some(SpawnMode::Worktree);
+    options.cwd = repo.clone();
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &repo).await;
+    conn.until(run_finished("tk_1")).await;
+    let path = session_worktree(&rig);
+    let branch = git_out(&path, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert!(branch.starts_with("sm/"), "{branch}");
+    let branches = git_out(&repo, &["branch", "--format=%(refname:short)"]);
+
+    // The hub closes the idle thread: its worktree goes, the branch stays.
+    conn.command(json!({ "kind": "cancel", "thread_id": "th_1", "task_id": "tk_1" }))
+        .await;
+    conn.until(|f| f["t"] == "ack" && f["seq"] == 2).await;
+    assert!(!path.exists(), "the worktree is removed");
+    assert_eq!(worktrees(&repo), 1);
+
+    // The next prompt reopens the session: the worktree is back on the same branch, and the
+    // agent resumes its session in it.
+    conn.prompt("th_1", "tk_2").await;
+    let frames = conn.until(run_finished("tk_2")).await;
+    assert!(has_text(&frames, "b"), "{frames:#?}");
+    assert!(path.join(".git").exists(), "the worktree is back");
+    assert_eq!(worktrees(&repo), 2);
+    assert_eq!(
+        git_out(&path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        branch
+    );
+    assert_eq!(
+        git_out(&repo, &["branch", "--format=%(refname:short)"]),
+        branches,
+        "no new branch"
+    );
+
+    let methods = received_by(&rig, 2, |m| m.iter().any(|x| x == "session/prompt")).await;
+    assert!(
+        methods
+            .iter()
+            .any(|m| m == "session/resume" || m == "session/load"),
+        "{methods:?}"
+    );
+    assert!(!methods.iter().any(|m| m == "session/new"), "{methods:?}");
+    assert_eq!(
+        rig.pids().len(),
+        2,
+        "a new agent process resumed the session"
+    );
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_local_close_ends_an_idle_session_and_the_next_prompt_reopens_it() {
+    let rig = Rig::new(&[one("a"), one("b")]).await;
+    let repo = rig.repo();
+    let mut options = rig.options();
+    options.spawn = Some(SpawnMode::Worktree);
+    options.cwd = repo.clone();
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &repo).await;
+    conn.until(run_finished("tk_1")).await;
+    let path = session_worktree(&rig);
+    let pid = rig.pids()[0];
+
+    server::close_session(&rig.state(), "th_1")
+        .await
+        .expect("the session is closed");
+    assert!(!path.exists(), "the worktree is removed");
+    assert_eq!(worktrees(&repo), 1);
+    assert!(process_gone(pid).await, "the agent process is stopped");
+    let socket = rig.state().join("rc.sock");
+    let mode = fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the control socket is owner-only");
+
+    conn.prompt("th_1", "tk_2").await;
+    let frames = conn.until(run_finished("tk_2")).await;
+    assert!(has_text(&frames, "b"), "{frames:#?}");
+    assert_eq!(worktrees(&repo), 2);
+
+    running.stop().await;
+    assert!(
+        !socket.exists(),
+        "the socket is removed when the server stops"
+    );
+}
+
+#[tokio::test]
+async fn a_local_close_of_a_running_session_or_an_unknown_thread_is_refused() {
+    let rig = Rig::new(&[pauses()]).await;
+    let running = start(rig.options());
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &rig.work()).await;
+    conn.until(|f| event_type(f) == Some("Interrupt")).await;
+    let busy = server::close_session(&rig.state(), "th_1")
+        .await
+        .expect_err("a task is running");
+    assert!(busy.to_string().contains("has a task running"), "{busy:#}");
+    let unknown = server::close_session(&rig.state(), "th_9")
+        .await
+        .expect_err("no such session");
+    assert!(
+        unknown.to_string().contains("no open session"),
+        "{unknown:#}"
+    );
     running.stop().await;
 }
 

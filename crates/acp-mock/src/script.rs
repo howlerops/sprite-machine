@@ -7,8 +7,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use protocol::acp::{
-    CreateElicitationRequest, RequestPermissionRequest, SessionConfigOption, SessionModeState,
-    SessionUpdate, StopReason,
+    CreateElicitationRequest, McpCapabilities, RequestPermissionRequest, SessionConfigOption,
+    SessionModeState, SessionUpdate, StopReason,
 };
 use serde_json::{Map, Value, json};
 
@@ -25,6 +25,7 @@ pub struct Script {
     turns: Vec<Turn>,
     modes: Option<SessionModeState>,
     config_options: Option<Vec<SessionConfigOption>>,
+    mcp_capabilities: Option<McpCapabilities>,
 }
 
 /// One prompt turn: steps executed in order.
@@ -74,7 +75,11 @@ impl Script {
         let object = value
             .as_object()
             .ok_or_else(|| anyhow!("script must be a JSON object"))?;
-        reject_unknown_keys(object, &["turns", "modes", "config_options"], "script")?;
+        reject_unknown_keys(
+            object,
+            &["turns", "modes", "config_options", "mcp_capabilities"],
+            "script",
+        )?;
         let turns = object
             .get("turns")
             .and_then(Value::as_array)
@@ -97,10 +102,18 @@ impl Script {
                     .context("\"config_options\" is not an ACP config option list")
             })
             .transpose()?;
+        let mcp_capabilities = object
+            .get("mcp_capabilities")
+            .map(|caps| {
+                serde_json::from_value(caps.clone())
+                    .context("\"mcp_capabilities\" is not an ACP MCP capabilities object")
+            })
+            .transpose()?;
         Ok(Self {
             turns,
             modes,
             config_options,
+            mcp_capabilities,
         })
     }
 
@@ -119,6 +132,12 @@ impl Script {
     /// advertises none.
     pub fn config_options(&self) -> Option<&[SessionConfigOption]> {
         self.config_options.as_deref()
+    }
+
+    /// The MCP transports the agent's `initialize` response advertises. Nothing (stdio only) when
+    /// the script says none.
+    pub fn mcp_capabilities(&self) -> McpCapabilities {
+        self.mcp_capabilities.clone().unwrap_or_default()
     }
 }
 

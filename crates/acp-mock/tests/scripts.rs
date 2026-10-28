@@ -931,3 +931,30 @@ async fn set_config_option_refuses_unknown_options_and_ill_fitting_values() {
         assert!(exchange.updates.is_empty(), "{params} sent an update");
     }
 }
+
+#[tokio::test]
+async fn initialize_advertises_the_scripts_mcp_capabilities() {
+    let initialize = json!({ "protocolVersion": 1, "clientCapabilities": {} });
+
+    let mut client =
+        connect(json!({ "mcp_capabilities": { "http": true, "sse": true }, "turns": [] }));
+    let exchange = client
+        .call("initialize", initialize.clone(), &mut default_answer)
+        .await;
+    let caps = &exchange.result()["agentCapabilities"]["mcpCapabilities"];
+    assert_eq!(caps["http"], json!(true), "{caps}");
+    assert_eq!(caps["sse"], json!(true), "{caps}");
+
+    // Without the setting the agent takes stdio servers only.
+    let mut client = connect(json!({ "turns": [] }));
+    let exchange = client
+        .call("initialize", initialize, &mut default_answer)
+        .await;
+    let caps = &exchange.result()["agentCapabilities"]["mcpCapabilities"];
+    assert_eq!(caps["http"], json!(false), "{caps}");
+    assert_eq!(caps["sse"], json!(false), "{caps}");
+
+    // Not an MCP capabilities object: the script fails at load.
+    let invalid = json!({ "mcp_capabilities": "http", "turns": [] });
+    assert!(Script::from_value(&invalid).is_err());
+}
