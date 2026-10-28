@@ -979,16 +979,29 @@ fn the_bootstrap_owner_signs_in_with_the_configured_github_login_and_no_other_lo
     assert_eq!(landing.param("error").as_deref(), Some("access_denied"));
 
     // The configured login signs in as the owner, whatever the age of the owner's account.
-    let reply = desktop_sign_in(&login, next_id());
+    // One GitHub account is one numeric id: the sign-ins below reuse it.
+    let github_id = next_id();
+    let reply = desktop_sign_in(&login, github_id);
     token_of(&reply);
     let body = reply.json();
     assert_eq!(body["role"], json!("owner"), "{body}");
     assert_eq!(body["user"]["id"], owner_id, "{body}");
 
     // Again, the same account (found by its GitHub id now).
-    let again = desktop_sign_in(&login, next_id());
+    let again = desktop_sign_in(&login, github_id);
     token_of(&again);
     assert_eq!(again.json()["user"]["id"], owner_id);
+
+    // A different GitHub account with the same login is not the owner: the link is used up.
+    let (_, challenge) = pkce();
+    let stranger = browse(
+        &loopback(),
+        &challenge,
+        &unique("appstate"),
+        &login,
+        next_id(),
+    );
+    assert_eq!(stranger.param("error").as_deref(), Some("access_denied"));
 
     // The link is audited, and says it came from the bootstrap login.
     assert!(
