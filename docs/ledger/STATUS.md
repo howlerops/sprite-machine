@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 63/120
+done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d,M2B-005 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 64/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d · blocked 11 (human: M0-0
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 45 | 14 | 2 |
+| P2 | 45 | 14 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -51,7 +51,7 @@ done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d · blocked 11 (human: M0-0
 | M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
 | M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
-| M2B-005 | worker | rust | todo | runner: `sm login` device-code pairing + trusted device + keychain |
+| M2B-005 | worker | rust | assigned | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | todo | runner: local harness discovery + local logins/MCP passthrough |
 | M2B-007 | worker | rust | todo | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
 | M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |

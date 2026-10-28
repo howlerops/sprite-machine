@@ -2712,13 +2712,16 @@ items:
     title: 'runner: `sm login` device-code pairing + trusted device + keychain'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     deps: [M2B-004, M2B-002, M2-003a]
     paths:
-      - 'crates/runner/src/login/**'
-      - 'crates/hub/src/devices/**'
-      - 'crates/hub/migrations/*devices*'
-      - 'crates/hub/tests/devices.rs'
-      - 'crates/runner/tests/login.rs'
+      - "crates/runner/src/login/**"
+      - "crates/runner/tests/login.rs"
+      - "crates/hub/src/devices/**"
+      - "crates/hub/migrations/0005_devices.sql"
+      - "crates/hub/tests/devices.rs"
     context:
       - 'RFC 8628 device authorization grant'
       - 'docs/PLAN-v2-ade.md §4.10 (Security)'
