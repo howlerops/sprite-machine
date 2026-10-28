@@ -1426,14 +1426,20 @@ fn listening_ports() -> Vec<u16> {
 }
 
 fn assert_only_hubs_listen(own_hub: u16) {
-    let hubs = HUB_PORTS.lock().unwrap().clone();
-    let ports = listening_ports();
-    assert!(ports.contains(&own_hub), "the fake hub should be listening");
-    let strangers: Vec<_> = ports.iter().filter(|p| !hubs.contains(p)).collect();
-    assert!(
-        strangers.is_empty(),
-        "listening sockets besides the fake hubs: {strangers:?}"
-    );
+    // A parallel test's fake hub binds before it records its port in HUB_PORTS, so a listener
+    // can be unregistered for a moment. Only one that stays unregistered is the runner's.
+    let mut strangers = Vec::new();
+    for _ in 0..20 {
+        let ports = listening_ports();
+        assert!(ports.contains(&own_hub), "the fake hub should be listening");
+        let hubs = HUB_PORTS.lock().unwrap().clone();
+        strangers = ports.into_iter().filter(|p| !hubs.contains(p)).collect();
+        if strangers.is_empty() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("listening sockets besides the fake hubs: {strangers:?}");
 }
 
 #[tokio::test]
