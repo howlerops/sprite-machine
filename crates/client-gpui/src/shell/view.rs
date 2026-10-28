@@ -1,0 +1,459 @@
+//! [`AppShell`]: the root view. Login screen, or sidebar + content once signed in. Thin over
+//! [`ShellModel`]; every decision lives there.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use client_core::Connectivity;
+use gpui_kit::TestSupportExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{ActiveTheme as _, Selectable as _, Theme, ThemeMode, *};
+use gpui_kit::prelude::*;
+use gpui_kit::*;
+use gpui_kit::{black, white};
+
+use super::browser::Browser;
+use super::i18n::{tr, tr_args};
+use super::login::{LoginDriver, LoginEvent, LoginMethod, LoginStage};
+use super::model::{FocusSlot, Screen, ShellModel, theme_a11y};
+use super::nav::Section;
+use super::pairing::QrMatrix;
+use super::prefs::{Appearance, Preferences, ThemeChoice};
+use super::session::SessionStore;
+
+actions!(shell, [GoNewTask, NextSection, PreviousSection]);
+
+const CONTEXT: &str = "Shell";
+
+/// Register the shell's key bindings. Call once, after `gpui_kit::init`.
+pub fn init(cx: &mut App) {
+    let new_task = if cfg!(target_os = "macos") {
+        "cmd-n"
+    } else {
+        "ctrl-n"
+    };
+    cx.bind_keys([
+        KeyBinding::new(new_task, GoNewTask, Some(CONTEXT)),
+        KeyBinding::new("ctrl-tab", NextSection, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-tab", PreviousSection, Some(CONTEXT)),
+    ]);
+}
+
+/// Everything the shell needs from the outside world.
+pub struct AppConfig {
+    pub hub: String,
+    pub browser: Arc<dyn Browser>,
+    pub store: Arc<dyn SessionStore>,
+    pub prefs: Preferences,
+    pub prefs_path: Option<PathBuf>,
+    /// Divides the polling sleeps; 1 for a real launch, larger in tests against a local hub.
+    pub poll_speedup: u32,
+}
+
+pub struct AppShell {
+    model: ShellModel,
+    driver: LoginDriver,
+    focus: FocusHandle,
+    _appearance: Subscription,
+}
+
+impl AppShell {
+    pub fn new(config: AppConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let model = ShellModel::new(config.store, config.prefs, config.prefs_path, &config.hub);
+        let driver = LoginDriver::new(model.hub().to_string(), config.browser)
+            .with_sleep_divisor(config.poll_speedup);
+        let focus = cx.focus_handle();
+        let appearance = cx.observe_window_appearance(window, |this, window, cx| {
+            this.apply_theme(window, cx);
+        });
+        let shell = Self {
+            model,
+            driver,
+            focus,
+            _appearance: appearance,
+        };
+        shell.apply_theme(window, cx);
+        shell
+    }
+
+    pub fn model(&self) -> &ShellModel {
+        &self.model
+    }
+
+    pub fn driver(&self) -> &LoginDriver {
+        &self.driver
+    }
+
+    /// Apply the chosen theme (or the system's) to every window.
+    fn apply_theme(&self, window: &mut Window, cx: &mut App) {
+        let system_dark = ThemeMode::from(window.appearance()).is_dark();
+        let mode = match self.model.appearance(system_dark) {
+            Appearance::Light => ThemeMode::Light,
+            Appearance::Dark => ThemeMode::Dark,
+        };
+        Theme::change(mode, Some(window), cx);
+    }
+
+    pub fn choose_theme(
+        &mut self,
+        choice: ThemeChoice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A failed save keeps the choice for this run; the next launch falls back to the old one.
+        let _ = self.model.set_theme(choice);
+        self.apply_theme(window, cx);
+        cx.notify();
+    }
+
+    pub fn set_connectivity(&mut self, connectivity: Connectivity, cx: &mut Context<Self>) {
+        self.model.set_connectivity(connectivity);
+        cx.notify();
+    }
+
+    pub fn select(&mut self, section: Section, cx: &mut Context<Self>) {
+        self.model.nav.select(section);
+        cx.notify();
+    }
+
+    pub fn start_login(&mut self, method: LoginMethod, cx: &mut Context<Self>) {
+        let _ = self.model.apply_login(LoginEvent::Started(method));
+        self.driver.set_hub(self.model.hub());
+        self.driver.start(method);
+        self.watch_login(cx);
+        cx.notify();
+    }
+
+    pub fn cancel_login(&mut self, cx: &mut Context<Self>) {
+        self.driver.cancel();
+        let _ = self.model.apply_login(LoginEvent::Reset);
+        cx.notify();
+    }
+
+    pub fn sign_out(&mut self, cx: &mut Context<Self>) {
+        let _ = self.model.sign_out();
+        cx.notify();
+    }
+
+    /// Move events from the background sign-in into the model.
+    pub fn pump_login(&mut self, cx: &mut Context<Self>) {
+        let events = self.driver.drain();
+        if events.is_empty() {
+            return;
+        }
+        for event in events {
+            let _ = self.model.apply_login(event);
+        }
+        cx.notify();
+    }
+
+    /// Poll the driver while a flow is running.
+    fn watch_login(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        this.pump_login(cx);
+                        this.model.login.is_busy()
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn tab_index(slots: &[FocusSlot], id: &str) -> isize {
+        slots
+            .iter()
+            .position(|slot| slot.id == id)
+            .map_or(0, |position| position as isize + 1)
+    }
+
+    fn button(slots: &[FocusSlot], id: &str, label: String) -> Button {
+        let a11y = slots
+            .iter()
+            .find(|slot| slot.id == id)
+            .map(|slot| slot.label.clone())
+            .unwrap_or_else(|| label.clone());
+        Button::new(SharedString::from(id.to_string()))
+            .label(label)
+            .accessibility_label(a11y)
+            .tab_index(Self::tab_index(slots, id))
+    }
+
+    fn status(id: &'static str, text: String, cx: &App) -> impl IntoElement {
+        div()
+            .id(id)
+            .role(Role::Status)
+            .test_support()
+            .aria_label(text.clone())
+            .text_color(cx.theme().muted_foreground)
+            .child(text)
+    }
+
+    fn render_login(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {
+        let stage = self.model.login.stage().clone();
+        let status = self.model.login.status_text();
+        let failed = matches!(stage, LoginStage::Failed(_));
+        let choosing = matches!(stage, LoginStage::Choose);
+        v_flex()
+            .id("login")
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_4()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child(div().id("login-title").text_xl().child(tr("login-title")))
+            .child(Self::status("login-status", status, cx))
+            .when(choosing, |el| {
+                el.child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            Self::button(slots, "login-pair", tr("login-pair"))
+                                .primary()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.start_login(LoginMethod::Pairing, cx);
+                                })),
+                        )
+                        .child(
+                            Self::button(slots, "login-github", tr("login-github")).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.start_login(LoginMethod::GitHub, cx);
+                                }),
+                            ),
+                        ),
+                )
+            })
+            .when_some(pairing_panel(&stage), |el, panel| el.child(panel))
+            .when(failed, |el| {
+                el.child(
+                    Self::button(slots, "login-retry", tr("login-retry")).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.cancel_login(cx);
+                        },
+                    )),
+                )
+            })
+            .when(self.model.login.is_busy(), |el| {
+                el.child(
+                    Self::button(slots, "login-cancel", tr("login-cancel")).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.cancel_login(cx);
+                        },
+                    )),
+                )
+            })
+    }
+
+    fn render_main(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.model.nav.current();
+        let banner = self.model.banner();
+        let sidebar = v_flex()
+            .id("sidebar")
+            .role(Role::Navigation)
+            .test_support()
+            .aria_label(tr("nav-label"))
+            .w(px(220.))
+            .h_full()
+            .p_2()
+            .gap_1()
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .children(Section::ALL.map(|section| {
+                Self::button(slots, &section.nav_id(), section.title())
+                    .ghost()
+                    .w_full()
+                    .selected(section == current)
+                    .on_click(cx.listener(move |this, _, _, cx| this.select(section, cx)))
+            }));
+        let content = if current == Section::Settings {
+            self.render_settings(slots, cx).into_any_element()
+        } else {
+            let text = tr_args("content-placeholder", &[("section", &current.title())]);
+            div().child(text).into_any_element()
+        };
+        h_flex()
+            .id("main")
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child(sidebar)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .h_full()
+                    .when_some(banner, |el, text| {
+                        el.child(
+                            div()
+                                .id("connectivity-banner")
+                                .role(Role::Status)
+                                .test_support()
+                                .aria_label(text.clone())
+                                .px_3()
+                                .py_1()
+                                .bg(cx.theme().warning)
+                                .text_color(cx.theme().warning_foreground)
+                                .child(text),
+                        )
+                    })
+                    .child(
+                        div()
+                            .id("content")
+                            .role(Role::Main)
+                            .test_support()
+                            .aria_label(tr("content-a11y"))
+                            .flex_1()
+                            .p_4()
+                            .child(content),
+                    ),
+            )
+    }
+
+    fn render_settings(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = self.model.prefs().theme;
+        let account = self
+            .model
+            .session()
+            .map(|session| {
+                tr_args(
+                    "settings-signed-in-as",
+                    &[
+                        ("user", &session.user_label()),
+                        ("org", &session.org_label()),
+                    ],
+                )
+            })
+            .unwrap_or_else(|| tr("settings-not-signed-in"));
+        v_flex()
+            .id("settings")
+            .gap_4()
+            .child(div().text_xl().child(tr("settings-title")))
+            .child(div().child(tr("settings-appearance")))
+            .child(h_flex().gap_2().children(ThemeChoice::ALL.map(|choice| {
+                let id = format!("theme-{}", choice.slug());
+                Self::button(slots, &id, tr(choice.message_id()))
+                    .selected(choice == selected)
+                    .accessibility_label(theme_a11y(choice, choice == selected))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.choose_theme(choice, window, cx);
+                    }))
+            })))
+            .child(div().child(format!(
+                "{}: {}",
+                tr("settings-language"),
+                tr("settings-language-en")
+            )))
+            .child(div().child(format!("{}: {}", tr("settings-hub"), self.model.hub())))
+            .child(
+                div()
+                    .id("account")
+                    .test_support()
+                    .aria_label(account.clone())
+                    .child(account),
+            )
+            .child(
+                Self::button(slots, "sign-out", tr("settings-sign-out")).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        this.sign_out(cx);
+                    },
+                )),
+            )
+    }
+}
+
+/// The QR code, the typed code and the instructions while pairing.
+fn pairing_panel(stage: &LoginStage) -> Option<impl IntoElement + use<>> {
+    let LoginStage::Pairing {
+        user_code,
+        qr_target,
+        ..
+    } = stage
+    else {
+        return None;
+    };
+    let qr = QrMatrix::encode(qr_target)?;
+    let quiet = 2usize;
+    let module = 4.0_f32;
+    let side = (qr.width() + quiet * 2) as f32 * module;
+    let rows = (0..qr.width()).map(|y| {
+        qr.dark_runs(y).into_iter().map(move |(start, len)| {
+            div()
+                .absolute()
+                .left(px((start + quiet) as f32 * module))
+                .top(px((y + quiet) as f32 * module))
+                .w(px(len as f32 * module))
+                .h(px(module))
+                .bg(black())
+        })
+    });
+    Some(
+        v_flex()
+            .items_center()
+            .gap_3()
+            .child(
+                div()
+                    .id("login-qr")
+                    .role(Role::Image)
+                    .test_support()
+                    .aria_label(tr("login-qr-a11y"))
+                    .relative()
+                    .w(px(side))
+                    .h(px(side))
+                    .bg(white())
+                    .children(rows.flatten()),
+            )
+            .child(
+                div()
+                    .id("login-user-code")
+                    .test_support()
+                    .aria_label(tr_args("login-pairing-code-a11y", &[("code", user_code)]))
+                    .text_xl()
+                    .child(tr_args("login-pairing-code", &[("code", user_code)])),
+            ),
+    )
+}
+
+impl Render for AppShell {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.focus.is_focused(window) {
+            window.focus(&self.focus, cx);
+        }
+        let slots = self.model.focus_order();
+        let body = match self.model.screen() {
+            Screen::Login => self.render_login(&slots, cx).into_any_element(),
+            Screen::Main => self.render_main(&slots, cx).into_any_element(),
+        };
+        div()
+            .id("app-shell")
+            .key_context(CONTEXT)
+            .track_focus(&self.focus)
+            .size_full()
+            .on_action(cx.listener(|this, _: &GoNewTask, _, cx| {
+                if this.model.screen() == Screen::Main {
+                    this.select(Section::NewTask, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &NextSection, _, cx| {
+                if this.model.screen() == Screen::Main {
+                    this.model.nav.next();
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &PreviousSection, _, cx| {
+                if this.model.screen() == Screen::Main {
+                    this.model.nav.previous();
+                    cx.notify();
+                }
+            }))
+            .child(body)
+    }
+}
