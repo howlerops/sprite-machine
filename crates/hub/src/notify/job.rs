@@ -24,10 +24,17 @@ pub enum Kind {
     TaskDone,
     /// A run ended in an error.
     TaskFailed,
+    /// A machine came back online while commands were queued for one of its threads (M2B-014).
+    MachineBack,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::ApprovalNeeded, Kind::TaskDone, Kind::TaskFailed];
+    pub const ALL: [Kind; 4] = [
+        Kind::ApprovalNeeded,
+        Kind::TaskDone,
+        Kind::TaskFailed,
+        Kind::MachineBack,
+    ];
 
     /// The stored and wire name (`notification_prefs.event_class`).
     pub fn as_str(self) -> &'static str {
@@ -35,6 +42,7 @@ impl Kind {
             Kind::ApprovalNeeded => "approval_needed",
             Kind::TaskDone => "task_done",
             Kind::TaskFailed => "task_failed",
+            Kind::MachineBack => "machine_back",
         }
     }
 
@@ -48,6 +56,7 @@ impl Kind {
             Kind::ApprovalNeeded => "Approval needed",
             Kind::TaskDone => "Task finished",
             Kind::TaskFailed => "Task failed",
+            Kind::MachineBack => "Machine back online",
         }
     }
 }

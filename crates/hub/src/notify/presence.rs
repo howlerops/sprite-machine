@@ -2,10 +2,14 @@
 //! comes back online while commands are queued for it announces itself once per window.
 //!
 //! This file is the pure decision, with the clock injected, so it runs natively. The Machine DO
-//! calls [`machine_back_thread`] on each presence change. The push itself is not wired yet: it
-//! needs its own notification class in `job.rs` and `prefs.rs`.
+//! (`do/machine.rs`) calls [`machine_back_thread`] on each presence change to `online`, loads and
+//! stores the [`MachineBackDebounce`] in its storage, and enqueues [`machine_back_job`] when due.
+//! The push goes to each user of the org once (`service::process_job`), under the `machine_back`
+//! prefs class, which is on by default.
 
 use serde::{Deserialize, Serialize};
+
+use super::job::{Kind, NotifyJob};
 
 /// At most one "machine back" notification per machine in this many milliseconds. A machine that
 /// flaps (online, offline, online) within the window sends one push, not one per reconnect.
@@ -52,6 +56,21 @@ pub fn machine_back_thread<'a>(
     }
     let thread = queued_threads.first()?;
     debounce.admit(now_ms).then_some(thread.as_str())
+}
+
+/// The NOTIFY job for a machine that came back: one per comeback, named by the first thread with
+/// queued work. Ids only; the payload is the generic title and the thread id.
+pub fn machine_back_job(thread_id: &str) -> NotifyJob {
+    NotifyJob {
+        kind: Kind::MachineBack,
+        thread_id: thread_id.to_owned(),
+        task_id: None,
+        interrupt_id: None,
+        allow_option_id: None,
+        deny_option_id: None,
+        subscriptions: None,
+        attempt: 0,
+    }
 }
 
 #[cfg(test)]

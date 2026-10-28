@@ -71,6 +71,10 @@ name = "notify"
 required-features = ["live"]
 
 [[test]]
+name = "presence_notify"
+required-features = ["live"]
+
+[[test]]
 name = "tasks"
 required-features = ["live"]
 

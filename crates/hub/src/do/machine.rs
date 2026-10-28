@@ -37,8 +37,12 @@ use crate::machines::internal::WorkerHost;
 use crate::machines::sqlite::SqlMachineStore;
 use crate::machines::store::{HostKind, MachineStore};
 use crate::machines::{Auth, MachineCore, Out};
+use crate::notify::presence::{MachineBackDebounce, machine_back_job, machine_back_thread};
+use crate::queues_notify;
 
 const TUNNEL_TAG: &str = "tunnel";
+/// The storage key of the machine-back debounce (`notify::presence`), one value per machine.
+const BACK_DEBOUNCE_KEY: &str = "machine_back_debounce";
 const PING: &str = r#"{"t":"ping"}"#;
 const PONG: &str = r#"{"t":"pong"}"#;
 
@@ -351,10 +355,15 @@ impl Machine {
         let host = self.host();
         match item {
             Queued::Frame { ws, conn, text } => {
+                let before = core.borrow().state().presence.clone();
                 driver::handle_text(core, &host, conn, &text, now_ms(), &mut |out| {
                     self.send_out(&ws, out);
                 })
                 .await;
+                let after = core.borrow().state().presence.clone();
+                if before != after {
+                    self.announce_machine_back(core, &before, &after).await;
+                }
                 // The batched ack goes out once the frames queued behind this one are handled.
                 if self.queue.borrow().is_empty()
                     && let Some(out) = driver::flush_ack(core)
@@ -393,6 +402,54 @@ impl Machine {
         for ws in self.sockets_of(conn) {
             self.send_out(&ws, out.clone());
         }
+    }
+
+    /// A presence change to `online` with commands still queued for this machine (the outbox)
+    /// sends one machine-back job to the NOTIFY queue, at most once per debounce window. The
+    /// debounce is kept in the DO storage, so the window holds across evictions. A storage error
+    /// sends nothing: a missed "back" push is better than a repeated one.
+    async fn announce_machine_back(&self, core: &Core<SqlMachineStore>, from: &str, to: &str) {
+        if to != "online" || from == "online" {
+            return;
+        }
+        let (machine_id, queued) = {
+            let core = core.borrow();
+            let rows = match core.store().outbox() {
+                Ok(rows) => rows,
+                Err(error) => {
+                    worker::console_log!("machine: outbox read failed: {error}");
+                    return;
+                }
+            };
+            let mut threads: Vec<String> = Vec::new();
+            for row in rows {
+                if !threads.contains(&row.thread_id) {
+                    threads.push(row.thread_id);
+                }
+            }
+            (core.machine_id().to_owned(), threads)
+        };
+        if queued.is_empty() {
+            return;
+        }
+        let storage = self.state.storage();
+        let mut debounce = match storage.get::<MachineBackDebounce>(BACK_DEBOUNCE_KEY).await {
+            Ok(saved) => saved.unwrap_or_default(),
+            Err(error) => {
+                worker::console_log!("machine {machine_id}: debounce read failed: {error}");
+                return;
+            }
+        };
+        let Some(thread) =
+            machine_back_thread(from, to, &queued, &mut debounce, now_ms()).map(str::to_owned)
+        else {
+            return;
+        };
+        if let Err(error) = storage.put(BACK_DEBOUNCE_KEY, &debounce).await {
+            worker::console_log!("machine {machine_id}: debounce write failed: {error}");
+            return;
+        }
+        queues_notify::enqueue(&self.env, &[machine_back_job(&thread)]).await;
     }
 
     /// A socket closed or failed: presence, if it was the current connection.

@@ -246,7 +246,7 @@ before it stores the token.
   or 200 with the same id when this user and device already registered the endpoint.
   **`DELETE /v1/push/subscriptions`** `{ "endpoint" }` → 204. Both are idempotent by the endpoint
   itself, so they are the one exception to §3: `Idempotency-Key` is accepted but not required.
-- **`GET` / `PUT /v1/push/prefs`** `{ "classes": { "approval_needed", "task_done", "task_failed" },
+- **`GET` / `PUT /v1/push/prefs`** `{ "classes": { "approval_needed", "task_done", "task_failed", "machine_back" },
   "muted_threads": [..], "quiet_hours": { "start": "22:00", "end": "07:00", "tz": "Europe/Berlin" } }`.
 - **Payload** (encrypted to the subscription): `{ "kind", "thread_id", "task_id", "interrupt_id"?,
   "title", "actions"? }`. `title` is generic ("Approval needed", "Task finished", "Task failed");
