@@ -98,3 +98,4 @@
 2026-10-28T04:33Z M1A-013 re-scoped (pending tasks are hub-owned; session_config command), paths += runtime/handler/client + protocol command; assigned (haiku)
 2026-10-28T04:38Z MVP-000c assigned→done merged e3cad67 (haiku; measurement: ACP contributes 0 bytes, name section 34%; one denied send_message call). Added MVP-000f (strip name section). MVP-000e (move validator, gate ACP) not added: no size win
 2026-10-28T04:38Z M1A-004a assigned (sonnet; P2 pick — remaining P1 items overlap in-flight bridge files)
+2026-10-28T04:47Z M1A-013 assigned→done merged 6f3f33b (haiku; hub sqlite.rs match arm accepted); added M2-008b (hub session route + acp-mock set_mode)

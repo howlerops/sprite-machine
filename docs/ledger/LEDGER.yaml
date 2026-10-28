@@ -1187,7 +1187,8 @@ items:
     title: 'Session config: commands, modes, config options, pending tasks (StateDelta{session})'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 6f3f33b; verify (merged tree, forced recompile): session_config 5, workspace 407, clippy, wasm32, tracer PASS"
     assignee: "worker:haiku"
     attempt: 1
     deps:
@@ -1826,6 +1827,26 @@ items:
     verify:
       - 'bash scripts/hub-test.sh thread_do'
       - 'cargo run -p cli -- e2e tracer'
+
+  - id: M2-008b
+    title: 'hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option'
+    milestone: M2
+    phase: P2
+    priority: 2
+    deps: [M1A-013, M2B-002]
+    paths:
+      - crates/hub/src/threads/**
+      - crates/hub/tests/thread_session.rs
+      - crates/acp-mock/**
+    context:
+      - 'docs/specs/client-api.md §5.5a, docs/specs/tunnel.md §3.5 session_config'
+      - 'docs/ledger/reports/M1A-013.md (discovered 1, 2)'
+    acceptance:
+      - 'The route (member role, audited, Idempotency-Key) validates mode_id / config id + value against the thread''s current session state and answers 400 invalid_request synchronously; a valid request queues a tunnel session_config command'
+      - 'acp-mock answers session/set_mode and session/set_config_option and reports current_mode_update / config_option_update; a sidecar test drives session_config against acp-mock instead of a hand-played agent'
+    verify:
+      - bash scripts/hub-test.sh thread_session
+      - cargo test -p acp-mock --test scripts
 
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
