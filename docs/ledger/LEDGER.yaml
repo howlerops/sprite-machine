@@ -2119,6 +2119,9 @@ items:
     title: 'Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key'
     milestone: M1a
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     lane: rust
     size: S
     risk: high
