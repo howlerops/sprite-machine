@@ -565,6 +565,12 @@ fn close_codes_match_spec_table() {
         ),
         (CloseCode::ServerRestart, "server_restart", 4007, Some(true)),
         (CloseCode::GoingToSleep, "going_to_sleep", 4008, None),
+        (
+            CloseCode::DeviceUntrusted,
+            "device_untrusted",
+            4009,
+            Some(true),
+        ),
     ];
     assert_eq!(CloseCode::ALL.len(), table.len());
     for (code, name, ws, reconnects) in table {
@@ -579,7 +585,7 @@ fn close_codes_match_spec_table() {
         assert_eq!(json, Value::String(name.to_owned()), "{name} wire name");
     }
     assert_eq!(CloseCode::from_ws_code(3999), None);
-    assert_eq!(CloseCode::from_ws_code(4009), None);
+    assert_eq!(CloseCode::from_ws_code(4010), None);
 }
 
 #[test]

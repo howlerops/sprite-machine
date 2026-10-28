@@ -49,6 +49,8 @@ struct Seen(String, Option<String>, Option<String>);
 struct Upgrade {
     seen: Arc<Mutex<Seen>>,
     refuse: Option<u16>,
+    /// With a refusal: the JSON body; then only the first upgrade is refused.
+    refusal_body: Option<(&'static str, Arc<AtomicUsize>)>,
 }
 
 impl Callback for Upgrade {
@@ -65,9 +67,18 @@ impl Callback for Upgrade {
             header(SEC_WEBSOCKET_PROTOCOL),
         );
         if let Some(status) = self.refuse {
-            let mut refusal = ErrorResponse::new(None);
-            *refusal.status_mut() = status.try_into().unwrap();
-            return Err(refusal);
+            let (body, refused) = match &self.refusal_body {
+                Some((body, count)) => (
+                    Some((*body).to_owned()),
+                    count.fetch_add(1, Ordering::SeqCst) == 0,
+                ),
+                None => (None, true),
+            };
+            if refused {
+                let mut refusal = ErrorResponse::new(body);
+                *refusal.status_mut() = status.try_into().unwrap();
+                return Err(refusal);
+            }
         }
         if let Some(protocol) = header(SEC_WEBSOCKET_PROTOCOL) {
             resp.headers_mut()
@@ -92,15 +103,30 @@ struct HubConn {
 
 impl FakeHub {
     async fn start() -> Self {
-        Self::start_with(None).await
+        Self::start_with(None, None).await
     }
 
     /// A hub that refuses every upgrade with `status`.
     async fn refusing(status: u16) -> Self {
-        Self::start_with(Some(status)).await
+        Self::start_with(Some(status), None).await
     }
 
-    async fn start_with(refuse: Option<u16>) -> Self {
+    /// A hub that refuses the first upgrade with `403 device_untrusted` (SPEC-007), then accepts.
+    async fn untrusted_once() -> Self {
+        Self::start_with(
+            Some(403),
+            Some((
+                r#"{"error":"device_untrusted","message":"not trusted"}"#,
+                Arc::new(AtomicUsize::new(0)),
+            )),
+        )
+        .await
+    }
+
+    async fn start_with(
+        refuse: Option<u16>,
+        refusal_body: Option<(&'static str, Arc<AtomicUsize>)>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         HUB_PORTS.lock().unwrap().push(addr.port());
@@ -111,6 +137,7 @@ impl FakeHub {
                 let callback = Upgrade {
                     seen: Arc::clone(&seen),
                     refuse,
+                    refusal_body: refusal_body.clone(),
                 };
                 let Ok(ws) = tokio_tungstenite::accept_hdr_async(stream, callback).await else {
                     continue;
@@ -941,6 +968,59 @@ async fn close_auth_invalid_does_not_reconnect() {
 #[tokio::test]
 async fn close_auth_revoked_does_not_reconnect_and_wipes_the_credential() {
     no_reconnect(CloseCode::AuthRevoked).await;
+}
+
+#[tokio::test]
+async fn close_device_untrusted_keeps_the_credential_and_reconnects() {
+    let mut rig = Rig::new().await;
+    rig.start();
+    let mut conn = rig.hub.next_conn().await;
+    conn.hello().await;
+    conn.welcome(false, "rt_1", 0, 20_000).await;
+    conn.close(CloseCode::DeviceUntrusted).await;
+    let mut again = rig.hub.next_conn().await;
+    again.hello().await;
+    assert!(rig.run.as_ref().is_some_and(|run| !run.is_finished()));
+    assert_eq!(
+        rig.wipes.load(Ordering::SeqCst),
+        0,
+        "the credential is kept"
+    );
+    assert_eq!(
+        again.authorization.as_deref(),
+        Some(format!("Bearer {CREDENTIAL}").as_str())
+    );
+}
+
+#[tokio::test]
+async fn a_403_device_untrusted_upgrade_keeps_the_credential_and_is_retried() {
+    let dir = TempDir::new().unwrap();
+    let hub = FakeHub::untrusted_once().await;
+    let mut rig = Rig::build(hub, dir.path(), timing(5, 40), 0.0);
+    rig.start();
+    // The first upgrade was refused; the retry arrives with the same credential.
+    let mut conn = rig.hub.next_conn().await;
+    conn.hello().await;
+    assert!(rig.run.as_ref().is_some_and(|run| !run.is_finished()));
+    assert_eq!(
+        rig.wipes.load(Ordering::SeqCst),
+        0,
+        "the credential is kept"
+    );
+    assert_eq!(
+        conn.authorization.as_deref(),
+        Some(format!("Bearer {CREDENTIAL}").as_str())
+    );
+}
+
+#[tokio::test]
+async fn a_403_without_the_device_untrusted_code_is_still_fatal() {
+    let dir = TempDir::new().unwrap();
+    let hub = FakeHub::refusing(403).await;
+    let mut rig = Rig::build(hub, dir.path(), timing(5, 40), 0.0);
+    rig.start();
+    let error = rig.finished().await.unwrap_err();
+    assert!(error.to_string().contains("403"), "{error:#}");
 }
 
 #[tokio::test]

@@ -32,7 +32,7 @@ pub trait MachineControl {
     /// Revokes it: the live tunnel closes with `auth_revoked`, the credential stops working.
     fn revoke(&self, machine_id: &str) -> impl Future<Output = Result<(), ApiError>>;
 
-    /// Closes the live tunnel with `auth_revoked` without revoking: the machine may reconnect.
+    /// Closes the live tunnel with `device_untrusted` without revoking: the machine may reconnect.
     fn disconnect(&self, machine_id: &str) -> impl Future<Output = Result<(), ApiError>>;
 }
 

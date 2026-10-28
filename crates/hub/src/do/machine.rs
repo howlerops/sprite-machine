@@ -482,7 +482,7 @@ impl Machine {
         json_response(200, &json!({ "status": "revoked" }))
     }
 
-    /// Closes the live tunnel with `auth_revoked` but leaves the machine usable: nothing is
+    /// Closes the live tunnel with `device_untrusted` (SPEC-007) but leaves the machine usable: nothing is
     /// persisted as revoked, so its credential works again on the next connect. The socket's
     /// close takes presence offline like any other drop.
     async fn disconnect(&self) -> worker::Result<Response> {
@@ -493,8 +493,8 @@ impl Machine {
         for ws in self.state.get_websockets_with_tag(TUNNEL_TAG) {
             close_socket(
                 &ws,
-                CloseCode::AuthRevoked,
-                "the tunnel was closed by the hub",
+                CloseCode::DeviceUntrusted,
+                "the machine is not a trusted device",
             );
         }
         json_response(200, &json!({ "status": "disconnected" }))

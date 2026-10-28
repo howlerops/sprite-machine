@@ -191,8 +191,9 @@ async fn revoke(
 
 /// `GET /v1/machines/{id}/tunnel`: the upgrade goes to the Machine DO unchanged; the DO checks
 /// the subprotocol and the credential. Before that (M2B-005a) the org's `require_trusted_devices`
-/// setting applies (`devices::trust`): a machine that is not vouched for is refused with `401`
-/// (the status of a missing credential, tunnel.md §2; there is no socket yet to close). A
+/// setting applies (`devices::trust`): a machine that is not vouched for is refused with `403
+/// device_untrusted` (SPEC-007; not `401`, which means a missing or bad credential, and there is
+/// no socket yet to close). A
 /// revoked machine still reaches the DO, which closes it with `auth_revoked`.
 #[worker::send]
 async fn tunnel(
@@ -208,7 +209,9 @@ async fn tunnel(
             .await
             .map_err(|error| ApiError::internal(format!("machines: {error}")))?;
         if verdict == Verdict::Untrusted {
-            return Err(ApiError::unauthorized(
+            return Err(ApiError::new(
+                403,
+                "device_untrusted",
                 "this machine is not a trusted device of an org that requires trusted devices",
             ));
         }

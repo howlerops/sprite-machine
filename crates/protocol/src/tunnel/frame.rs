@@ -169,11 +169,12 @@ pub enum CloseCode {
     HeartbeatTimeout,
     ServerRestart,
     GoingToSleep,
+    DeviceUntrusted,
 }
 
 impl CloseCode {
     /// Every close code, in table order.
-    pub const ALL: [CloseCode; 9] = [
+    pub const ALL: [CloseCode; 10] = [
         CloseCode::Normal,
         CloseCode::Superseded,
         CloseCode::AuthInvalid,
@@ -183,6 +184,7 @@ impl CloseCode {
         CloseCode::HeartbeatTimeout,
         CloseCode::ServerRestart,
         CloseCode::GoingToSleep,
+        CloseCode::DeviceUntrusted,
     ];
 
     /// The WebSocket close code (§3.8).
@@ -197,6 +199,7 @@ impl CloseCode {
             Self::HeartbeatTimeout => 6,
             Self::ServerRestart => 7,
             Self::GoingToSleep => 8,
+            Self::DeviceUntrusted => 9,
         }
     }
 
@@ -214,7 +217,10 @@ impl CloseCode {
             | Self::AuthInvalid
             | Self::AuthRevoked
             | Self::VersionUnsupported => Some(false),
-            Self::ProtocolError | Self::HeartbeatTimeout | Self::ServerRestart => Some(true),
+            Self::ProtocolError
+            | Self::HeartbeatTimeout
+            | Self::ServerRestart
+            | Self::DeviceUntrusted => Some(true),
             Self::GoingToSleep => None,
         }
     }

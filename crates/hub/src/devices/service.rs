@@ -671,7 +671,7 @@ pub async fn set_policy(
 }
 
 /// Turning the setting on closes the live tunnels of the org's machines that are no longer
-/// trusted (M2B-005c): the Machine DO closes the socket with `auth_revoked` (tunnel.md §3.8) without
+/// trusted (M2B-005c): the Machine DO closes the socket with `device_untrusted` (SPEC-007) without
 /// revoking, so the machine connects again once the setting is off (M2B-005f). The org's machines are its registry rows and the machines its
 /// threads are hosted on (`thread_hosts`), which also reaches machines without a row. Every
 /// machine is tried; the first failure is returned after the rest were. Returns how many were told.
