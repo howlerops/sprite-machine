@@ -3540,6 +3540,9 @@ items:
     title: 'Presence + reconnect notifications on the phone'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     deps: [M2B-002, M2-011]
     paths:
       - 'crates/hub/src/notify/presence*'
@@ -3694,6 +3697,9 @@ items:
     title: 'web: composer with attachments + Allow/Deny + Stop'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     deps: [WEB-002, M2-009]
     paths:
       - 'web/src/composer*'
@@ -5446,3 +5452,40 @@ items:
       - 'When stdin is a TTY, sm rc reads keys in raw mode and space shows/hides the QR of the latest session URL; with no TTY nothing changes (test drives the key handler through an injected reader)'
     verify:
       - 'cargo test -p runner'
+
+  - id: M2-010f
+    title: 'hub: live test for the cron task-index reconcile (dev fixture drops a tasks row; /__scheduled; the thread is listed again)'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-010a]
+    paths:
+      - 'crates/hub/src/dev_fixtures*'
+      - 'crates/hub/tests/tasks.rs'
+    context:
+      - 'docs/ledger/reports/M2-010a.md (Discovered work)'
+    acceptance:
+      - 'Live test: a hosted thread whose index row was dropped is listed again after one scheduled run; the dev route exists only with DEV_FIXTURES=1'
+    verify:
+      - 'bash scripts/hub-test.sh tasks'
+
+  - id: M2-010g
+    title: 'hub: page the task-index reconcile through all hosted threads (cursor or checked_at), so large orgs are fully visited'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-010a]
+    paths:
+      - 'crates/hub/src/tasks/**'
+      - 'crates/hub/migrations/**'
+      - 'crates/hub/src/db/mod.rs'
+    context:
+      - 'docs/ledger/reports/M2-010a.md (Notes and limits)'
+    acceptance:
+      - 'Successive passes visit every hosted thread (native test with 450 threads and 200 per pass: all visited within 3 passes)'
+    verify:
+      - 'cargo test -p hub'
