@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 
+use crate::auth::ticket;
+
 /// Request id header, echoed when the caller sends a valid one and generated otherwise.
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
@@ -53,14 +55,30 @@ pub fn new_request_id(now_ms: u64) -> String {
     format!("req_{now_ms:x}_{seq:x}")
 }
 
-/// One structured access-log line (JSON, one object per line) for the Workers console.
+/// The path and query a request is forwarded with, with its `ticket=` pairs removed (SPEC-006).
+/// `None` when there is no ticket in the query, so nothing needs rewriting.
+pub fn path_and_query_without_ticket(path: &str, query: Option<&str>) -> Option<String> {
+    let query = query?;
+    ticket::ticket_in_query(Some(query))?;
+    let cleaned = ticket::strip_ticket(query);
+    Some(if cleaned.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{path}?{cleaned}")
+    })
+}
+
+/// One structured access-log line (JSON, one object per line) for the Workers console. Only the
+/// path is logged: `path_and_query` is cut at its first `?`, so a query (a subscribe ticket, an
+/// `after=` cursor) never reaches the logs.
 pub fn access_log(
     request_id: &str,
     method: &str,
-    path: &str,
+    path_and_query: &str,
     status: u16,
     duration_ms: u64,
 ) -> String {
+    let path = path_and_query.split('?').next().unwrap_or_default();
     json!({
         "level": "info",
         "msg": "request",
@@ -140,6 +158,81 @@ mod tests {
         assert_eq!(value["path"], "/healthz");
         assert_eq!(value["status"], 200);
         assert_eq!(value["duration_ms"], 3);
+    }
+
+    #[test]
+    fn access_log_records_the_path_and_never_the_query() {
+        let line = access_log(
+            "req_2",
+            "GET",
+            "/v1/threads/th_1/subscribe?after=3&ticket=sst_abcdef0123",
+            101,
+            4,
+        );
+        let value: Value = serde_json::from_str(&line).expect("access log is JSON");
+        assert_eq!(value["path"], "/v1/threads/th_1/subscribe");
+        assert!(!line.contains("ticket"), "query key in log: {line}");
+        assert!(!line.contains("sst_"), "ticket value in log: {line}");
+        assert!(!line.contains("after"), "query key in log: {line}");
+        assert!(!line.contains('?'), "query separator in log: {line}");
+        // A ticket-only query and a bare `?` log the same path.
+        for query_form in [
+            "/v1/threads/th_1/subscribe?ticket=sst_x",
+            "/v1/threads/th_1/subscribe?",
+        ] {
+            let line = access_log("req_3", "GET", query_form, 401, 1);
+            let value: Value = serde_json::from_str(&line).expect("access log is JSON");
+            assert_eq!(value["path"], "/v1/threads/th_1/subscribe");
+            assert!(!line.contains("sst_"), "{line}");
+        }
+    }
+
+    #[test]
+    fn ticket_is_stripped_from_mixed_queries_before_forwarding() {
+        let path = "/v1/threads/th_1/subscribe";
+        let stripped = |query: &str| path_and_query_without_ticket(path, Some(query));
+        // Ticket in the middle, first, last and alone; repeated keys are all removed.
+        assert_eq!(
+            stripped("after=3&ticket=sst_a&x=1").as_deref(),
+            Some("/v1/threads/th_1/subscribe?after=3&x=1")
+        );
+        assert_eq!(
+            stripped("ticket=sst_a&after=3").as_deref(),
+            Some("/v1/threads/th_1/subscribe?after=3")
+        );
+        assert_eq!(
+            stripped("after=3&ticket=sst_a").as_deref(),
+            Some("/v1/threads/th_1/subscribe?after=3")
+        );
+        assert_eq!(stripped("ticket=sst_a").as_deref(), Some(path));
+        assert_eq!(
+            stripped("ticket=sst_a&after=1&ticket=sst_b").as_deref(),
+            Some("/v1/threads/th_1/subscribe?after=1")
+        );
+        // An empty ticket is still a ticket pair (and is refused later).
+        assert_eq!(
+            stripped("ticket=&after=3").as_deref(),
+            Some("/v1/threads/th_1/subscribe?after=3")
+        );
+        // Keys that merely end in `ticket` are not the ticket and stay.
+        assert_eq!(
+            stripped("myticket=1&ticket=sst_a&after=3").as_deref(),
+            Some("/v1/threads/th_1/subscribe?myticket=1&after=3")
+        );
+        // A percent-encoded value is still the ticket's value under a literal `ticket=` key.
+        assert_eq!(
+            stripped("after=1&ticket=sst%5Fabc").as_deref(),
+            Some("/v1/threads/th_1/subscribe?after=1")
+        );
+        // No ticket, no rewrite.
+        assert_eq!(path_and_query_without_ticket(path, Some("after=3")), None);
+        assert_eq!(path_and_query_without_ticket(path, None), None);
+        // Known gap, pinned: a percent-encoded key (`%74icket`) is not the ticket to either the
+        // Worker or the consume step, so it is forwarded unchanged. See the report's discovered work.
+        assert_eq!(
+            path_and_query_without_ticket(path, Some("%74icket=sst_a&after=3")),
+            None
+        );
     }
 
     #[test]

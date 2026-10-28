@@ -226,4 +226,40 @@ mod tests {
         assert_eq!(block_on(purge(&db, T0 + 90_000)).expect("purge"), 1);
         assert_eq!(count(&db), 0);
     }
+
+    #[test]
+    fn strip_ticket_keeps_every_other_pair_in_order() {
+        assert_eq!(strip_ticket("after=3&ticket=sst_a&x=1"), "after=3&x=1");
+        assert_eq!(strip_ticket("ticket=sst_a&after=3"), "after=3");
+        assert_eq!(strip_ticket("after=3&ticket=sst_a"), "after=3");
+        assert_eq!(strip_ticket("ticket=sst_a"), "");
+        assert_eq!(strip_ticket("ticket=sst_a&after=1&ticket=sst_b"), "after=1");
+        assert_eq!(strip_ticket("ticket=&after=3"), "after=3");
+        assert_eq!(
+            strip_ticket("myticket=1&ticket=sst_a&xticket=2"),
+            "myticket=1&xticket=2"
+        );
+        assert_eq!(strip_ticket("after=1&ticket=sst%5Fabc"), "after=1");
+        assert_eq!(strip_ticket("after=3"), "after=3");
+        assert_eq!(strip_ticket(""), "");
+        // A percent-encoded key is not `ticket=`, so it is kept (see router.rs's pinned gap).
+        assert_eq!(
+            strip_ticket("%74icket=sst_a&after=3"),
+            "%74icket=sst_a&after=3"
+        );
+    }
+
+    #[test]
+    fn ticket_in_query_reads_the_first_literal_ticket_pair() {
+        assert_eq!(
+            ticket_in_query(Some("ticket=sst_a&ticket=sst_b")),
+            Some("sst_a")
+        );
+        assert_eq!(
+            ticket_in_query(Some("myticket=1&ticket=sst_a")),
+            Some("sst_a")
+        );
+        assert_eq!(ticket_in_query(Some("after=3")), None);
+        assert_eq!(ticket_in_query(None), None);
+    }
 }

@@ -114,7 +114,11 @@ async fn not_found(method: Method, uri: Uri) -> Response {
 async fn observe(req: Request, next: Next) -> Response {
     let started = worker::Date::now().as_millis();
     let method = req.method().to_string();
-    let path = req.uri().path().to_owned();
+    // The whole path-and-query goes to `router::access_log`, which logs the path only.
+    let path_and_query = req.uri().path_and_query().map_or_else(
+        || req.uri().path().to_owned(),
+        |value| value.as_str().to_owned(),
+    );
     let incoming = req
         .headers()
         .get(REQUEST_ID_HEADER)
@@ -130,7 +134,7 @@ async fn observe(req: Request, next: Next) -> Response {
     let elapsed = worker::Date::now().as_millis().saturating_sub(started);
     worker::console_log!(
         "{}",
-        router::access_log(&id, &method, &path, status, elapsed)
+        router::access_log(&id, &method, &path_and_query, status, elapsed)
     );
     response
 }
