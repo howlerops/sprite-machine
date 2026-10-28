@@ -9,6 +9,9 @@
 //!   the principal from the live session, so a revoked session, device or demoted member loses
 //!   the ticket too. Every failure is the same `401`.
 //!
+//! - [`purge`] (the hourly cron, M2-008j): deletes tickets past their expiry and spent tickets
+//!   older than [`USED_GRACE_MS`].
+//!
 //! The ticket is never logged, audited or put in an error. The clock is passed in.
 
 use serde_json::{Value, json};
@@ -22,6 +25,8 @@ use crate::threads::ApiError;
 pub const TICKET_TTL_MS: i64 = 60 * 1000;
 /// Every ticket starts with this.
 pub const TICKET_PREFIX: &str = "sst_";
+/// A spent ticket is kept this long after it was used, then purged (M2-008j).
+pub const USED_GRACE_MS: i64 = TICKET_TTL_MS;
 
 fn db_failure(error: DbError) -> ApiError {
     ApiError::internal(format!("subscribe ticket: {error}"))
@@ -96,6 +101,18 @@ pub async fn mint(
     Ok(json!({ "ticket": ticket, "expires_at": expires_at }))
 }
 
+/// Deletes the tickets past their expiry (never usable again) and the spent ones used more than
+/// [`USED_GRACE_MS`] ago. Returns how many were deleted.
+pub async fn purge(db: &impl Db, now_ms: i64) -> Result<u64, ApiError> {
+    db.execute(
+        "DELETE FROM subscribe_tickets WHERE expires_at_ms <= ? \
+         OR (used_at_ms IS NOT NULL AND used_at_ms < ?)",
+        &[now_ms.into(), (now_ms - USED_GRACE_MS).into()],
+    )
+    .await
+    .map_err(db_failure)
+}
+
 /// Trades a ticket for the principal it was minted for, consuming it. `401` (always the same
 /// answer) unless the ticket is well formed, unused, unexpired, minted for `thread_id`, its
 /// session is still live, the member still has the viewer role, and the thread still belongs to
@@ -164,4 +181,49 @@ pub async fn consume(
         return Err(refused());
     }
     Ok(principal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::github_tests::{Fake, block_on, seed_org};
+
+    const T0: i64 = 1_700_000_000_000;
+
+    fn mint_at(db: &Fake, principal: &Principal, now: i64) {
+        block_on(mint(db, principal, "t1", now)).expect("mint");
+    }
+
+    fn count(db: &Fake) -> usize {
+        db.rows("SELECT id FROM subscribe_tickets").len()
+    }
+
+    #[test]
+    fn the_hourly_purge_drops_expired_tickets_and_spent_ones_past_the_grace() {
+        let db = Fake::new();
+        let owner = seed_org(&db, "org_t", "usr_t");
+        // A: unused, expires at T0 + 60s. B: used at T0 + 1s, expires at T0 + 60s.
+        // C: unused, expires at T0 + 90s.
+        mint_at(&db, &owner, T0);
+        mint_at(&db, &owner, T0);
+        db.exec(&format!(
+            "UPDATE subscribe_tickets SET used_at_ms = {} WHERE rowid = 2",
+            T0 + 1_000
+        ));
+        mint_at(&db, &owner, T0 + 30_000);
+        assert_eq!(count(&db), 3);
+
+        // Nothing is past expiry, and B's grace has not run out.
+        assert_eq!(block_on(purge(&db, T0 + 30_000)).expect("purge"), 0);
+        assert_eq!(count(&db), 3);
+
+        // A has expired (at T0 + 60s); B was used at T0 + 1s, so its grace ends before T0 + 62s.
+        assert_eq!(block_on(purge(&db, T0 + 62_000)).expect("purge"), 2);
+        assert_eq!(count(&db), 1);
+        assert_eq!(block_on(purge(&db, T0 + 62_000)).expect("again"), 0);
+
+        // C expires at T0 + 90s.
+        assert_eq!(block_on(purge(&db, T0 + 90_000)).expect("purge"), 1);
+        assert_eq!(count(&db), 0);
+    }
 }

@@ -82,7 +82,22 @@ async fn queue(
 async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     crate::devices::routes::purge_scheduled(&env).await;
     crate::auth::github_routes::purge_scheduled(&env).await;
+    purge_subscribe_tickets(&env).await;
     crate::tasks::reconcile::run(&env).await;
+}
+
+/// The cron trigger's ticket purge (M2-008j): expired subscribe tickets and spent ones past their
+/// grace (`auth/ticket.rs`).
+async fn purge_subscribe_tickets(env: &Env) {
+    let Ok(database) = env.d1("DB") else {
+        worker::console_log!("subscribe ticket purge failed: no D1 binding DB");
+        return;
+    };
+    let now_ms = i64::try_from(worker::Date::now().as_millis()).unwrap_or(i64::MAX);
+    match crate::auth::ticket::purge(&crate::db::d1::D1::new(&database), now_ms).await {
+        Ok(deleted) => worker::console_log!("subscribe ticket purge: {deleted} tickets"),
+        Err(error) => worker::console_log!("subscribe ticket purge failed: {}", error.message),
+    }
 }
 
 async fn healthz() -> Json<serde_json::Value> {
