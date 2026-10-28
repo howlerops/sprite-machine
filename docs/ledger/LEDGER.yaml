@@ -2101,6 +2101,9 @@ items:
     title: 'runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: low
@@ -2120,7 +2123,8 @@ items:
     title: 'Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key'
     milestone: M1a
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged e747f34 (leader resolved runner Cargo.toml dev-dep union with M2B-004b); runner+sidecar 192 passed 0 failed on merged tree incl. bridge_durable_commands 3 and tunnel_client 39 (end-to-end crash test with one shared Store, mutation-checked by worker), clippy clean, tracer PASS"
     attempt: 1
     assignee: "worker:sonnet"
     lane: rust
@@ -2169,6 +2173,9 @@ items:
     title: 'Production runner uses Bridge::spawn_with (agent respawn); stored interrupt of an unknown thread answers unknown_interrupt (409); acp-mock records requests and can advertise modes/config'
     milestone: M1a
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: M
     risk: medium
@@ -2188,6 +2195,7 @@ items:
       - "Per SPEC-004 (turn-event.md §4.9): interrupts open when the harness exits, and interrupts stored by a previous process at startup, end with InterruptResolved{cancelled} + RunError{error, code:\"harness_exited\"} (not expired) (test)"
       - "An approval for an interrupt stored by a previous process for a thread this process has not loaded answers unknown_interrupt (hub maps to 409) (test)"
       - "acp-mock can record received requests (opt-in) and advertise modes/config_options in session/new; bridge_robust drops its hand-played agent where acp-mock now suffices"
+      - "The bridge's in-memory applied-keys set is pruned once Store::seen_key reports a key committed (bounded; test)"
     verify:
       - 'cargo test -p sidecar --test bridge_robust'
       - 'cargo test -p acp-mock'
@@ -2661,7 +2669,8 @@ items:
     title: 'runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":")'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged eba1bf6 + leader fix 5a89c03 (validate ids in list/restore/diff; test mutation-checked); shadow_git 11 passed, clippy clean; worker mutation-checked CAS ([1,1,1,1] without old value)"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust

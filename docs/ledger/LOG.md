@@ -129,3 +129,6 @@
 2026-10-28T07:37Z SPEC-004 done 948fc84 (leader): harness exit → cancelled + harness_exited; MCP servers from runner config until loadouts. M1A-006e acceptance updated to follow it
 2026-10-28T07:41Z M2B-004b assigned→done merged adcf82c (haiku; one read-only read_documentation call, harmless). Private-CA roots + TLS trust in TunnelConfig noted for the runner config item, not added separately
 2026-10-28T07:41Z M2B-011a assigned (haiku)
+2026-10-28T07:47Z M2B-011a assigned→done merged eba1bf6 (haiku; one denied stray create_session call); leader fix 5a89c03 for its discovered item (ids validated in every entry point)
+2026-10-28T07:50Z M1A-006d assigned→done merged e747f34 (sonnet). End-to-end crash window closed
+2026-10-28T07:50Z M1A-006e acceptance += prune applied-keys set; assigned (haiku). M2B-004c assigned (haiku)
