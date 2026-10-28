@@ -83,6 +83,13 @@ async fn run_rc(args: &[String]) -> Result<()> {
         continue_last: rc.continue_last,
         idle_timeout: rc.idle_timeout,
         timing: Timing::default(),
+        // The terminal gets the QR code and the URL; nothing else ever sees the link code.
+        signin: Some(std::sync::Arc::new(|block: &str| {
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(block.as_bytes());
+            let _ = out.flush();
+        })),
     };
     server::run(options, async {
         let _ = tokio::signal::ctrl_c().await;

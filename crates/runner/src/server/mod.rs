@@ -2,6 +2,8 @@
 //! advertises the harnesses it found, and runs the agent sessions that phones and desktops
 //! dispatch to it.
 //!
+//! - With a sign-in sink, the machine asks the hub for a phone sign-in link and prints it as a QR
+//!   code and a URL, at start and on `SIGUSR1` ([`signin`]).
 //! - One tunnel ([`crate::tunnel`]) for the machine; its sleep watcher runs beside it.
 //! - One session per thread: its own [`sidecar::bridge::Bridge`] over its own harness process
 //!   (`Bridge::spawn_with`, so a crashed agent is started again and resumed on the next prompt)
@@ -30,6 +32,7 @@ mod names;
 mod project;
 mod router;
 mod session;
+mod signin;
 mod worktree;
 
 use std::ffi::OsString;
@@ -48,6 +51,7 @@ use crate::tunnel::{Timing, TunnelConfig, tunnel};
 
 pub use self::names::{host_prefix, session_name};
 pub use self::project::{LastSession, Projects};
+pub use self::signin::Sink;
 pub use self::worktree::Worktree;
 
 /// Default `--capacity`.
@@ -139,6 +143,9 @@ pub struct Options {
     /// `--idle-timeout`: a session without a task for this long ends.
     pub idle_timeout: Duration,
     pub timing: Timing,
+    /// Where the phone sign-in link (QR and URL) is printed: at start and on `SIGUSR1`. `None`:
+    /// no link is requested from the hub (see [`signin`]).
+    pub signin: Option<Sink>,
 }
 
 /// The flags of `sm rc`.
@@ -278,11 +285,11 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
         timing: options.timing,
     };
     let tunnel_store = Arc::new(Store::open(&options.state_dir).context("open the sidecar store")?);
-    let (client, sink, commands) = tunnel(
-        config,
-        tunnel_store,
-        KeychainCredentials::new(options.credentials),
-    );
+    let credentials = KeychainCredentials::new(options.credentials);
+    let signin_task = options
+        .signin
+        .map(|sink| signin::spawn(sink, login.clone(), credentials.clone()));
+    let (client, sink, commands) = tunnel(config, tunnel_store, credentials);
     // The hook starts before the tunnel runs, so a sleep that comes early is still hinted.
     let sleep_hook = sleep::spawn(client.sleep_hint());
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -310,6 +317,9 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
     .run(options.continue_last, shutdown, client_task, stop_tx)
     .await;
     sleep_hook.abort();
+    if let Some(task) = signin_task {
+        task.abort();
+    }
     result
 }
 

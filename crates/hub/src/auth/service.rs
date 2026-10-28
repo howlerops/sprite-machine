@@ -11,7 +11,7 @@ use super::policy::{Policy, thread_policy};
 use super::token::{self, new_id, new_token, secrets_match};
 use super::{Principal, authenticate, bearer_token, store};
 use crate::audit::{self, Event};
-use crate::db::{Db, DbError, Role, queries};
+use crate::db::{Db, DbError, Role, opt_text, queries, text};
 use crate::threads::ApiError;
 
 /// Default and maximum session lifetime for [`issue_session`], in seconds.
@@ -19,6 +19,8 @@ pub const DEFAULT_TTL_SECONDS: i64 = 24 * 60 * 60;
 pub const MAX_TTL_SECONDS: i64 = 90 * 24 * 60 * 60;
 /// Lifetime of the session the bootstrap returns.
 const BOOTSTRAP_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+/// Lifetime of a browser sign-in session (link redeem or browser device code).
+pub const BROWSER_SESSION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
 const MAX_NAME_CHARS: usize = 128;
 
 fn db_failure(error: DbError) -> ApiError {
@@ -324,6 +326,109 @@ pub async fn issue_session(
         return Err(error);
     }
     Ok(issued.to_json(&caller.org_id, role, &display_name, None))
+}
+
+/// A session issued to an existing member of an org (browser sign-in, M2-003c).
+pub struct MemberSession {
+    pub user_id: String,
+    pub device_id: String,
+    pub session_id: String,
+    pub role: Role,
+    pub expires_at: String,
+    /// The `smt_` token: shown to the caller once, never stored or logged.
+    token: String,
+    user: Value,
+    org: Value,
+}
+
+impl MemberSession {
+    /// `{token, expires_at, user, org, role}`: the sign-in response bodies (client-api §5.7).
+    pub fn to_json(&self) -> Value {
+        json!({
+            "token": self.token,
+            "expires_at": self.expires_at,
+            "user": self.user,
+            "org": self.org,
+            "role": self.role.as_str(),
+        })
+    }
+}
+
+/// Issues a session for `user_id` in `org_id` on a new device named `device_name`, with the
+/// user's role capped at `cap`. `None` when the user is not a member of the org.
+pub async fn issue_member_session(
+    db: &impl Db,
+    user_id: &str,
+    org_id: &str,
+    cap: Role,
+    device_name: &str,
+    ttl_seconds: i64,
+) -> Result<Option<MemberSession>, ApiError> {
+    let rows = db
+        .query(
+            "SELECT m.role AS role, u.display_name AS display_name, u.email AS email, \
+             o.name AS org_name FROM members m JOIN users u ON u.id = m.user_id \
+             JOIN orgs o ON o.id = m.org_id WHERE m.org_id = ? AND m.user_id = ?",
+            &[org_id.into(), user_id.into()],
+        )
+        .await
+        .map_err(db_failure)?;
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
+    let member_role = text(row, "role")
+        .map_err(db_failure)?
+        .parse::<Role>()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let user = json!({
+        "id": user_id,
+        "display_name": text(row, "display_name").map_err(db_failure)?,
+        "email": opt_text(row, "email").map_err(db_failure)?,
+    });
+    let org = json!({ "id": org_id, "name": text(row, "org_name").map_err(db_failure)? });
+
+    let device_id = new_id("dev")?;
+    let session_id = new_id("ses")?;
+    let session_token = new_token()?;
+    store::insert_device(db, &device_id, org_id, user_id, device_name)
+        .await
+        .map_err(db_failure)?;
+    let inserted = async {
+        let expires_at = store::insert_session(
+            db,
+            &session_id,
+            &token::hash_token(&session_token),
+            user_id,
+            &device_id,
+            org_id,
+            ttl_seconds,
+        )
+        .await?;
+        store::set_role_cap(db, &session_id, cap).await?;
+        Ok::<_, DbError>(expires_at)
+    }
+    .await;
+    match inserted {
+        Ok(expires_at) => Ok(Some(MemberSession {
+            user_id: user_id.to_owned(),
+            device_id,
+            session_id,
+            role: member_role.min(cap),
+            expires_at,
+            token: session_token,
+            user,
+            org,
+        })),
+        Err(error) => {
+            let _ = store::delete_device(db, &device_id).await;
+            Err(db_failure(error))
+        }
+    }
+}
+
+/// Undo of [`issue_member_session`] (its device and, by cascade, its session), best effort.
+pub async fn discard_member_session(db: &impl Db, session: &MemberSession) {
+    let _ = store::delete_device(db, &session.device_id).await;
 }
 
 /// `DELETE /v1/auth/sessions/current`: the caller revokes the session they are using.

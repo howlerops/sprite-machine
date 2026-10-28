@@ -5,6 +5,8 @@
 //! - [`limits`]: rate limits on start and on failed user-code attempts, and the purge;
 //! - [`service`]: the endpoints' logic over the `Db` trait and `MachineControl`, so it runs
 //!   natively in the unit tests: start, approve, deny, poll, list, revoke, policy;
+//! - [`signin`] and [`browser`] (M2-003c): browser sign-in, a link a paired machine mints and the
+//!   browser device-code flow (client-api.md §5.7);
 //! - [`trust`]: how the `require_trusted_devices` org setting applies to a machine;
 //! - `routes` (wasm32 only): the axum glue.
 //!
@@ -12,9 +14,11 @@
 //! `POST /v1/machines` creates one, with `origin = 'device'`. Revoking goes through the same
 //! `machines::admin::revoke_machine`, which closes the live tunnel with `auth_revoked`.
 
+pub mod browser;
 pub mod codes;
 pub mod limits;
 pub mod service;
+pub mod signin;
 pub mod trust;
 
 #[cfg(test)]

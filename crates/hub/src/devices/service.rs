@@ -131,7 +131,7 @@ pub async fn start(
     }))
 }
 
-fn user_code_of(body: &Value) -> Result<String, ApiError> {
+pub(super) fn user_code_of(body: &Value) -> Result<String, ApiError> {
     body.get("user_code")
         .and_then(Value::as_str)
         .and_then(normalize_user_code)

@@ -8,6 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -357,6 +358,7 @@ impl Rig {
                 stable_after: Duration::from_secs(3600),
                 welcome_timeout: Duration::from_secs(5),
             },
+            signin: None,
         }
     }
 
@@ -987,4 +989,312 @@ fn rc_flags_parse_with_defaults() {
     ] {
         assert!(RcArgs::parse(&args(&bad)).is_err(), "{bad:?}");
     }
+}
+
+// ---- the phone sign-in link (M2-003c) ----------------------------------------------------------
+
+/// What the fake hub saw on `POST /v1/devices/signin-links`.
+#[derive(Default)]
+struct LinkLog {
+    /// `Authorization` header of each request.
+    authorizations: Vec<String>,
+    paths: Vec<String>,
+}
+
+/// A hub that serves the tunnel (WebSocket) and `POST /v1/devices/signin-links` on one port, as
+/// the real one does. Link `n` is `sli_<n as 64 hex digits>`; a hub with `device_origin: false`
+/// answers `403 forbidden`, as for a machine the admin API created.
+struct LinkHub {
+    base: String,
+    log: Arc<Mutex<LinkLog>>,
+    task: JoinHandle<()>,
+}
+
+impl LinkHub {
+    async fn start(device_origin: bool) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("ws://{}", listener.local_addr().unwrap());
+        let log = Arc::new(Mutex::new(LinkLog::default()));
+        let seen = Arc::clone(&log);
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let seen = Arc::clone(&seen);
+                tokio::spawn(async move {
+                    let mut head = [0u8; 5];
+                    if stream.peek(&mut head).await.is_err() {
+                        return;
+                    }
+                    if head.starts_with(b"POST ") {
+                        serve_link(stream, &seen, device_origin).await;
+                    } else {
+                        serve_tunnel(stream).await;
+                    }
+                });
+            }
+        });
+        Self { base, log, task }
+    }
+
+    fn requests(&self) -> usize {
+        self.log.lock().unwrap().paths.len()
+    }
+}
+
+impl Drop for LinkHub {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// Accepts the runner's tunnel, answers `hello` with `welcome` and then just reads.
+async fn serve_tunnel(stream: TcpStream) {
+    let Ok(mut ws) = tokio_tungstenite::accept_hdr_async(stream, Echo).await else {
+        return;
+    };
+    while let Some(Ok(message)) = ws.next().await {
+        if let Message::Text(text) = message
+            && serde_json::from_str::<Value>(text.as_str()).is_ok_and(|frame| frame["t"] == "hello")
+        {
+            let welcome = json!({
+                "t": "welcome", "proto": 1, "resumed": false, "resume_token": "tok",
+                "last_up_seq": 0, "heartbeat_ms": 20_000, "max_inflight": 256,
+            });
+            let _ = ws.send(Message::text(welcome.to_string())).await;
+        }
+    }
+}
+
+async fn serve_link(mut stream: TcpStream, seen: &Mutex<LinkLog>, device_origin: bool) {
+    use tokio::io::AsyncReadExt;
+    let mut raw = Vec::new();
+    let mut chunk = [0u8; 1024];
+    while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => return,
+            Ok(n) => raw.extend_from_slice(&chunk[..n]),
+        }
+    }
+    let head = String::from_utf8_lossy(&raw).into_owned();
+    let path = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or_default()
+        .to_owned();
+    let authorization = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("authorization")
+                .then(|| value.trim().to_owned())
+        })
+        .unwrap_or_default();
+    let n = {
+        let mut log = seen.lock().unwrap();
+        log.authorizations.push(authorization);
+        log.paths.push(path);
+        log.paths.len()
+    };
+    let (status, body) = if device_origin {
+        (
+            "201 Created",
+            json!({
+                "url": format!("https://hub.example/pair?code=sli_{n:064x}"),
+                "expires_at": "2030-01-01T00:00:00.000Z",
+            }),
+        )
+    } else {
+        (
+            "403 Forbidden",
+            json!({ "error": "forbidden", "message": "only a machine a member approved" }),
+        )
+    };
+    let body = body.to_string();
+    let response = format!(
+        "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+         connection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.shutdown().await;
+}
+
+/// Everything `tracing` was told, as text, to prove a secret never reached it.
+#[derive(Clone, Default)]
+struct Captured(Arc<Mutex<String>>);
+
+struct Fields<'a>(&'a Mutex<String>);
+
+impl tracing::field::Visit for Fields<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .lock()
+            .unwrap()
+            .push_str(&format!("{}={value:?} ", field.name()));
+    }
+}
+
+impl tracing::Subscriber for Captured {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, attrs: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        attrs.record(&mut Fields(&self.0));
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, values: &tracing::span::Record<'_>) {
+        values.record(&mut Fields(&self.0));
+    }
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        self.0.lock().unwrap().push_str(event.metadata().name());
+        event.record(&mut Fields(&self.0));
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+fn collecting_sink() -> (server::Sink, Arc<Mutex<Vec<String>>>) {
+    let printed = Arc::new(Mutex::new(Vec::new()));
+    let into = Arc::clone(&printed);
+    let sink: server::Sink = Arc::new(move |block: &str| {
+        into.lock().unwrap().push(block.to_owned());
+    });
+    (sink, printed)
+}
+
+async fn until_len(printed: &Mutex<Vec<String>>, len: usize) -> Vec<String> {
+    tokio::time::timeout(WAIT, async {
+        loop {
+            {
+                let blocks = printed.lock().unwrap();
+                if blocks.len() >= len {
+                    return blocks.clone();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the sign-in link was not printed")
+}
+
+fn code_in(block: &str) -> String {
+    let url = block
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("https://hub.example/pair?code="))
+        .expect("the URL line");
+    url.split_once("code=").unwrap().1.to_owned()
+}
+
+fn login_to(rig: &Rig, hub: &LinkHub) {
+    CredentialStore::file_only(rig.root.join("credential.json"))
+        .save(&Login {
+            hub: hub.base.clone(),
+            machine_id: "mch_test".to_owned(),
+            credential: "smm_test_credential".to_owned(),
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn rc_prints_the_sign_in_qr_and_url_at_start_and_on_sigusr1_and_never_logs_the_code() {
+    let captured = Captured::default();
+    let _tracing = tracing::subscriber::set_default(captured.clone());
+    let rig = Rig::new(&[]).await;
+    let hub = LinkHub::start(true).await;
+    login_to(&rig, &hub);
+    let (sink, printed) = collecting_sink();
+    let mut options = rig.options();
+    options.signin = Some(sink);
+    let running = start(options);
+
+    // At start: the QR code and the URL, from a link the machine asked for with its credential.
+    let first = until_len(&printed, 1).await[0].clone();
+    let code = code_in(&first);
+    assert!(code.starts_with("sli_") && code.len() == 4 + 64, "{code}");
+    let qr = runner::login::flow::qr_text(&format!("https://hub.example/pair?code={code}"))
+        .expect("a QR code");
+    assert!(
+        first.contains(&qr),
+        "the block carries the QR code of the URL"
+    );
+    assert!(
+        first.contains(['\u{2580}', '\u{2584}', '\u{2588}']),
+        "unicode blocks"
+    );
+    {
+        let log = hub.log.lock().unwrap();
+        assert_eq!(log.paths, ["/v1/devices/signin-links"]);
+        assert_eq!(log.authorizations, ["Bearer smm_test_credential"]);
+    }
+
+    // SIGUSR1: a fresh link (the first one is single use), printed again.
+    let sent = Process::new("kill")
+        .args(["-USR1", &std::process::id().to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let blocks = until_len(&printed, 2).await;
+    let second = code_in(&blocks[1]);
+    assert_ne!(second, code);
+    let second_qr =
+        runner::login::flow::qr_text(&format!("https://hub.example/pair?code={second}")).unwrap();
+    assert!(blocks[1].contains(&second_qr));
+    running.stop().await;
+
+    // The codes live in the printed blocks only: not in tracing, not in the state directory.
+    let logged = captured.0.lock().unwrap().clone();
+    for secret in [&code, &second, &"smm_test_credential".to_owned()] {
+        assert!(
+            !logged.contains(secret.as_str()),
+            "tracing carried a secret: {logged}"
+        );
+    }
+    let mut dirs = vec![rig.state()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if let Ok(text) = fs::read_to_string(&path) {
+                assert!(
+                    !text.contains(&code) && !text.contains(&second),
+                    "{}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_machine_the_hub_gives_no_link_prints_nothing() {
+    let captured = Captured::default();
+    let _tracing = tracing::subscriber::set_default(captured.clone());
+    let rig = Rig::new(&[]).await;
+    let hub = LinkHub::start(false).await;
+    login_to(&rig, &hub);
+    let (sink, printed) = collecting_sink();
+    let mut options = rig.options();
+    options.signin = Some(sink);
+    let running = start(options);
+    tokio::time::timeout(WAIT, async {
+        while hub.requests() == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the runner asked for a link");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        printed.lock().unwrap().is_empty(),
+        "nothing to print for an admin-created machine"
+    );
+    running.stop().await;
+    assert!(!captured.0.lock().unwrap().contains("smm_test_credential"));
 }

@@ -47,6 +47,7 @@ pub fn router(env: Env) -> Router {
         .merge(crate::threads::routes::thread_routes())
         .merge(crate::machines::routes::machine_routes())
         .merge(crate::devices::routes::device_routes())
+        .merge(crate::devices::routes::signin_routes())
         .merge(crate::attachments::routes::attachment_routes())
         .merge(crate::notify::routes::push_routes())
         .merge(crate::links::routes::link_routes())

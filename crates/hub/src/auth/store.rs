@@ -3,7 +3,7 @@
 //! native fake and D1 agree.
 
 use super::{DEV_DEVICE_ID, DEV_ORG_ID, DEV_USER_ID, Principal};
-use crate::db::{Db, DbError, Param, Role, Row, text};
+use crate::db::{Db, DbError, Param, Role, Row, opt_text, text};
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
@@ -55,7 +55,7 @@ pub async fn find_by_hash(
 ) -> Result<Option<(String, Principal)>, DbError> {
     let sql = format!(
         "SELECT s.id AS session_id, s.token_hash, s.user_id, s.device_id, s.org_id, \
-                u.display_name, m.role \
+                u.display_name, m.role, s.role_cap \
          FROM sessions s \
          JOIN users u ON u.id = s.user_id \
          JOIN members m ON m.org_id = s.org_id AND m.user_id = s.user_id \
@@ -67,13 +67,22 @@ pub async fn find_by_hash(
     let Some(row) = rows.first() else {
         return Ok(None);
     };
+    // A session may be capped below the member's role (a browser sign-in); a demotion still
+    // applies at once because the member's role is read on every request.
+    let mut role = role_of(row)?;
+    if let Some(cap) = opt_text(row, "role_cap")? {
+        let cap = cap
+            .parse::<Role>()
+            .map_err(|error| DbError::Invalid(error.to_string()))?;
+        role = role.min(cap);
+    }
     Ok(Some((
         text(row, "token_hash")?,
         Principal {
             user_id: text(row, "user_id")?,
             device_id: text(row, "device_id")?,
             org_id: text(row, "org_id")?,
-            role: role_of(row)?,
+            role,
             display_name: text(row, "display_name")?,
             session_id: Some(text(row, "session_id")?),
         },
@@ -207,6 +216,16 @@ pub async fn insert_session(
         .ok_or_else(|| DbError::Decode("session vanished after insert".to_owned()))
 }
 
+/// Caps the effective role of a session (see [`find_by_hash`]).
+pub async fn set_role_cap(db: &impl Db, id: &str, cap: Role) -> Result<(), DbError> {
+    db.execute(
+        "UPDATE sessions SET role_cap = ? WHERE id = ?",
+        &[cap.as_str().into(), id.into()],
+    )
+    .await
+    .map(|_| ())
+}
+
 /// Whether the org has a session with this id.
 pub async fn session_in_org(db: &impl Db, id: &str, org_id: &str) -> Result<bool, DbError> {
     Ok(!db
@@ -222,6 +241,13 @@ pub async fn session_in_org(db: &impl Db, id: &str, org_id: &str) -> Result<bool
 pub async fn revoke_session(db: &impl Db, id: &str) -> Result<(), DbError> {
     let sql = format!("UPDATE sessions SET revoked_at = {NOW} WHERE id = ? AND revoked_at IS NULL");
     db.execute(&sql, &[id.into()]).await.map(|_| ())
+}
+
+/// Hard delete of one device (undo of a failed browser sign-in).
+pub async fn delete_device(db: &impl Db, id: &str) -> Result<(), DbError> {
+    db.execute("DELETE FROM devices WHERE id = ?", &[id.into()])
+        .await
+        .map(|_| ())
 }
 
 /// Hard delete of a user and, by cascade, their membership, devices and sessions (undo of a

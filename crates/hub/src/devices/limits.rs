@@ -161,6 +161,18 @@ pub async fn check_start(
     client_ip: Option<&str>,
     now_ms: i64,
 ) -> Result<Option<Limited>, ApiError> {
+    check_start_in(db, "device_pairings", client_ip, now_ms).await
+}
+
+/// [`check_start`] for a pairing table: `device_pairings` (machines) or `browser_pairings`
+/// (browser sign-in, M2-003c). The per-IP window is shared by both; the cap is per table.
+pub async fn check_start_in(
+    db: &impl Db,
+    table: &'static str,
+    client_ip: Option<&str>,
+    now_ms: i64,
+) -> Result<Option<Limited>, ApiError> {
+    debug_assert!(matches!(table, "device_pairings" | "browser_pairings"));
     let scope = client_ip
         .map(str::trim)
         .filter(|ip| !ip.is_empty())
@@ -174,8 +186,10 @@ pub async fn check_start(
     }
     let live = db
         .query(
-            "SELECT COUNT(*) AS n, MIN(expires_at_ms) AS first_free FROM device_pairings \
-             WHERE status = 'pending' AND expires_at_ms > ?",
+            &format!(
+                "SELECT COUNT(*) AS n, MIN(expires_at_ms) AS first_free FROM {table} \
+                 WHERE status = 'pending' AND expires_at_ms > ?"
+            ),
             &[now_ms.into()],
         )
         .await
@@ -207,6 +221,20 @@ pub async fn purge(db: &impl Db, now_ms: i64) -> Result<(u64, u64), ApiError> {
         )
         .await
         .map_err(db_failure)?;
+    // Browser sign-in (M2-003c): its pairings and the spent or expired link codes.
+    let browser = db
+        .execute(
+            "DELETE FROM browser_pairings WHERE expires_at_ms <= ?",
+            &[(now_ms - PAIRING_GRACE_MS).into()],
+        )
+        .await
+        .map_err(db_failure)?;
+    db.execute(
+        "DELETE FROM signin_links WHERE expires_at_ms <= ?",
+        &[(now_ms - PAIRING_GRACE_MS).into()],
+    )
+    .await
+    .map_err(db_failure)?;
     let attempts = db
         .execute(
             "DELETE FROM device_attempts WHERE at_ms <= ?",
@@ -214,5 +242,5 @@ pub async fn purge(db: &impl Db, now_ms: i64) -> Result<(u64, u64), ApiError> {
         )
         .await
         .map_err(db_failure)?;
-    Ok((pairings, attempts))
+    Ok((pairings + browser, attempts))
 }

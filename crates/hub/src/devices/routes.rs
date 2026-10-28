@@ -11,6 +11,16 @@
 //! | `DELETE /v1/devices/{machine_id}`  | session token, admin; audited                     |
 //! | `PUT /v1/devices/policy`           | session token, admin; audited                     |
 //!
+//! Browser sign-in (M2-003c, client-api.md §5.7), registered by [`signin_routes`]:
+//!
+//! | Route                              | Auth                                              |
+//! | ---------------------------------- | ------------------------------------------------- |
+//! | `POST /v1/devices/signin-links`    | `Bearer smm_...` of a device-origin machine       |
+//! | `POST /v1/auth/links/redeem`       | none; the link code is the secret                 |
+//! | `POST /v1/auth/device/code`        | none; rate limited like `/v1/devices/code`        |
+//! | `POST /v1/auth/device/approve`     | session token, member; audited; `429` on guessing |
+//! | `POST /v1/auth/device/token`       | none; the device code is the secret               |
+//!
 //! The device code and the credential travel only in JSON bodies, never in a URL.
 
 use axum::{
@@ -29,6 +39,7 @@ use worker::Env;
 
 use super::limits;
 use super::service::{self, PollError};
+use super::{browser, signin};
 use crate::auth::routes::error_response;
 use crate::auth::service::parse_body;
 use crate::auth::{authenticate, dev_fixtures_enabled};
@@ -288,4 +299,114 @@ async fn revoke_self(State(env): State<AppState>, req: Request) -> Response {
     }
     .await;
     respond(result, StatusCode::OK)
+}
+
+/// The browser sign-in routes; merged into the Worker router by `worker.rs`.
+pub fn signin_routes() -> Router<AppState> {
+    Router::new()
+        .route("/v1/devices/signin-links", post(mint_link))
+        .route("/v1/auth/links/redeem", post(redeem_link))
+        .route("/v1/auth/device/code", post(browser_code))
+        .route("/v1/auth/device/approve", post(browser_approve))
+        .route("/v1/auth/device/token", post(browser_token))
+}
+
+#[worker::send]
+async fn mint_link(State(env): State<AppState>, req: Request) -> Response {
+    let result = async {
+        let headers = req.headers().clone();
+        let database = database(&env)?;
+        signin::mint(
+            &D1::new(&database),
+            authorization(&headers).as_deref(),
+            &base_url(&headers),
+            now_ms(),
+            &request_id_of(&headers),
+        )
+        .await
+    }
+    .await;
+    respond(result, StatusCode::CREATED)
+}
+
+#[worker::send]
+async fn redeem_link(State(env): State<AppState>, req: Request) -> Response {
+    let result = async {
+        let (headers, body) = read_body(req).await?;
+        let database = database(&env)?;
+        signin::redeem(
+            &D1::new(&database),
+            &body,
+            now_ms(),
+            &request_id_of(&headers),
+        )
+        .await
+    }
+    .await;
+    respond(result, StatusCode::CREATED)
+}
+
+#[worker::send]
+async fn browser_code(State(env): State<AppState>, req: Request) -> Response {
+    let result = async {
+        let headers = req.headers().clone();
+        let database = database(&env)?;
+        let client_ip = headers
+            .get("cf-connecting-ip")
+            .and_then(|value| value.to_str().ok());
+        browser::start(
+            &D1::new(&database),
+            &base_url(&headers),
+            client_ip,
+            now_ms(),
+        )
+        .await
+    }
+    .await;
+    respond(result, StatusCode::OK)
+}
+
+#[worker::send]
+async fn browser_approve(State(env): State<AppState>, req: Request) -> Response {
+    let result = async {
+        let (headers, body) = read_body(req).await?;
+        let database = database(&env)?;
+        let db = D1::new(&database);
+        let caller =
+            authenticate(&db, authorization(&headers).as_deref(), dev_fixtures(&env)).await?;
+        browser::approve(&db, &caller, &body, now_ms(), &request_id_of(&headers)).await
+    }
+    .await;
+    respond(result, StatusCode::OK)
+}
+
+#[worker::send]
+async fn browser_token(State(env): State<AppState>, req: Request) -> Response {
+    let result: Result<Value, PollError> = async {
+        let (headers, body) = read_body(req).await?;
+        let device_code = body
+            .get("device_code")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::invalid_request("device_code is required"))?;
+        let database = database(&env)?;
+        browser::poll(
+            &D1::new(&database),
+            device_code,
+            now_ms(),
+            &request_id_of(&headers),
+        )
+        .await
+    }
+    .await;
+    match result {
+        Ok(body) => (StatusCode::OK, Json(body)).into_response(),
+        Err(error) => {
+            let (status, body) = error.response();
+            (
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                Json(body),
+            )
+                .into_response()
+        }
+    }
 }

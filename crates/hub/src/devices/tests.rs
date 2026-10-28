@@ -21,6 +21,8 @@ use crate::machines::admin::MachineControl;
 use crate::machines::credential::hash;
 use crate::threads::ApiError;
 
+mod signin_tests;
+
 struct Fake {
     conn: RefCell<rusqlite::Connection>,
 }

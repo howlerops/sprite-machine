@@ -28,6 +28,25 @@ pub fn hash_device_code(code: &str) -> String {
     hash_token(code)
 }
 
+pub const LINK_CODE_PREFIX: &str = "sli_";
+
+/// A fresh sign-in link code (256 random bits, `sli_` + 64 hex): a bearer secret that appears
+/// only in the URL the runner prints; the hub stores its SHA-256.
+pub fn new_link_code() -> Result<String, ApiError> {
+    Ok(format!("{LINK_CODE_PREFIX}{}", hex(&random_bytes(32)?)))
+}
+
+/// What is stored for a link code.
+pub fn hash_link_code(code: &str) -> String {
+    hash_token(code)
+}
+
+/// Whether `code` has the shape of a link code (a cheap filter before the lookup).
+pub fn looks_like_link_code(code: &str) -> bool {
+    code.strip_prefix(LINK_CODE_PREFIX)
+        .is_some_and(|rest| rest.len() == 64 && rest.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// A fresh user code (8 characters, no dash), drawn without modulo bias.
 pub fn new_user_code() -> Result<String, ApiError> {
     let n = USER_CODE_ALPHABET.len();
