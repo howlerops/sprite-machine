@@ -15,7 +15,7 @@ item and report back. Only the leader edits the ledger, merges, and marks items 
   subagents. If this session is not Opus, stop and tell the user to restart with
   `--model opus` (or `/model opus`).
 - **Workers**: the `Agent` tool with `isolation: "worktree"` and `run_in_background: true`.
-  - **Model**: `haiku` by default. Use `opus` on attempt 1 when the item is `risk: high` or `size: L`, and on attempt 3 of any item.
+  - **Model** (cost policy set by the user, 2026-10-28): `haiku` by default. Use `sonnet` on attempt 1 when the item is `risk: high` or `size: L`, and on attempt 2+ of any item. Workers never run on `opus`; only the leader does. If a sonnet attempt 3 fails, split the item or block it.
   - One worker per item, one item per worker.
 
 ## Files

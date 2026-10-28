@@ -4,8 +4,9 @@
 version: 1
 plan: docs/PLAN-v2-ade.md
 branch: v2
+models: { default: haiku, high_risk_or_retry: sonnet, never: opus } # user cost policy 2026-10-28
 max_parallel: 2 # Rust workers; the docs and client lanes add their own slots (see lanes)
-lanes: { rust: 2, docs: 1, client: 1 } # per-lane in-flight caps; client (GPUI) is serialized
+lanes: { rust: 2, docs: 1, client: 1, ts: 1 } # per-lane in-flight caps; client (GPUI) is serialized
 budget: # sized for P0–P2; the leader re-raises max_total_attempts at each phase review
   max_total_attempts: 120
   max_worker_minutes: 45
@@ -375,6 +376,10 @@ items:
     title: 'workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest'
     milestone: M0
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
+    lane: ts
     priority: 1
     size: M
     risk: high
@@ -834,6 +839,9 @@ items:
     title: 'protocol::mapping ACP→TurnEvent + golden tests'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
     size: M
     risk: high
     deps: [M0-006, SPEC-001, MVP-000]
@@ -2213,6 +2221,9 @@ items:
     title: 'client-core: TurnEvent subscription client, view models, cache, outbound queue'
     milestone: M3
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     size: M
     deps:
       - "SPEC-001"

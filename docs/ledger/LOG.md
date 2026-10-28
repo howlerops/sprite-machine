@@ -54,3 +54,5 @@
 2026-10-28T01:04Z M1B-004a assigned→done merged 0007480 (opus); CONVENTIONS.md updated with its GPUI API notes; discovered work → M1B-004b..d / M1B-008 (variable-height rows, streaming + frame timing)
 2026-10-28T01:04Z leader: all 12 P0 items done — P0 phase review starts (clean rebuild of the shared target)
 2026-10-28T01:30Z leader: P0 phase review complete (docs/ledger/reviews/P0.md): clean rebuild, 129 tests, tracer, hub smoke, gpui spike, schemas all green; CI run 40612758905 green; no tag (plan §5 tags alpha.1 at P2)
+2026-10-28T02:03Z user: go-ahead to drive the ledger through all phases; worker models = haiku + sonnet only (no opus workers). SKILL.md, worker-brief.md and the ledger header updated; new lane ts:1 (M0-008a)
+2026-10-28T02:03Z P1 batch 1: M1A-006a (sonnet), M3-001 (haiku), M0-008a (sonnet, ts lane) assigned

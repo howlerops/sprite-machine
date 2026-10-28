@@ -2,7 +2,7 @@
 
 Fill this in for each assignment. Pass it as the `Agent` prompt with
 `isolation: "worktree"` and `run_in_background: true`. Use `model: "haiku"` by
-default, and `"opus"` for `risk: high` / `size: L` items or attempt 3.
+default, and `"sonnet"` for `risk: high` / `size: L` items or attempt 2+. Never `"opus"`.
 
 The brief is the worker's **only** context, so paste the item's fields verbatim.
 

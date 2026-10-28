@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 24/192 (3 dropped) · in-flight — · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 19/120
+done 24/192 (3 dropped) · in-flight M0-008a,M1A-006a,M3-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 22/120
 
-P0 complete and reviewed (docs/ledger/reviews/P0.md). Paused at the phase boundary; P1 is ready to start and needs nothing from you.
+P1 (Engine) running. Worker models: haiku + sonnet only.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 30 | 7 | 0 |
+| P1 | 30 | 7 | 3 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -27,12 +27,12 @@ P0 complete and reviewed (docs/ledger/reviews/P0.md). Paused at the phase bounda
 | MVP-000c | worker | rust | todo | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
 | MVP-000b | worker | rust | done | CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2 |
 | SPEC-003 | leader | docs | done | Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage |
-| M0-008a | worker | rust | todo | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
+| M0-008a | worker | ts | assigned | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
 | M0-008b | worker | rust | todo | hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests |
 | M1A-001 | worker | rust | done | sidecar (runner-core lib): config, tracing, /healthz server fn |
 | M1A-003 | worker | rust | done | sidecar (runner core): ACP client + session table (concurrency, pending tasks) |
 | M1A-004 | worker | rust | todo | sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal}) |
-| M1A-006a | worker | rust | todo | protocol::mapping ACP→TurnEvent + golden tests |
+| M1A-006a | worker | rust | assigned | protocol::mapping ACP→TurnEvent + golden tests |
 | M1A-006b | worker | rust | todo | runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink) |
 | M1A-007 | worker | rust | todo | Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms) |
 | M1A-009 | worker | rust | todo | Durable store (SQLite) + ACP session re-attach after restart |
@@ -52,7 +52,7 @@ P0 complete and reviewed (docs/ledger/reviews/P0.md). Paused at the phase bounda
 | M2B-003 | worker | rust | todo | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
 | M2B-004 | worker | rust | todo | runner: tunnel client with reconnect/backoff/resume |
 | M2B-011 | worker | rust | todo | runner: local checkpoints as shadow git commits |
-| M3-001 | worker | rust | todo | client-core: TurnEvent subscription client, view models, cache, outbound queue |
+| M3-001 | worker | rust | assigned | client-core: TurnEvent subscription client, view models, cache, outbound queue |
 
 ## Waiting on the human
 
