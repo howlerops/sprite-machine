@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 105/264 (3 dropped) · in-flight M2B-010,M2B-014,WEB-004,M2B-005f,M2-008k · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 104/200
+done 107/264 (3 dropped) · in-flight M2B-010,WEB-004,M2-008k · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 104/200
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 105/264 (3 dropped) · in-flight M2B-010,M2B-014,WEB-004,M2B-005f,M2-008k �
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 66 | 49 | 5 |
+| P2 | 66 | 51 | 3 |
 | P3 | 23 | 4 | 0 |
 | P4 | 49 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -76,14 +76,14 @@ done 105/264 (3 dropped) · in-flight M2B-010,M2B-014,WEB-004,M2B-005f,M2-008k �
 | M2B-010 | worker | rust | assigned | runner: interactive TUI shared with remote devices (`sm --rc`) |
 | M2B-011a | worker | rust | done | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
 | M2B-012 | worker | rust | done | Attachments from phone → local files / image blocks |
-| M2B-014 | worker | rust | assigned | Presence + reconnect notifications on the phone |
+| M2B-014 | worker | rust | done | Presence + reconnect notifications on the phone |
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
 | WEB-001 | worker | rust | done | web: mobile web page — pairing (QR / device code) + session list with presence |
 | WEB-002 | worker | rust | done | web: transcript rendering for every TurnEvent variant |
 | WEB-003 | worker | rust | done | web: composer with attachments + Allow/Deny + Stop |
 | WEB-004 | worker | rust | assigned | web: PWA + Web Push |
-| M2B-005f | worker | rust | assigned | hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect |
+| M2B-005f | worker | rust | done | hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect |
 | M2B-009a | worker | rust | done | runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode) |
 | M2-008k | worker | rust | assigned | hub: DELETE /v1/threads/{id}/pending/{task_id} is member-level (client-api §5.3/§5.5) instead of admin; the web composer uses it instead of the cancel workaround |
 | M2B-014d | worker | rust | todo | notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine |

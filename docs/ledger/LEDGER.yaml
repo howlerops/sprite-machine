@@ -3544,7 +3544,8 @@ items:
     title: 'Presence + reconnect notifications on the phone'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify19: fmt, clippy workspace + wasm, workspace tests 860/0 --no-fail-fast, live machine_do/devices/presence_notify/smoke PASS, tracer PASS"
     assignee: "haiku"
     attempt: 1
     deps: [M2B-002, M2-011]
@@ -5334,7 +5335,8 @@ items:
     title: 'hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify19: fmt, clippy workspace + wasm, workspace tests 860/0 --no-fail-fast, live machine_do/devices/presence_notify/smoke PASS, tracer PASS"
     assignee: "sonnet"
     attempt: 1
     lane: rust
