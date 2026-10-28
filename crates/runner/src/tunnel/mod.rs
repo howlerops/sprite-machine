@@ -16,6 +16,7 @@
 mod backoff;
 mod client;
 mod io;
+mod tls;
 
 pub use backoff::{Backoff, Jitter, RandomJitter};
 pub use client::{CredentialSource, Exit, StaticCredential, TunnelClient};
