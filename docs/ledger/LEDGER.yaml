@@ -1015,6 +1015,28 @@ items:
       - cargo test -p sidecar --test bridge_robust
       - cargo test -p sidecar --test bridge
       - cargo run -p cli -- e2e tracer
+  - id: SPEC-002b
+    title: 'Spec: tunnel session_config command + client-api POST /v1/threads/{id}/session'
+    milestone: M0
+    phase: P1
+    status: "done"
+    evidence: "merged 98ee8f9"
+    assignee: "leader"
+    attempt: 1
+    lane: docs
+    priority: 1
+    owner: leader
+    deps: [SPEC-002]
+    paths:
+      - docs/specs/tunnel.md
+      - docs/specs/client-api.md
+    context:
+      - 'M1A-013 acceptance (set-mode/config from the tunnel) had no command kind'
+    acceptance:
+      - 'tunnel.md §3.5 defines `session_config {thread_id, mode_id?, config?{id,value}}` with an example; client-api.md §5.5a defines the route'
+    verify:
+      - grep -q session_config docs/specs/tunnel.md
+
   - id: SPEC-002a
     title: 'Spec: tunnel approval command carries every interrupt outcome (selected, submitted+data, declined, cancelled)'
     milestone: M0
@@ -1140,15 +1162,27 @@ items:
     title: 'Session config: commands, modes, config options, pending tasks (StateDelta{session})'
     milestone: M1a
     phase: P1
-    deps: [M1A-006b]
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
+    deps:
+      - "M1A-006b"
+      - "SPEC-002b"
     paths:
-      - 'crates/sidecar/src/bridge/session_config*'
-      - 'crates/sidecar/tests/session_config.rs'
+      - "crates/sidecar/src/bridge/session_config*"
+      - "crates/sidecar/src/bridge/runtime.rs"
+      - "crates/sidecar/src/bridge/handler.rs"
+      - "crates/sidecar/src/acp/client.rs"
+      - "crates/sidecar/tests/session_config.rs"
+      - "crates/protocol/src/tunnel/command.rs"
+      - "crates/protocol/tests/tunnel_frames.rs"
     context:
       - 'docs/PLAN-v2-ade.md §1.1 (StateDelta{session} row), §1.2 (pending tasks)'
       - 'https://agentclientprotocol.com/protocol/session-modes'
     acceptance:
-      - 'available_commands_update / current_mode_update / config options → StateDelta{session}; a set-mode/config command from the tunnel calls ACP set_mode/config; pending tasks listed and removable'
+      - "available_commands_update / current_mode_update / config_option_update → StateDelta{session} (after a StateSnapshot{session} at session start); verified with acp-mock scripts"
+      - "The tunnel session_config command (docs/specs/tunnel.md §3.5, SPEC-002b) is a protocol::tunnel::Command variant and calls ACP session/set_mode and session/set_config_option; unknown mode/option → command_result invalid; the resulting StateDelta{session} reaches the EventSink"
+      - "Pending tasks are hub-owned (M2-008): nothing to do in the runner — documented in the report"
     verify:
       - 'cargo test -p sidecar --test session_config'
 
