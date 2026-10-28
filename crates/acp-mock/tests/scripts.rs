@@ -788,3 +788,146 @@ async fn read_result(lines: &mut Lines<BufReader<tokio::process::ChildStdout>>, 
         }
     }
 }
+
+// ---- session/set_mode and session/set_config_option -------------------------------------
+
+const INVALID_PARAMS: i64 = -32602;
+
+fn session_modes() -> Value {
+    json!({
+        "currentModeId": "code",
+        "availableModes": [
+            { "id": "code", "name": "Code" },
+            { "id": "plan", "name": "Plan" }
+        ]
+    })
+}
+
+fn session_options() -> Value {
+    json!([
+        {
+            "id": "model", "name": "Model", "type": "select", "currentValue": "sonnet",
+            "options": [
+                { "value": "sonnet", "name": "Sonnet" },
+                { "value": "opus", "name": "Opus" }
+            ]
+        },
+        { "id": "auto_fix", "name": "Auto fix", "type": "boolean", "currentValue": false }
+    ])
+}
+
+#[tokio::test]
+async fn set_mode_is_answered_and_reports_a_current_mode_update() {
+    let mut client = connect(json!({ "modes": session_modes(), "turns": [] }));
+    let session = client.new_session().await;
+
+    let exchange = client
+        .call(
+            "session/set_mode",
+            json!({ "sessionId": session, "modeId": "plan" }),
+            &mut default_answer,
+        )
+        .await;
+    assert_eq!(exchange.result(), &json!({}));
+    assert_eq!(exchange.updates.len(), 1, "{:?}", exchange.updates);
+    match &exchange.updates[0].update {
+        SessionUpdate::CurrentModeUpdate(mode) => {
+            assert_eq!(mode.current_mode_id.0.as_ref(), "plan");
+        }
+        other => panic!("expected current_mode_update, got {other:?}"),
+    }
+
+    // An unknown mode is refused and sends no update.
+    let refused = client
+        .call(
+            "session/set_mode",
+            json!({ "sessionId": session, "modeId": "nope" }),
+            &mut default_answer,
+        )
+        .await;
+    assert_eq!(refused.error()["code"], json!(INVALID_PARAMS));
+    assert!(refused.updates.is_empty(), "{:?}", refused.updates);
+}
+
+#[tokio::test]
+async fn set_mode_is_refused_when_the_script_has_no_modes() {
+    let mut client = connect(json!({ "turns": [] }));
+    let session = client.new_session().await;
+
+    let exchange = client
+        .call(
+            "session/set_mode",
+            json!({ "sessionId": session, "modeId": "plan" }),
+            &mut default_answer,
+        )
+        .await;
+    assert_eq!(exchange.error()["code"], json!(INVALID_PARAMS));
+    assert!(exchange.updates.is_empty());
+}
+
+#[tokio::test]
+async fn set_config_option_sets_the_value_and_reports_a_config_option_update() {
+    let mut client = connect(json!({ "config_options": session_options(), "turns": [] }));
+    let session = client.new_session().await;
+
+    let select = client
+        .call(
+            "session/set_config_option",
+            json!({ "sessionId": session, "configId": "model", "value": "opus" }),
+            &mut default_answer,
+        )
+        .await;
+    assert_eq!(select.result()["configOptions"][0]["currentValue"], "opus");
+    assert_eq!(select.result()["configOptions"][1]["currentValue"], false);
+    assert_eq!(select.updates.len(), 1, "{:?}", select.updates);
+    match &select.updates[0].update {
+        SessionUpdate::ConfigOptionUpdate(update) => {
+            let wire = serde_json::to_value(update).expect("json");
+            assert_eq!(wire["configOptions"][0]["currentValue"], "opus");
+        }
+        other => panic!("expected config_option_update, got {other:?}"),
+    }
+
+    let flag = client
+        .call(
+            "session/set_config_option",
+            json!({ "sessionId": session, "configId": "auto_fix", "type": "boolean", "value": true }),
+            &mut default_answer,
+        )
+        .await;
+    assert_eq!(flag.result()["configOptions"][1]["currentValue"], true);
+    // The session keeps the earlier change.
+    assert_eq!(flag.result()["configOptions"][0]["currentValue"], "opus");
+    assert!(matches!(
+        flag.updates[0].update,
+        SessionUpdate::ConfigOptionUpdate(_)
+    ));
+}
+
+#[tokio::test]
+async fn set_config_option_refuses_unknown_options_and_ill_fitting_values() {
+    let mut client = connect(json!({ "config_options": session_options(), "turns": [] }));
+    let session = client.new_session().await;
+
+    let refused = [
+        json!({ "sessionId": session, "configId": "nope", "value": "opus" }),
+        json!({ "sessionId": session, "configId": "model", "value": "gpt" }),
+        json!({ "sessionId": session, "configId": "auto_fix", "type": "boolean", "value": "yes" }),
+    ];
+    for params in refused {
+        let exchange = client
+            .call(
+                "session/set_config_option",
+                params.clone(),
+                &mut default_answer,
+            )
+            .await;
+        assert_eq!(
+            exchange.error()["code"],
+            json!(INVALID_PARAMS),
+            "{params} was accepted: {}",
+            exchange.response
+        );
+        assert!(exchange.updates.is_empty(), "{params} sent an update");
+    }
+}

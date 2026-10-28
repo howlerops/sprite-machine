@@ -13,8 +13,8 @@ use protocol::acp::{
     PermissionOption, PromptRequest, PromptResponse, ReleaseTerminalRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SessionUpdate,
-    StopReason, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -152,12 +152,30 @@ struct SessionState {
     prompts: usize,
     /// `true` after `session/cancel`; reset when the next prompt starts.
     cancel: watch::Sender<bool>,
+    /// The current mode id: the script's at start, then what `session/set_mode` chose.
+    current_mode: Option<String>,
+    /// The config options as ACP serializes them, with the current values that
+    /// `session/set_config_option` has set.
+    config_options: Vec<Value>,
 }
 
 impl SessionState {
-    fn new() -> Self {
+    /// A session that starts with the script's modes and config options.
+    fn new(script: &Script) -> Self {
         let (cancel, _) = watch::channel(false);
-        Self { prompts: 0, cancel }
+        Self {
+            prompts: 0,
+            cancel,
+            current_mode: script
+                .modes()
+                .map(|modes| modes.current_mode_id.0.to_string()),
+            config_options: script
+                .config_options()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|option| serde_json::to_value(option).ok())
+                .collect(),
+        }
     }
 }
 
@@ -242,7 +260,7 @@ where
                 self.sessions
                     .lock()
                     .await
-                    .insert(id.clone(), SessionState::new());
+                    .insert(id.clone(), SessionState::new(&self.script));
                 let mut response = NewSessionResponse::new(id);
                 response.modes = self.script.modes().cloned();
                 response.config_options = self.script.config_options().map(<[_]>::to_vec);
@@ -264,6 +282,68 @@ where
                 response.config_options = self.script.config_options().map(<[_]>::to_vec);
                 to_value(response)
             }
+            "session/set_mode" => {
+                let request: SetSessionModeRequest = parse(params)?;
+                let mode = request.mode_id.0.to_string();
+                let known = self.script.modes().is_some_and(|modes| {
+                    modes
+                        .available_modes
+                        .iter()
+                        .any(|available| *available.id.0 == *mode)
+                });
+                if !known {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        format!("unknown mode {mode}"),
+                    ));
+                }
+                {
+                    let mut sessions = self.sessions.lock().await;
+                    let session = sessions
+                        .get_mut(&session_key(&request.session_id))
+                        .ok_or_else(|| unknown_session(&request.session_id))?;
+                    session.current_mode = Some(mode.clone());
+                }
+                let changed = typed_update("current_mode_update", json!({ "currentModeId": mode }))
+                    .map_err(internal)?;
+                self.notify_update(&request.session_id, changed)
+                    .await
+                    .map_err(internal)?;
+                Ok(json!({}))
+            }
+            "session/set_config_option" => {
+                let request: SetSessionConfigOptionRequest = parse(params)?;
+                // The request as the wire has it: `configId`, and `value` (with `type` for a
+                // boolean).
+                let wire = to_value(&request)?;
+                let config_id = wire["configId"].as_str().unwrap_or_default().to_owned();
+                let options = {
+                    let mut sessions = self.sessions.lock().await;
+                    let session = sessions
+                        .get_mut(&session_key(&request.session_id))
+                        .ok_or_else(|| unknown_session(&request.session_id))?;
+                    let index = session
+                        .config_options
+                        .iter()
+                        .position(|option| option["id"] == config_id.as_str())
+                        .ok_or_else(|| {
+                            RpcError::new(
+                                INVALID_PARAMS,
+                                format!("unknown config option {config_id}"),
+                            )
+                        })?;
+                    let value = config_value(&session.config_options[index], &wire)?;
+                    session.config_options[index]["currentValue"] = value;
+                    session.config_options.clone()
+                };
+                let changed =
+                    typed_update("config_option_update", json!({ "configOptions": options }))
+                        .map_err(internal)?;
+                self.notify_update(&request.session_id, changed)
+                    .await
+                    .map_err(internal)?;
+                Ok(json!({ "configOptions": options }))
+            }
             _ => Err(RpcError::new(
                 METHOD_NOT_FOUND,
                 format!("method not found: {method}"),
@@ -278,7 +358,7 @@ where
             .lock()
             .await
             .entry(session_key(session))
-            .or_insert_with(SessionState::new);
+            .or_insert_with(|| SessionState::new(&self.script));
     }
 
     async fn notification(&self, method: &str, params: Value) {
@@ -545,6 +625,55 @@ fn with_session(payload: &Value, session: &SessionId) -> Value {
 
 fn session_key(session: &SessionId) -> String {
     session.0.to_string()
+}
+
+fn unknown_session(session: &SessionId) -> RpcError {
+    RpcError::new(
+        INVALID_PARAMS,
+        format!("unknown session {}", session_key(session)),
+    )
+}
+
+fn internal(error: impl std::fmt::Display) -> RpcError {
+    RpcError::new(INTERNAL_ERROR, format!("{error:#}"))
+}
+
+/// The option value a `session/set_config_option` request sets, if it fits `option`: a boolean
+/// for a boolean option, a listed value id for a select option.
+fn config_value(option: &Value, request: &Value) -> RpcResult<Value> {
+    let value = &request["value"];
+    let fits = match option["type"].as_str() {
+        Some("boolean") => value.is_boolean(),
+        Some("select") => value
+            .as_str()
+            .is_some_and(|text| select_values(&option["options"]).contains(&text)),
+        _ => false,
+    };
+    if fits {
+        Ok(value.clone())
+    } else {
+        Err(RpcError::new(
+            INVALID_PARAMS,
+            format!("the value does not fit config option {}", option["id"]),
+        ))
+    }
+}
+
+/// Every value id of a select option's `options`, flat or grouped.
+fn select_values(options: &Value) -> Vec<&str> {
+    options
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| match entry.get("options") {
+            Some(group) => select_values(group),
+            None => entry
+                .get("value")
+                .and_then(Value::as_str)
+                .into_iter()
+                .collect(),
+        })
+        .collect()
 }
 
 /// Checks a permission answer against the script's `expect`.

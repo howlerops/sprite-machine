@@ -1,15 +1,16 @@
 //! `session_config` and the session state of the bridge (tunnel.md §3.5, turn-event.md §4.6).
 //!
-//! The agent is a small fake written here, not acp-mock: acp-mock has no `session/set_mode` or
-//! `session/set_config_option`. The fake advertises modes and config options in `session/new`,
-//! sends the updates a test asks for, answers the set calls like an agent would (reporting the
-//! change as an update), and records every call it receives so a test can check what reached
-//! ACP. The harness plays the hub: it appends `UserMessage` to the log it validates.
+//! The agent is acp-mock: its script advertises the modes and config options in `session/new`,
+//! its one turn sends the updates a test asks for, and it answers `session/set_mode` and
+//! `session/set_config_option`, reporting each change as an update. A `Recorder` keeps every
+//! message the bridge sent, so a test can check what reached ACP. The harness plays the hub: it
+//! appends `UserMessage` to the log it validates.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
+use acp_mock::Recorder;
 use protocol::mapping::acp_turn::{SequenceValidator, validate_complete};
 use protocol::tunnel::{Actor, ActorKind, Command, CommandErrorCode, ContentPart};
 use protocol::turn_event::{Envelope, Event, StateScope, ThreadSeq, UserMessage};
@@ -20,14 +21,13 @@ use sidecar::bridge::{
 };
 use sidecar::store::{ManualClock, Store};
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 const STEP: Duration = Duration::from_secs(20);
 const T0: u64 = 1_700_000_000_000;
-const SESSION: &str = "sess_1";
+const SESSION: &str = "sess_mock_1";
 
 fn user() -> Actor {
     Actor {
@@ -64,101 +64,14 @@ fn modes(current: &str) -> Value {
     })
 }
 
-/// A `session/update` notification for `update` on the test session.
-fn update(update: Value) -> Value {
-    json!({ "jsonrpc": "2.0", "method": "session/update",
-        "params": { "sessionId": SESSION, "update": update } })
-}
-
-fn reply(id: Value, result: Value) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "result": result })
-}
-
-async fn write<W: AsyncWrite + Unpin>(writer: &mut W, message: &Value) {
-    let mut bytes = serde_json::to_vec(message).expect("json");
-    bytes.push(b'\n');
-    writer.write_all(&bytes).await.expect("write to the bridge");
-    writer.flush().await.expect("flush to the bridge");
-}
-
-/// Plays the agent until the bridge closes the connection. `prompt_updates` are sent, in order,
-/// before each prompt's answer. `calls` gets every `session/set_*` request as (method, params).
-async fn fake_agent<R, W>(
-    reader: R,
-    mut writer: W,
-    calls: mpsc::UnboundedSender<(String, Value)>,
-    prompt_updates: Vec<Value>,
-) where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let mut current_mode = "code".to_owned();
-    let mut config = options("sonnet", false);
-    let mut lines = BufReader::new(reader).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let message: Value = serde_json::from_str(&line).expect("the bridge sends JSON");
-        let Some(method) = message.get("method").and_then(Value::as_str) else {
-            continue;
-        };
-        let params = message.get("params").cloned().unwrap_or(Value::Null);
-        // Notifications (no id) need no answer; `session/cancel` is the only one sent here.
-        let Some(id) = message.get("id").cloned() else {
-            continue;
-        };
-        match method {
-            "initialize" => {
-                write(
-                    &mut writer,
-                    &reply(id, json!({ "protocolVersion": 1, "agentCapabilities": {} })),
-                )
-                .await;
-            }
-            "session/new" => {
-                let answer = json!({
-                    "sessionId": SESSION,
-                    "modes": modes(&current_mode),
-                    "configOptions": config,
-                });
-                write(&mut writer, &reply(id, answer)).await;
-            }
-            "session/prompt" => {
-                for sent in &prompt_updates {
-                    write(&mut writer, sent).await;
-                }
-                write(&mut writer, &reply(id, json!({ "stopReason": "end_turn" }))).await;
-            }
-            "session/set_mode" => {
-                calls
-                    .send((method.to_owned(), params.clone()))
-                    .expect("the test listens");
-                current_mode = params["modeId"].as_str().expect("modeId").to_owned();
-                let changed = update(json!({
-                    "sessionUpdate": "current_mode_update",
-                    "currentModeId": current_mode,
-                }));
-                write(&mut writer, &changed).await;
-                write(&mut writer, &reply(id, json!({}))).await;
-            }
-            "session/set_config_option" => {
-                calls
-                    .send((method.to_owned(), params.clone()))
-                    .expect("the test listens");
-                let config_id = params["configId"].as_str().expect("configId");
-                for option in config.as_array_mut().expect("options") {
-                    if option["id"] == config_id {
-                        option["currentValue"] = params["value"].clone();
-                    }
-                }
-                let changed = update(json!({
-                    "sessionUpdate": "config_option_update",
-                    "configOptions": config,
-                }));
-                write(&mut writer, &changed).await;
-                write(&mut writer, &reply(id, json!({ "configOptions": config }))).await;
-            }
-            other => panic!("the fake agent got an unexpected `{other}`"),
-        }
-    }
+/// The acp-mock script: the modes and config options of `session/new`, and one turn whose steps
+/// are `steps` (they run during the test's prompt).
+fn script(steps: Vec<Value>) -> Value {
+    json!({
+        "modes": modes("code"),
+        "config_options": options("sonnet", false),
+        "turns": [{ "steps": steps }],
+    })
 }
 
 // ---- harness ----------------------------------------------------------------------------------
@@ -168,19 +81,25 @@ struct Rig {
     events: mpsc::UnboundedReceiver<SinkItem>,
     failures: VecDeque<CommandFailure>,
     pending: VecDeque<Envelope>,
-    calls: mpsc::UnboundedReceiver<(String, Value)>,
+    recorder: Recorder,
     log: Vec<Envelope>,
     bridge: JoinHandle<Result<(), BridgeError>>,
     _dirs: Vec<TempDir>,
 }
 
 impl Rig {
-    /// A bridge with a fake agent that sends `prompt_updates` during every prompt.
-    async fn start(prompt_updates: Vec<Value>) -> Self {
+    /// A bridge over acp-mock. The agent's one turn runs `steps` during the test's prompt.
+    async fn start(steps: Vec<Value>) -> Self {
         let (client_io, agent_io) = tokio::io::duplex(1 << 16);
         let (agent_r, agent_w) = tokio::io::split(agent_io);
-        let (calls_tx, calls) = mpsc::unbounded_channel();
-        tokio::spawn(fake_agent(agent_r, agent_w, calls_tx, prompt_updates));
+        let agent = acp_mock::Script::from_value(&script(steps)).expect("a valid script");
+        let recorder = Recorder::new();
+        let agent_recorder = recorder.clone();
+        tokio::spawn(async move {
+            acp_mock::run_recorded(agent, agent_recorder, agent_r, agent_w)
+                .await
+                .expect("acp-mock runs");
+        });
         let (reader, writer) = tokio::io::split(client_io);
 
         let state = TempDir::new().expect("state dir");
@@ -204,7 +123,7 @@ impl Rig {
             events,
             failures: VecDeque::new(),
             pending: VecDeque::new(),
-            calls,
+            recorder,
             log: Vec::new(),
             bridge: tokio::spawn(bridge.run()),
             _dirs: vec![state, work],
@@ -289,13 +208,18 @@ impl Rig {
         self.feed.send(command)
     }
 
-    /// The ACP calls the fake agent received so far, with their methods.
-    fn acp_calls(&mut self) -> Vec<(String, Value)> {
-        let mut calls = Vec::new();
-        while let Ok(call) = self.calls.try_recv() {
-            calls.push(call);
-        }
-        calls
+    /// The `session/set_*` requests the bridge sent to the agent so far, as (method, params).
+    fn acp_calls(&self) -> Vec<(String, Value)> {
+        self.recorder
+            .messages()
+            .into_iter()
+            .filter_map(|message| {
+                let method = message.get("method")?.as_str()?;
+                method
+                    .starts_with("session/set_")
+                    .then(|| (method.to_owned(), message["params"].clone()))
+            })
+            .collect()
     }
 
     /// Ends the command stream, waits for the bridge and checks the whole log.
@@ -361,18 +285,12 @@ fn session_delta_with(envelope: &Envelope, path: &str) -> bool {
 
 #[tokio::test]
 async fn session_start_snapshot_precedes_the_state_deltas_of_the_agents_updates() {
-    let updates = vec![
-        update(json!({
-            "sessionUpdate": "available_commands_update",
-            "availableCommands": [{ "name": "review", "description": "Review the diff" }]
-        })),
-        update(json!({ "sessionUpdate": "current_mode_update", "currentModeId": "plan" })),
-        update(json!({
-            "sessionUpdate": "config_option_update",
-            "configOptions": options("opus", false)
-        })),
+    let steps = vec![
+        json!({ "available_commands": [{ "name": "review", "description": "Review the diff" }] }),
+        json!({ "current_mode": "plan" }),
+        json!({ "config_option": options("opus", false) }),
     ];
-    let mut rig = Rig::start(updates).await;
+    let mut rig = Rig::start(steps).await;
     let turn = rig.turn().await;
 
     // §4.6: the session snapshot comes at session start, with the advertised modes and options.

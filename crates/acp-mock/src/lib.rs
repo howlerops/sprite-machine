@@ -7,10 +7,13 @@
 //!
 //! # Handled methods
 //!
-//! `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt` and
-//! the `session/cancel` notification. Each session counts its prompts: the Nth
-//! `session/prompt` of a session runs `turns[N-1]`. A prompt past the end of the script
-//! fails with a JSON-RPC error, so a test notices a script that is too short.
+//! `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt`, the
+//! `session/cancel` notification, `session/set_mode` and `session/set_config_option`. Each
+//! session counts its prompts: the Nth `session/prompt` of a session runs `turns[N-1]`. A prompt
+//! past the end of the script fails with a JSON-RPC error, so a test notices a script that is
+//! too short. `session/set_mode` and `session/set_config_option` answer from the session's
+//! current modes and options (the script's at start), reject an unknown mode, option or value
+//! with `-32602`, and send `current_mode_update` / `config_option_update` before the answer.
 //!
 //! [`run_recorded`] keeps every message the agent received in a [`Recorder`], so a test can
 //! check what the client sent (for example `mcpServers` on `session/new`).
@@ -35,6 +38,8 @@
 //!         { "usage": { "used": 100, "size": 1000 } },
 //!         { "available_commands": [{ "name": "review", "description": "Review" }] },
 //!         { "current_mode": "code" },
+//!         { "config_option": [{ "id": "model", "name": "Model", "type": "select",
+//!             "currentValue": "opus", "options": [{ "value": "opus", "name": "Opus" }] }] },
 //!         { "request_permission": { "toolCall": { "toolCallId": "call_2",
 //!               "title": "Run tests", "kind": "execute" },
 //!             "options": [{ "optionId": "allow_once", "name": "Allow",
@@ -64,6 +69,8 @@
 //! script loads, so an invalid payload fails in [`Script::from_json`].
 //!
 //! - `text`, `thought`: an `agent_message_chunk` or `agent_thought_chunk` with that text.
+//! - `config_option`: the list of `SessionConfigOption` of a `config_option_update`. It only
+//!   sends the update; `session/set_config_option` answers from the session's own values.
 //! - `tool_call`, `tool_call_update`: the ACP `tool_call` or `tool_call_update` fields.
 //! - `plan`: the array of plan entries.
 //! - `usage`: the `usage_update` fields (`used`, `size`, optional `cost`).

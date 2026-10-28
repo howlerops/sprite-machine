@@ -45,6 +45,10 @@ name = "authz"
 required-features = ["live"]
 
 [[test]]
+name = "thread_session"
+required-features = ["live"]
+
+[[test]]
 name = "machine_do"
 required-features = ["live"]
 
