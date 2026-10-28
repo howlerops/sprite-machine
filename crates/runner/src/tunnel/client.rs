@@ -1,6 +1,6 @@
 //! The connection task: connect, `hello`, `welcome`, pump frames, reconnect (tunnel.md §2-§4).
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -83,9 +83,14 @@ pub struct TunnelClient<C> {
     wall: Arc<dyn WallClock>,
     backoff: Backoff,
     commands: mpsc::UnboundedSender<IncomingCommand>,
-    processed: mpsc::UnboundedReceiver<u64>,
-    /// Down seqs fed to the bridge and not yet reported processed, in order.
-    pending: VecDeque<u64>,
+    processed: mpsc::UnboundedReceiver<String>,
+    /// Down commands of the current stream in seq order. A command is committed
+    /// (`last_down_seq` + idempotency key) only when the bridge reports it processed, and only
+    /// from the front, so the cursor never skips an unprocessed command.
+    pending: VecDeque<PendingDown>,
+    /// Keys fed to the bridge and not yet reported processed, across reconnects: a redelivery
+    /// of one is not fed again.
+    in_flight: HashSet<String>,
     up_since: Option<Instant>,
 }
 
@@ -111,6 +116,7 @@ pub(crate) fn build<C: CredentialSource>(
         commands: command_tx,
         processed: processed_rx,
         pending: VecDeque::new(),
+        in_flight: HashSet::new(),
         up_since: None,
     };
     (
@@ -119,8 +125,17 @@ pub(crate) fn build<C: CredentialSource>(
         TunnelCommands {
             rx: command_rx,
             processed: processed_tx,
+            delivered: VecDeque::new(),
         },
     )
+}
+
+/// A down command waiting to be committed.
+struct PendingDown {
+    seq: u64,
+    key: String,
+    /// The bridge finished it (or it needs no bridge).
+    done: bool,
 }
 
 /// How one connection ended.
@@ -155,7 +170,7 @@ impl From<serde_json::Error> for SessErr {
 enum Wakeup {
     Shutdown,
     Outbox,
-    Processed(u64),
+    Processed(String),
     Inbound(Inbound),
     Tick,
 }
@@ -263,6 +278,87 @@ impl<C: CredentialSource> TunnelClient<C> {
         }
     }
 
+    /// A down command in stream order. Nothing is committed here: the cursor and the key move
+    /// when the bridge reports it processed, so a crash before that gets it redelivered.
+    fn accept_command(
+        &mut self,
+        seq: u64,
+        key: String,
+        command: protocol::tunnel::Command,
+    ) -> Result<(), SessErr> {
+        // Redelivered after a resumed reconnect while still pending: already tracked.
+        if self.pending.iter().any(|p| p.seq == seq && p.key == key) {
+            return Ok(());
+        }
+        if self.shared.store.seen_key(&key)? {
+            // Applied before (a renumbered stream replays it): ack, do not apply.
+            self.pending.push_back(PendingDown {
+                seq,
+                key,
+                done: true,
+            });
+        } else if self.in_flight.contains(&key) {
+            // The bridge still has it from before the reconnect: wait for its report.
+            self.pending.push_back(PendingDown {
+                seq,
+                key,
+                done: false,
+            });
+        } else {
+            self.in_flight.insert(key.clone());
+            self.pending.push_back(PendingDown {
+                seq,
+                key: key.clone(),
+                done: false,
+            });
+            let fed = self.commands.send(IncomingCommand {
+                seq,
+                idempotency_key: key,
+                command,
+            });
+            if fed.is_err() {
+                tracing::warn!(seq, "the bridge stopped taking commands");
+            }
+        }
+        self.commit_done()
+    }
+
+    /// A command kind this build does not know: answer `unsupported` (§3.5), nothing to apply.
+    fn accept_unsupported(&mut self, seq: u64, key: String, kind: &str) -> Result<(), SessErr> {
+        if !self.pending.iter().any(|p| p.seq == seq && p.key == key) {
+            if !self.shared.store.seen_key(&key)? {
+                let result = self.shared.enqueue(json!({
+                    "t": "command_result",
+                    "idempotency_key": key,
+                    "ok": false,
+                    "code": "unsupported",
+                    "message": format!("unsupported command kind `{kind}`"),
+                }));
+                if let Err(error) = result {
+                    tracing::warn!(%error, "could not queue the unsupported answer");
+                }
+            }
+            self.pending.push_back(PendingDown {
+                seq,
+                key,
+                done: true,
+            });
+        }
+        self.commit_done()
+    }
+
+    /// Commits the finished commands at the front of the queue, in order.
+    fn commit_done(&mut self) -> Result<(), SessErr> {
+        while self.pending.front().is_some_and(|p| p.done) {
+            if let Some(entry) = self.pending.pop_front() {
+                self.shared
+                    .store
+                    .commit_down_frame(entry.seq, Some(&entry.key))?;
+            }
+        }
+        Ok(())
+    }
+
     async fn connected(
         &mut self,
         ws: Ws,
@@ -295,14 +391,21 @@ impl<C: CredentialSource> TunnelClient<C> {
             Inbound::Frame(frame) => *frame,
             other => return Ok(terminal(other)),
         };
-        let (resumed, resume_token, last_up_seq, heartbeat_ms) = match welcome {
+        let (resumed, resume_token, last_up_seq, heartbeat_ms, max_inflight) = match welcome {
             Frame::Welcome {
                 resumed,
                 resume_token,
                 last_up_seq,
                 heartbeat_ms,
+                max_inflight,
                 ..
-            } => (resumed, resume_token, last_up_seq, heartbeat_ms),
+            } => (
+                resumed,
+                resume_token,
+                last_up_seq,
+                heartbeat_ms,
+                max_inflight,
+            ),
             Frame::Close { code, .. } => return Ok(Ended::Close(code)),
             other => {
                 return Err(
@@ -313,30 +416,28 @@ impl<C: CredentialSource> TunnelClient<C> {
 
         // The previous token died when `welcome` was sent (single use): persist the new one first.
         store.set_resume_token(Some(&resume_token))?;
-        let mut sender = {
-            let _guard = self.shared.lock_outbox();
-            if !resumed {
-                store.restart_outbound_stream()?;
-                store.restart_down_stream()?;
-            }
-            let state = store.outbox_state()?;
-            self.shared
-                .last_seq
-                .store(state.next_seq - 1, std::sync::atomic::Ordering::Release);
-            let mut sender = rebuild_sender(state);
-            if resumed {
-                // Drop what the hub processed, resend the rest (§4.2 rule 4).
-                if let Err(error) = sender.on_welcome(true, last_up_seq) {
-                    // The hub's cursor disagrees with our outbox: forget the token so the
-                    // next connect starts a fresh stream.
-                    store.set_resume_token(None)?;
-                    return Err(SessErr::Lost(format!("welcome: {error}")));
-                }
-                store.ack_outbound(last_up_seq)?;
-            }
-            sender
-        };
         if !resumed {
+            store.restart_outbound_stream()?;
+            store.restart_down_stream()?;
+        }
+        let state = store.outbox_state()?;
+        self.shared
+            .last_seq
+            .fetch_max(state.next_seq - 1, std::sync::atomic::Ordering::AcqRel);
+        let mut sender = rebuild_sender(state);
+        sender.set_max_inflight(u64::from(max_inflight));
+        if resumed {
+            // Drop what the hub processed, resend the rest (§4.2 rule 4).
+            if let Err(error) = sender.on_welcome(true, last_up_seq) {
+                // The hub's cursor disagrees with our outbox: forget the token so the
+                // next connect starts a fresh stream.
+                store.set_resume_token(None)?;
+                return Err(SessErr::Lost(format!("welcome: {error}")));
+            }
+            store.ack_outbound(last_up_seq)?;
+        } else {
+            // New numbering: old seqs mean nothing. Keys still in `in_flight` stay, so a
+            // redelivery of a command the bridge is still running is not applied twice.
             self.pending.clear();
         }
         let mut down = if resumed {
@@ -361,14 +462,25 @@ impl<C: CredentialSource> TunnelClient<C> {
             let wakeup = tokio::select! {
                 () = shutdown.as_mut() => Wakeup::Shutdown,
                 () = self.shared.wake.notified() => Wakeup::Outbox,
-                Some(seq) = self.processed.recv() => Wakeup::Processed(seq),
+                Some(key) = self.processed.recv() => Wakeup::Processed(key),
                 inbound = read(&mut stream) => Wakeup::Inbound(inbound),
                 _ = ticker.tick() => Wakeup::Tick,
             };
             match wakeup {
                 Wakeup::Shutdown => return Ok(goodbye(&mut sink).await),
                 Wakeup::Outbox => {}
-                Wakeup::Processed(seq) => self.pending.retain(|pending| *pending != seq),
+                Wakeup::Processed(key) => {
+                    self.in_flight.remove(&key);
+                    match self.pending.iter_mut().find(|p| p.key == key && !p.done) {
+                        Some(entry) => entry.done = true,
+                        // From a stream that was renumbered since: it was applied, so record
+                        // the key, but it must not move this stream's cursor.
+                        None => {
+                            store.observe_idempotency_key(&key)?;
+                        }
+                    }
+                    self.commit_done()?;
+                }
                 Wakeup::Tick => {
                     // OS sleep: the wall clock advanced much more than the monotonic one.
                     let wall = self.wall.now_ms();
@@ -438,22 +550,7 @@ impl<C: CredentialSource> TunnelClient<C> {
                                 }
                                 Ok(Verdict::Duplicate { .. }) => reack = true,
                                 Ok(Verdict::Process) => {
-                                    let disposition =
-                                        store.commit_down_frame(seq, Some(&idempotency_key))?;
-                                    if disposition == protocol::tunnel::Disposition::New {
-                                        self.pending.push_back(seq);
-                                        let fed = self.commands.send(IncomingCommand {
-                                            seq,
-                                            idempotency_key,
-                                            command,
-                                        });
-                                        if fed.is_err() {
-                                            tracing::warn!(
-                                                seq,
-                                                "the bridge stopped taking commands"
-                                            );
-                                        }
-                                    }
+                                    self.accept_command(seq, idempotency_key, command)?;
                                 }
                             },
                             Frame::Ping => {
@@ -474,22 +571,7 @@ impl<C: CredentialSource> TunnelClient<C> {
                                 return Err(protocol_error(&mut sink, error.to_string()).await);
                             }
                             Ok(Verdict::Duplicate { .. }) => reack = true,
-                            Ok(Verdict::Process) => {
-                                let disposition = store.commit_down_frame(seq, Some(&key))?;
-                                if disposition == protocol::tunnel::Disposition::New {
-                                    // Unknown kind: answer `unsupported` (§3.5), nothing to apply.
-                                    let result = self.shared.enqueue(json!({
-                                        "t": "command_result",
-                                        "idempotency_key": key,
-                                        "ok": false,
-                                        "code": "unsupported",
-                                        "message": format!("unsupported command kind `{kind}`"),
-                                    }));
-                                    if let Err(error) = result {
-                                        tracing::warn!(%error, "could not queue the unsupported answer");
-                                    }
-                                }
-                            }
+                            Ok(Verdict::Process) => self.accept_unsupported(seq, key, &kind)?,
                         },
                         other => return Ok(terminal(other)),
                     }
@@ -498,7 +580,10 @@ impl<C: CredentialSource> TunnelClient<C> {
 
             pump(&self.shared, &mut sender, &mut sink).await?;
             // Ack the down stream up to the last frame the bridge finished (cumulative).
-            let ackable = self.pending.front().map_or(down.last(), |first| first - 1);
+            let ackable = self
+                .pending
+                .front()
+                .map_or(down.last(), |first| first.seq - 1);
             if ackable > acked_sent || (reack && ackable > 0) {
                 acked_sent = acked_sent.max(ackable);
                 send(
@@ -557,9 +642,8 @@ async fn pump(
 ) -> Result<(), SessErr> {
     let last = shared.last_seq.load(std::sync::atomic::Ordering::Acquire);
     if last >= sender.next_seq() {
-        let state = shared.store.outbox_state()?;
-        for row in state.unacked {
-            if row.seq >= sender.next_seq() {
+        for row in shared.store.outbound_since(sender.next_seq() - 1)? {
+            {
                 let seq = sender.enqueue(UpBody {
                     event_id: row.event_id,
                     body: row.body,
