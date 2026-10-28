@@ -20,7 +20,7 @@
 //! together.
 
 use protocol::mapping::acp_turn::SequenceValidator;
-use protocol::tunnel::{Actor, Command, ContentPart, Outcome};
+use protocol::tunnel::{Actor, Command, ContentPart, Outcome, Workspace};
 use protocol::turn_event::{
     Envelope, Event, InterruptKind, InterruptResolved, MAX_ENVELOPE_BYTES, PatchOp, PatchOpKind,
     ResolvedOutcome, RunError, RunErrorReason, RunOutcome, RunReason, RunStarted, StateDelta,
@@ -39,6 +39,10 @@ use super::timestamp::parse_timestamp;
 
 /// How long an `Idempotency-Key` answer is kept (client-api.md §3).
 pub const IDEMPOTENCY_TTL_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// How long an appended `event_id` is remembered (tunnel.md §4.2): a retransmit inside this
+/// window is acknowledged without a second append.
+pub const EVENT_ID_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// Characters of the first text part kept as a pending task's `preview`.
 const PREVIEW_CHARS: usize = 80;
@@ -94,6 +98,20 @@ pub struct PromptBody {
     #[serde(default)]
     pub message_id: Option<String>,
     pub parts: Vec<ContentPart>,
+}
+
+/// `POST /v1/threads` body (client-api.md §5.2), as the Worker forwards it to the Thread DO.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct CreateThreadBody {
+    pub machine_id: String,
+    pub agent: String,
+    pub workspace: Workspace,
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<PromptBody>,
 }
 
 /// The logic of one thread over a [`ThreadStore`].
@@ -154,6 +172,23 @@ impl<S: ThreadStore> ThreadCore<S> {
 
     pub fn store(&self) -> &S {
         &self.store
+    }
+
+    /// Appends one envelope unless its `event_id` was appended within the last 24 hours
+    /// (tunnel.md §4.2). `Ok(None)` is the acknowledged duplicate: nothing is appended. The id
+    /// is remembered only after the append succeeded, so a failed append is retried.
+    pub fn append_once(
+        &mut self,
+        event_id: &str,
+        envelope: Envelope,
+        now_ms: u64,
+    ) -> Result<Option<Envelope>, ApiError> {
+        if self.store.event_seen(event_id, now_ms)? {
+            return Ok(None);
+        }
+        let stored = self.append_inner(envelope, now_ms)?;
+        self.store.record_event(event_id, now_ms)?;
+        Ok(Some(stored))
     }
 
     /// Envelopes appended since the last call, in order. The caller broadcasts them to the
@@ -438,6 +473,106 @@ impl<S: ThreadStore> ThreadCore<S> {
             }
         }
         Ok(())
+    }
+
+    /// `POST /v1/threads` (client-api.md §5.2), the Thread DO half. Records the host machine
+    /// through the init hook ([`ThreadCore::init_thread`]) and, with a prompt, starts the first
+    /// task (`UserMessage`, §6) and queues a `dispatch` command for the Machine DO (tunnel.md
+    /// §3.5). 201 `{thread_id, task_id, status: "started"}`; without a prompt the thread is
+    /// created idle (`task_id: null`). Replays under the same key are answered by [`ThreadCore::idempotent`].
+    pub fn create_thread(
+        &mut self,
+        actor: &Actor,
+        idempotency_key: &str,
+        body: CreateThreadBody,
+        now_ms: u64,
+    ) -> Result<Reply, ApiError> {
+        if !is_valid_id(&body.machine_id) {
+            return Err(ApiError::invalid_request(
+                "machine_id must be 1-128 characters of [A-Za-z0-9_:.-]",
+            ));
+        }
+        if body.agent.trim().is_empty() {
+            return Err(ApiError::invalid_request("agent is required"));
+        }
+        if body.workspace.path.trim().is_empty() {
+            return Err(ApiError::invalid_request("workspace.path is required"));
+        }
+        // Everything is checked before the first event or state write.
+        let prompt = match body.prompt {
+            None => None,
+            Some(prompt) => {
+                if prompt.parts.is_empty() {
+                    return Err(ApiError::invalid_request(
+                        "parts must have at least one part",
+                    ));
+                }
+                let task_id = match prompt.task_id {
+                    Some(id) => checked_id("task_id", id)?,
+                    None => self.new_id("tk", now_ms)?,
+                };
+                let message_id = match prompt.message_id {
+                    Some(id) => checked_id("message_id", id)?,
+                    None => self.new_id("msg", now_ms)?,
+                };
+                Some((task_id, message_id, prompt.parts))
+            }
+        };
+        if self.head > 0 || self.store.get_meta("info")?.is_some() {
+            return Err(ApiError::new(
+                409,
+                "conflict",
+                format!("thread {} already exists", self.thread_id),
+            ));
+        }
+
+        let mut info = Map::new();
+        info.insert("machine_id".to_owned(), json!(body.machine_id));
+        info.insert("agent".to_owned(), json!(body.agent));
+        info.insert("workspace".to_owned(), json!(body.workspace));
+        let permission_mode = body.permission_mode.unwrap_or_else(|| "default".to_owned());
+        info.insert("permission_mode".to_owned(), json!(permission_mode));
+        if let Some(title) = body.title {
+            info.insert("title".to_owned(), json!(title));
+        }
+        self.init_thread(&info, now_ms)?;
+
+        let Some((task_id, message_id, parts)) = prompt else {
+            return Ok(Reply::new(
+                201,
+                json!({ "thread_id": self.thread_id, "task_id": null, "status": "idle" }),
+            ));
+        };
+        let task = TaskRecord {
+            task_id: task_id.clone(),
+            status: TaskStatus::Pending,
+            message_id,
+            preview: preview_of(&parts),
+            parts,
+            author: actor.clone(),
+            queued_at: format_timestamp(now_ms),
+            idempotency_key: idempotency_key.to_owned(),
+            has_run: false,
+            cancel_requested: false,
+        };
+        self.store.put_task(&task)?;
+        self.begin_task(&task, now_ms)?;
+        let command = Command::Dispatch {
+            thread_id: self.thread_id.clone(),
+            task_id: task_id.clone(),
+            agent: body.agent,
+            workspace: body.workspace,
+            permission_mode,
+            message_id: task.message_id.clone(),
+            parts: task.parts.clone(),
+            author: actor.clone(),
+        };
+        self.store
+            .queue_command(idempotency_key, &format_timestamp(now_ms), &command)?;
+        Ok(Reply::new(
+            201,
+            json!({ "thread_id": self.thread_id, "task_id": task_id, "status": "started" }),
+        ))
     }
 
     /// `GET /v1/threads/{id}`; `404` for a thread nothing has happened to.

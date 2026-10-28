@@ -12,6 +12,8 @@ use protocol::turn_event::{Envelope, InterruptKind, ResolvedOutcome, StateScope}
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::core::EVENT_ID_TTL_MS;
+
 /// A storage failure (becomes HTTP 500).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreError(pub String);
@@ -178,6 +180,12 @@ pub trait ThreadStore {
     /// Deletes records created before `older_than_ms`.
     fn prune_idempotency(&mut self, older_than_ms: u64) -> StoreResult<()>;
 
+    // ---- event ids (tunnel.md §4.2: the Machine DO's retransmits, 24 h) ----
+    /// `true` when an envelope with this `event_id` was appended within the last 24 hours.
+    fn event_seen(&self, event_id: &str, now_ms: u64) -> StoreResult<bool>;
+    /// Remembers an appended `event_id` at `now_ms`; forgets the ones older than 24 hours.
+    fn record_event(&mut self, event_id: &str, now_ms: u64) -> StoreResult<()>;
+
     // ---- small stuff ----
     fn get_meta(&self, key: &str) -> StoreResult<Option<Value>>;
     fn put_meta(&mut self, key: &str, value: &Value) -> StoreResult<()>;
@@ -196,6 +204,7 @@ pub struct MemoryStore {
     commands: Vec<(CommandRecord, bool)>,
     next_command: u64,
     idempotency: Vec<IdempotencyRecord>,
+    event_ids: Vec<(String, u64)>,
     meta: Vec<(String, Value)>,
     counter: u64,
 }
@@ -351,7 +360,12 @@ impl ThreadStore for MemoryStore {
     fn retract_prompt_command(&mut self, task_id: &str) -> StoreResult<bool> {
         let before = self.commands.len();
         self.commands.retain(|(record, acked)| {
-            *acked || !matches!(&record.command, Command::Prompt { task_id: t, .. } if t == task_id)
+            *acked
+                || !matches!(
+                    &record.command,
+                    Command::Prompt { task_id: t, .. } | Command::Dispatch { task_id: t, .. }
+                        if t == task_id
+                )
         });
         Ok(self.commands.len() != before)
     }
@@ -373,6 +387,23 @@ impl ThreadStore for MemoryStore {
 
     fn prune_idempotency(&mut self, older_than_ms: u64) -> StoreResult<()> {
         self.idempotency.retain(|r| r.created_ms >= older_than_ms);
+        Ok(())
+    }
+
+    fn event_seen(&self, event_id: &str, now_ms: u64) -> StoreResult<bool> {
+        Ok(self
+            .event_ids
+            .iter()
+            .any(|(id, seen)| id == event_id && seen.saturating_add(EVENT_ID_TTL_MS) > now_ms))
+    }
+
+    fn record_event(&mut self, event_id: &str, now_ms: u64) -> StoreResult<()> {
+        self.event_ids
+            .retain(|(_, seen)| seen.saturating_add(EVENT_ID_TTL_MS) > now_ms);
+        match self.event_ids.iter_mut().find(|(id, _)| id == event_id) {
+            Some((_, seen)) => *seen = now_ms,
+            None => self.event_ids.push((event_id.to_owned(), now_ms)),
+        }
         Ok(())
     }
 

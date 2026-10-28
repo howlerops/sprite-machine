@@ -3,6 +3,7 @@
 //!
 //! | Route                                                | Auth                      |
 //! | ---------------------------------------------------- | ------------------------- |
+//! | `POST /v1/threads`                                   | session token (member), `Idempotency-Key`; creates the thread (M2-008c) |
 //! | `GET  /v1/threads/{id}`                              | session token (viewer+), or `Bearer dev` + `DEV_FIXTURES=1` |
 //! | `GET  /v1/threads/{id}/subscribe?after=<seq>` (WebSocket) | same                 |
 //! | `POST /v1/threads/{id}/prompts`                      | same                      |
@@ -23,17 +24,24 @@ use std::collections::HashMap;
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Path, Request, State},
-    http::{HeaderName, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use protocol::turn_event::is_valid_id;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use worker::Env;
 
 use super::auth::dev_fixtures_enabled;
 use super::error::ApiError;
-use crate::auth::routes::authorize_thread_request;
+use super::valid_idempotency_key;
+use crate::audit::{self, Event};
+use crate::auth::{Principal, authenticate, routes::authorize_thread_request};
+use crate::db::{Role, d1::D1};
+use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::worker::AppState;
 
 /// The Durable Object binding of the Thread DO (wrangler.toml).
@@ -45,6 +53,7 @@ const ACTOR_HEADER: &str = "x-sm-actor";
 /// The `/v1/threads/...` routes of M2-008; merged into the Worker router by `worker.rs`.
 pub fn thread_routes() -> Router<AppState> {
     Router::new()
+        .route("/v1/threads", post(create_thread))
         .route("/v1/threads/{thread_id}", get(forward))
         .route("/v1/threads/{thread_id}/subscribe", get(forward))
         .route("/v1/threads/{thread_id}/prompts", post(forward))
@@ -110,6 +119,11 @@ async fn forward_inner(
     req.headers_mut()
         .insert(HeaderName::from_static(ACTOR_HEADER), value);
 
+    to_thread(env, thread_id, req).await
+}
+
+/// Hands a request to the Thread DO named `thread_id` and returns its answer.
+async fn to_thread(env: &Env, thread_id: &str, req: Request) -> Result<Response, ApiError> {
     let internal = |error: worker::Error| ApiError::internal(error.to_string());
     let namespace = env.durable_object(THREAD_BINDING).map_err(internal)?;
     let stub = namespace
@@ -119,4 +133,121 @@ async fn forward_inner(
     let req = worker::Request::try_from(req).map_err(internal)?;
     let response = stub.fetch_with_request(req).await.map_err(internal)?;
     Ok(response.into())
+}
+
+/// The body limit of `POST /v1/threads` (a prompt's parts travel in it).
+const MAX_CREATE_BYTES: usize = 64 * 1024;
+
+/// `POST /v1/threads` (client-api.md §5.2, M2-008c): member role, audited as `thread.create`.
+///
+/// The thread id is derived from the caller and the `Idempotency-Key`, so a replay of the same
+/// request reaches the same Thread DO and gets its stored answer (no second thread). The Thread
+/// DO creates the thread, records the host machine (init hook), and with a prompt queues the
+/// `dispatch` command for the Machine DO.
+///
+/// The route has no thread id in its path, so `auth::policy` cannot name its role; the same
+/// public primitives `authorize_thread_request` uses are called here instead.
+#[worker::send]
+async fn create_thread(State(env): State<AppState>, req: Request) -> Response {
+    match create_inner(&env, req).await {
+        Ok(response) => response,
+        Err(error) => (
+            StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            Json(error.body()),
+        )
+            .into_response(),
+    }
+}
+
+async fn create_inner(env: &Env, req: Request) -> Result<Response, ApiError> {
+    let (parts, body) = req.into_parts();
+    let headers: &HeaderMap = &parts.headers;
+    let key = headers
+        .get("Idempotency-Key")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::new(
+                400,
+                "idempotency_key_required",
+                "this request needs an Idempotency-Key header",
+            )
+        })?;
+    if !valid_idempotency_key(key) {
+        return Err(ApiError::invalid_request(
+            "Idempotency-Key must be 1-128 characters of [A-Za-z0-9_:.-]",
+        ));
+    }
+    let bytes = axum::body::to_bytes(body, MAX_CREATE_BYTES)
+        .await
+        .map_err(|_| ApiError::invalid_request("request body is too large or unreadable"))?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| ApiError::invalid_request(format!("body is not JSON: {error}")))?;
+
+    let database = env
+        .d1("DB")
+        .map_err(|error| ApiError::internal(format!("D1 binding DB: {error}")))?;
+    let db = D1::new(&database);
+    let authorization = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let principal: Principal = authenticate(&db, authorization, dev_fixtures(env)).await?;
+    principal.require(Role::Member)?;
+
+    let thread_id = derived_thread_id(&principal.user_id, key);
+    let request_id_header = headers
+        .get(REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok());
+    let request_id = request_id(request_id_header, worker::Date::now().as_millis());
+    let machine_id = value
+        .get("machine_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    audit::record(
+        &db,
+        &Event::by(
+            &principal,
+            "thread.create",
+            "thread",
+            &thread_id,
+            &request_id,
+            json!({ "machine_id": machine_id }),
+        ),
+    )
+    .await?;
+
+    let actor_json = serde_json::to_string(&principal.actor())
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let forwarded = Request::builder()
+        .method("POST")
+        // Absolute, as the Worker's request conversion needs; the DO routes on the path only.
+        .uri(format!(
+            "https://do.internal/internal/threads/{thread_id}/create"
+        ))
+        .header(ACTOR_HEADER, actor_json)
+        .header("Idempotency-Key", key)
+        .header("content-type", "application/json")
+        .body(Body::from(bytes))
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    to_thread(env, &thread_id, forwarded).await
+}
+
+/// `th_` plus 32 hex digits of `SHA-256(user, key)`: stable for one user and key, distinct
+/// across users. Not a secret; only the Idempotency-Key scope needs it to be unique.
+fn derived_thread_id(user_id: &str, key: &str) -> String {
+    let digest = Sha256::digest(format!("{user_id}\n{key}").as_bytes());
+    let hex: String = digest
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("th_{hex}")
+}
+
+fn dev_fixtures(env: &Env) -> bool {
+    dev_fixtures_enabled(
+        env.var("DEV_FIXTURES")
+            .ok()
+            .map(|v| v.to_string())
+            .as_deref(),
+    )
 }
