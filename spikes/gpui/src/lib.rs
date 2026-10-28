@@ -2,7 +2,12 @@
 //! M1B-004b spike: the diff pane (gpui-kit `Diff`, syntax highlighted) over the diff-5k fixture.
 //! M1B-004c spike: the terminal pane (`alacritty_terminal` model, styled rows, key input) over the
 //! `terminal` fixture.
+//! M1B-004d spike: the approval card (`Interrupt{approval}`, answers over HTTP to the `approval`
+//! fixture).
 
+pub mod approval_model;
+pub mod approval_pane;
+pub mod approval_sink;
 pub mod diff_model;
 pub mod diff_pane;
 pub mod terminal_input;

@@ -22,6 +22,8 @@ path = "src/main.rs"
 protocol = { path = "../../crates/protocol" }
 agui-fixture = { path = "../../crates/agui-fixture" }
 serde_json = "1"
+# M1B-004d: the approval card's HTTP AnswerSink (blocking; called on the background executor).
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 # M1B-004c: the terminal pane's VT model (`Term` + the `vte` ANSI processor). Exact pin.
 alacritty_terminal = "=0.26.0"
 # Exactly the root [workspace.dependencies] specs (checked by tests/pins.rs).
@@ -31,6 +33,8 @@ gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "
 gpui-kit = { git = "https://github.com/longbridge/gpui-component", rev = "c8917c3661ed1090870f403c312b39e0d8a62e0b", features = ["syntect"] }
 
 [dev-dependencies]
+# M1B-004d: the approval integration test starts agui-fixture, which needs a tokio runtime.
+tokio = { version = "1", features = ["full"] }
 gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
 gpui-kit = { git = "https://github.com/longbridge/gpui-component", rev = "c8917c3661ed1090870f403c312b39e0d8a62e0b", features = ["test-support"] }
 
