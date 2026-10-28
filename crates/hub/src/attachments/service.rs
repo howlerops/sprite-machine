@@ -246,7 +246,7 @@ impl<'a, B: Blobs> Attachments<'a, B> {
         })?;
         if !valid_idempotency_key(key) {
             return Err(ApiError::invalid_request(
-                "Idempotency-Key must be 1-128 characters of [A-Za-z0-9_:.-]",
+                "Idempotency-Key must be 1-128 characters of [A-Za-z0-9_:.-], not starting with local:",
             ));
         }
         let declared = parse_declared(request.body)?;

@@ -43,7 +43,7 @@ mod tests {
     use protocol::tunnel::Command;
     use tempfile::TempDir;
 
-    use super::super::io::{CommandSource, IncomingCommand, MemorySink};
+    use super::super::io::{CommandSource, IncomingCommand, MemorySink, Origin};
     use super::super::{Bridge, Config, SequentialGenerator};
     use super::*;
 
@@ -126,6 +126,7 @@ mod tests {
                     thread_id: "th_1".into(),
                     task_id: "tk_1".into(),
                 },
+                origin: Origin::Hub,
             })
             .await
             .expect("applied");

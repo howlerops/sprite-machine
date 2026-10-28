@@ -354,6 +354,7 @@ impl Router {
             seq: incoming.seq,
             idempotency_key: incoming.idempotency_key.clone(),
             command,
+            origin: incoming.origin,
         };
         session.tx.send(forwarded).map_err(|_| {
             (

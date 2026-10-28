@@ -2,7 +2,7 @@
 //!
 //! - [`ThreadCore`] over a [`ThreadStore`]: `seq` assignment, the §5 validator, state
 //!   snapshots / deltas, the subscription catch-up, interrupts, the pending-task queue, cancel
-//!   and idempotency. [`MemoryStore`] backs native tests and the tracer.
+//!   and idempotency. [`MemoryStore`] backs native tests.
 //! - [`api`]: the Thread DO's HTTP surface as a pure function over a core.
 //! - [`auth`]: the dev-token auth placeholder (client-api.md §2).
 //! - `sqlite` and `routes` (wasm32 only): the SQLite-backed store and the Worker routes. The

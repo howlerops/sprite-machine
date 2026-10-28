@@ -897,6 +897,16 @@ fn writes_need_a_valid_idempotency_key_and_errors_have_the_api_shape() {
         (bad.status, bad.body["error"].as_str()),
         (400, Some("invalid_request"))
     );
+    // A client cannot send a key that reads as a locally typed prompt (client-api.md §6).
+    let local = api::handle(
+        &mut core,
+        &request("POST", path, "usr_1", Some("local:1"), body.clone()),
+        NOW,
+    );
+    assert_eq!(
+        (local.status, local.body["error"].as_str()),
+        (400, Some("invalid_request"))
+    );
     let malformed = api::handle(
         &mut core,
         &request("POST", path, "usr_1", Some("k"), json!({"parts": "x"})),

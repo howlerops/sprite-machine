@@ -12,7 +12,7 @@
 //! - `alarm()` is the heartbeat watchdog: no traffic for 3 x `heartbeat_ms` closes the socket
 //!   with `heartbeat_timeout` and publishes presence `offline`.
 //! - Internal routes (only reachable through a DO stub): `provision`, `revoke`, `commands`
-//!   (the push of a Thread DO or the tracer hub) and `state`.
+//!   (the push of a Thread DO) and `state`.
 //!
 //! All rules live in `machines::{core, driver}`, which are native-tested; this file only wires
 //! them to sockets, storage and the other objects.
@@ -510,7 +510,7 @@ impl Machine {
             None => HostKind::Thread,
             Some(name) => match HostKind::parse(name) {
                 Some(kind) => kind,
-                None => return json_response(400, &error_body("host is thread or tracer")),
+                None => return json_response(400, &error_body("host must be thread")),
             },
         };
         let queued = parsed.commands.len();

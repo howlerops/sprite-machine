@@ -11,8 +11,6 @@ use protocol::tunnel::{Command, CommandErrorCode};
 use protocol::turn_event::Envelope;
 use tokio::sync::mpsc;
 
-use super::LOCAL_KEY_PREFIX;
-
 /// The sink cannot take more output (the tunnel client stopped). The bridge stops too.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("event sink closed: {0}")]
@@ -30,7 +28,17 @@ pub struct CommandFailure {
     pub message: String,
 }
 
-/// One down-stream `command` frame.
+/// Where a command came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// Sent by the hub (a down-stream `command` frame). The hub already emitted the
+    /// `UserMessage` of a prompt (client-api.md §6).
+    Hub,
+    /// Typed on the runner itself. The hub never saw it, so the bridge emits its `UserMessage`.
+    Local,
+}
+
+/// One down-stream `command` frame, or a command typed locally.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingCommand {
     /// The frame's down-stream seq (tunnel.md §3.7).
@@ -38,6 +46,8 @@ pub struct IncomingCommand {
     /// The key the client sent with its HTTP request. The bridge applies each key once.
     pub idempotency_key: String,
     pub command: Command,
+    /// Who sent the command. Only [`Origin::Local`] prompts get a `UserMessage` from the bridge.
+    pub origin: Origin,
 }
 
 /// Where the bridge sends what it produces.
@@ -153,12 +163,11 @@ impl CommandFeed {
         key
     }
 
-    /// Sends `command` as a prompt typed locally (key prefixed [`LOCAL_KEY_PREFIX`]); returns
-    /// the key.
+    /// Sends `command` as a prompt typed locally (origin [`Origin::Local`]); returns the key.
     pub fn send_local(&self, command: Command) -> String {
         let seq = self.next_seq();
-        let key = format!("{LOCAL_KEY_PREFIX}{seq}");
-        self.send_frame(seq, &key, command);
+        let key = format!("idk_local_{seq}");
+        self.send_origin(seq, &key, command, Origin::Local);
         key
     }
 
@@ -185,11 +194,16 @@ impl CommandFeed {
     }
 
     fn send_frame(&self, seq: u64, key: &str, command: Command) {
+        self.send_origin(seq, key, command, Origin::Hub);
+    }
+
+    fn send_origin(&self, seq: u64, key: &str, command: Command, origin: Origin) {
         // A closed bridge means the test is over; nobody reads the command.
         let _ = self.tx.send(IncomingCommand {
             seq,
             idempotency_key: key.to_owned(),
             command,
+            origin,
         });
     }
 }
