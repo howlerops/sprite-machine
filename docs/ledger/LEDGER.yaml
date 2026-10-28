@@ -1650,6 +1650,8 @@ items:
     title: 'Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux'
     milestone: M1b
     phase: P2
+    status: "done"
+    evidence: "real run on this container (xvfb + lavapipe software Vulkan, 4 vCPU, no GPU), 5x50 s common workload; five JSON files validate. frame_time_p95 56.29 ms (gate 16.7: FAIL, CPU rasteriser, not representative), key_to_glyph_p95 19.2 ms PASS, cold_start 0.15 s PASS, rss_peak 166.9 MB PASS, binary_size 45.9 MB PASS. Exit-trap bug fixed in run-desktop.sh"
     lane: docs
     owner: leader
     deps:
@@ -6076,3 +6078,17 @@ items:
       - 'Each listed point has a Playwright test; the full suite passes'
     verify:
       - 'cd web && npx playwright test'
+
+  - id: M1B-008f
+    title: 'Re-run the desktop bench on a machine with a real GPU (Linux or macOS) and commit desktop_linux_gpu / desktop_macos results'
+    milestone: M1b
+    phase: P7
+    owner: human
+    status: "blocked"
+    blocked_on: 'human: a desktop with a GPU (the container renders with lavapipe on CPU)'
+    deps: [M1B-008c]
+    acceptance:
+      - 'frame_time_p95 measured on GPU hardware; results committed and validated'
+    verify:
+      - 'python3 -I spikes/bench/validate_results.py spikes/bench/results/gpui-kit/*/*.json'
+    howto: 'On a Linux desktop with a GPU or a Mac: install the deps from scripts/setup-dev.sh, then `bash spikes/bench/run-desktop.sh` from the repo root (Linux) and commit spikes/bench/results/gpui-kit/; on macOS this needs the macOS variant of the script (part of M1B-010).'

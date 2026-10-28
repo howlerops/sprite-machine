@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 121/281 (4 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 113/200
+done 122/282 (4 dropped) · in-flight — · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 113/200
 
 ## Per phase
 
@@ -10,12 +10,12 @@ done 121/281 (4 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, 
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 59 | 0 |
+| P2 | 69 | 60 | 0 |
 | P3 | 27 | 9 | 0 |
 | P4 | 58 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
-| P7 | 16 | 0 | 0 |
+| P7 | 17 | 0 | 0 |
 
 ## P2 items
 
@@ -27,7 +27,7 @@ done 121/281 (4 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, 
 | M1A-004a | worker | rust | done | sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn |
 | M1A-006c | worker | rust | done | runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume |
 | M1B-008b | worker | client | done | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
-| M1B-008c | leader | docs | todo | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
+| M1B-008c | leader | docs | done | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
 | M1B-009 | leader | docs | todo | ADR 0001a: desktop client stack (no devices needed) |
 | M2-008b | worker | rust | done | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
 | M2-008c | worker | rust | done | hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO |
@@ -104,3 +104,4 @@ done 121/281 (4 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, 
 | M6-002 | P7 | Create a Cloudflare API token scoped to the promotion target account (it may be a different account from the hub's): Account → Workers Scripts Edit, Containers Edit (or "Cloudchamber"), Workers R2 Storage Edit and D1 Edit if the promoted service uses them; Zone → Workers Routes Edit only for a custom domain. Enter it in the app's org settings (stored encrypted, M2-002). Record its scopes (no secret) in docs/ops/deploy-tokens.md. Never paste it into chat. |
 | M6-006 | P7 | Add Apple/Google/Windows signing material as CI secrets per docs/ops/release.md; approve store listings. |
 | M2-003d | P4 | github.com → Settings → Developer settings → OAuth Apps → New. Homepage = the hub URL, callback = <hub>/auth/github/callback. Then in crates/hub: `wrangler secret put GITHUB_CLIENT_SECRET`, add GITHUB_CLIENT_ID and HUB_PUBLIC_URL to the deployed environment vars, `wrangler d1 migrations apply DB`. Leave GITHUB_API_BASE unset. Needs M2-014 (Cloudflare resources) first. |
+| M1B-008f | P7 | On a Linux desktop with a GPU or a Mac: install the deps from scripts/setup-dev.sh, then `bash spikes/bench/run-desktop.sh` from the repo root (Linux) and commit spikes/bench/results/gpui-kit/; on macOS this needs the macOS variant of the script (part of M1B-010). |
