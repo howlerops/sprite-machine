@@ -54,7 +54,7 @@ mod permission;
 mod runtime;
 mod session_config;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -207,6 +207,9 @@ pub struct Bridge<S: EventSink, C: CommandSource> {
     /// ACP session id → thread id.
     by_session: HashMap<String, String>,
     approvals: HashMap<String, PendingApproval>,
+    /// Keys applied by this process. The command source commits a key to the store only after
+    /// `processed`, so this catches a repeat in between.
+    applied: HashSet<String>,
 }
 
 /// The channels between the bridge loop and the ACP client's handler.
@@ -348,6 +351,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             threads: HashMap::new(),
             by_session: HashMap::new(),
             approvals: HashMap::new(),
+            applied: HashSet::new(),
         }
     }
 }

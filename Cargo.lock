@@ -6506,6 +6506,7 @@ dependencies = [
 name = "runner"
 version = "0.1.0"
 dependencies = [
+ "acp-mock",
  "anyhow",
  "futures-util",
  "jsonschema",
