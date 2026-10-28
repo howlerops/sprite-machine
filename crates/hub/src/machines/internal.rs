@@ -15,6 +15,7 @@ use super::core::{PresenceChange, PushCommand};
 use super::driver::{HostError, ThreadHost, push_command_from_json};
 use super::store::HostKind;
 use crate::db::d1::D1;
+use crate::db::queries;
 use crate::threads::ApiError;
 
 /// Durable Object bindings (wrangler.toml).
@@ -176,6 +177,27 @@ impl ThreadHost for WorkerHost<'_> {
     }
 
     async fn init_thread(&self, thread_id: &str, info: &Value) -> Result<(), HostError> {
+        // Map the thread to its machine's org first (M2-008e); a thread already mapped to
+        // another org is refused and never reaches the Thread DO.
+        let field = |key: &str| info.get(key).and_then(Value::as_str);
+        let (Some(org_id), Some(machine_id)) = (field("org_id"), field("machine_id")) else {
+            return Err(HostError::Unavailable(
+                "thread init without org_id or machine_id".to_owned(),
+            ));
+        };
+        let database = self
+            .env
+            .d1("DB")
+            .map_err(|error| HostError::Unavailable(format!("D1 binding DB: {error}")))?;
+        let mapped = queries::claim_thread_host(&D1::new(&database), thread_id, org_id, machine_id)
+            .await
+            .map_err(|error| HostError::Unavailable(format!("thread_hosts: {error}")))?;
+        if !mapped {
+            return Err(HostError::Rejected {
+                code: NackCode::Forbidden,
+                message: format!("thread {thread_id} belongs to another org"),
+            });
+        }
         let path = format!("/internal/threads/{thread_id}/init");
         let (status, body) = call(
             self.env,

@@ -358,11 +358,11 @@ fn machine_of(token: Option<&str>) -> (String, String) {
     )
 }
 
-/// An owner session of a second org (the hub's one-time bootstrap; this test binary runs against
-/// its own hub, so nothing else has used it): `(token, machine id, credential)` of a machine there.
-fn foreign_org_machine() -> (String, String) {
+/// An owner session token of a second org (the hub's one-time bootstrap; this test binary runs
+/// against its own hub, so nothing else has used it).
+fn foreign_owner_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
-    let token = TOKEN.get_or_init(|| {
+    TOKEN.get_or_init(|| {
         let secret = std::env::var("BOOTSTRAP_OWNER_TOKEN").unwrap_or_else(|_| {
             panic!(
                 "BOOTSTRAP_OWNER_TOKEN is not set: run `bash scripts/hub-test.sh thread_create`."
@@ -379,8 +379,12 @@ fn foreign_org_machine() -> (String, String) {
         let out = reply.json();
         assert_ne!(out["org"]["id"], "org_dev");
         out["session"]["token"].as_str().expect("token").to_owned()
-    });
-    machine_of(Some(token))
+    })
+}
+
+/// A machine of the second org: `(machine id, credential)`.
+fn foreign_org_machine() -> (String, String) {
+    machine_of(Some(foreign_owner_token()))
 }
 
 /// The Machine DO's queued commands, through the dev state route.
@@ -619,4 +623,207 @@ fn a_viewer_cannot_create_a_thread() {
     assert_eq!(reply.status, 403, "viewer create: {}", reply.body);
     assert_eq!(reply.json()["error"], "forbidden");
     assert_eq!(outbox_len(&machine), 0, "nothing was queued");
+}
+
+// ---- thread routes are scoped to the caller's org (M2-008e) ---------------------------------
+
+/// The status code of a WebSocket upgrade request to `path` as `token` (101 when it is
+/// accepted; the socket is dropped right after).
+fn upgrade_status(path: &str, token: &str) -> u16 {
+    let mut stream = connect();
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {token}\r\n\
+         Upgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        authority()
+    );
+    stream.write_all(request.as_bytes()).expect("send upgrade");
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    while !line.ends_with(b"\r\n") {
+        match stream.read(&mut byte) {
+            Ok(1) => line.push(byte[0]),
+            other => panic!("connection ended before a status line ({other:?}): {line:?}"),
+        }
+    }
+    String::from_utf8_lossy(&line)
+        .split_whitespace()
+        .nth(1)
+        .and_then(|status| status.parse().ok())
+        .expect("status code")
+}
+
+/// `true` when `reply` is the `404 not_found` the org check answers for `thread`.
+fn is_no_thread(reply: &Reply, thread: &str) -> bool {
+    reply.status == 404
+        && reply.json()["error"] == "not_found"
+        && reply.json()["message"] == format!("no thread {thread}").as_str()
+}
+
+#[test]
+fn a_member_of_another_org_gets_404_on_every_thread_route_and_the_owner_org_still_works() {
+    let (machine, _credential) = dev_machine();
+    let created = create(&unique("idk_scoped"), &create_body(&machine, true));
+    assert_eq!(created.status, 201, "create: {}", created.body);
+    let thread = created.json()["thread_id"]
+        .as_str()
+        .expect("thread_id")
+        .to_owned();
+    let base = format!("/v1/threads/{thread}");
+    let head_before = http("GET", &base, true, None, None).json()["head_seq"].clone();
+    let outbox_before = outbox_len(&machine);
+
+    let foreign = foreign_owner_token();
+    let requests: Vec<(&str, String, Option<Value>)> = vec![
+        ("GET", base.clone(), None),
+        ("GET", format!("{base}/pending"), None),
+        (
+            "POST",
+            format!("{base}/prompts"),
+            Some(json!({
+                "task_id": unique("tk_foreign"),
+                "parts": [{ "type": "text", "text": "hijack" }],
+            })),
+        ),
+        (
+            "POST",
+            format!("{base}/interrupts/int_foreign"),
+            Some(json!({ "outcome": { "type": "selected", "option_id": "allow" } })),
+        ),
+        (
+            "POST",
+            format!("{base}/cancel"),
+            Some(json!({ "task_id": "tk_foreign" })),
+        ),
+        (
+            "POST",
+            format!("{base}/session"),
+            Some(json!({ "mode_id": "plan" })),
+        ),
+        ("DELETE", format!("{base}/pending/tk_foreign"), None),
+    ];
+    // The other org's calls first, so none of them can be answered from the owner's effects.
+    for (method, path, body) in &requests {
+        // Another org's owner: no role excuse, and a valid body, so only the org check refuses.
+        let denied = http_as(
+            method,
+            path,
+            Some(foreign),
+            Some(&unique("idk_foreign")),
+            body.as_ref(),
+        );
+        assert!(
+            is_no_thread(&denied, &thread),
+            "{method} {path} as the other org: {} {}",
+            denied.status,
+            denied.body
+        );
+    }
+    assert_eq!(upgrade_status(&format!("{base}/subscribe"), foreign), 404);
+    assert_eq!(
+        http("GET", &base, true, None, None).json()["head_seq"],
+        head_before,
+        "nothing reached the Thread DO"
+    );
+    assert_eq!(
+        outbox_len(&machine),
+        outbox_before,
+        "nothing reached the Machine DO"
+    );
+
+    // The thread's own org gets past the gate (whatever the route then answers).
+    for (method, path, body) in &requests {
+        let allowed = http_as(
+            method,
+            path,
+            Some("dev"),
+            Some(&unique("idk_owner")),
+            body.as_ref(),
+        );
+        assert!(
+            !is_no_thread(&allowed, &thread),
+            "{method} {path} as the owning org: {} {}",
+            allowed.status,
+            allowed.body
+        );
+    }
+    assert_eq!(upgrade_status(&format!("{base}/subscribe"), "dev"), 101);
+}
+
+#[test]
+fn an_unknown_thread_is_404_for_every_caller() {
+    let thread = unique("th_never_hosted");
+    for token in ["dev", foreign_owner_token()] {
+        let reply = http_as(
+            "GET",
+            &format!("/v1/threads/{thread}"),
+            Some(token),
+            None,
+            None,
+        );
+        assert!(
+            is_no_thread(&reply, &thread),
+            "{} {}",
+            reply.status,
+            reply.body
+        );
+        let prompt = http_as(
+            "POST",
+            &format!("/v1/threads/{thread}/prompts"),
+            Some(token),
+            Some(&unique("idk_unknown")),
+            Some(&json!({ "task_id": "tk_1", "parts": [{ "type": "text", "text": "hi" }] })),
+        );
+        assert!(
+            is_no_thread(&prompt, &thread),
+            "{} {}",
+            prompt.status,
+            prompt.body
+        );
+    }
+}
+
+#[test]
+fn a_thread_already_mapped_to_another_org_cannot_be_claimed_by_a_dev_init() {
+    let (machine, _) = foreign_org_machine();
+    let created = http_as(
+        "POST",
+        "/v1/threads",
+        Some(foreign_owner_token()),
+        Some(&unique("idk_other_org")),
+        Some(&create_body(&machine, false)),
+    );
+    assert_eq!(created.status, 201, "foreign create: {}", created.body);
+    let thread = created.json()["thread_id"]
+        .as_str()
+        .expect("thread_id")
+        .to_owned();
+    // The dev org (another org) tries to record a host for it: refused, nothing initialised.
+    for route in ["init", "host"] {
+        let reply = http(
+            "POST",
+            &format!("/v1/dev/threads/{thread}/{route}"),
+            true,
+            None,
+            Some(&json!({ "machine_id": "mch_dev_grab", "title": "grabbed" })),
+        );
+        assert!(
+            is_no_thread(&reply, &thread),
+            "{route}: {} {}",
+            reply.status,
+            reply.body
+        );
+    }
+    // The owner org still reads it, and its title is untouched; the dev org still gets 404.
+    let owned = http_as(
+        "GET",
+        &format!("/v1/threads/{thread}"),
+        Some(foreign_owner_token()),
+        None,
+        None,
+    );
+    assert_eq!(owned.status, 200, "{}", owned.body);
+    assert_eq!(owned.json()["title"], "Upgrade axum");
+    let dev = http("GET", &format!("/v1/threads/{thread}"), true, None, None);
+    assert!(is_no_thread(&dev, &thread), "{} {}", dev.status, dev.body);
 }
