@@ -5397,6 +5397,9 @@ items:
     title: 'hub: regression tests that the access log never records the query string and that the Thread DO never sees ticket='
     milestone: M2
     phase: P4
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
@@ -6170,6 +6173,9 @@ items:
     title: 'runner tui: when a task ends, a queued local line and a phone prompt queued at the hub do not race (the hub tells the TUI what it will send next, or the TUI sends only when the hub has nothing queued)'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
