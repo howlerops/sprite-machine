@@ -5900,7 +5900,8 @@ items:
     title: 'hub (security): GitHub sign-in hardening — per-IP limit on unauthenticated authorize starts; purge expired oauth_requests/oauth_codes/org_invites in the hourly cron; link a pre-created user by login only if created < 7 days ago and confirm on first sign-in (GitHub logins can be renamed and re-registered)'
     milestone: M2
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; wasm clippy clean, cargo test -p hub 318/0, live oauth/authz/smoke PASS on merged tree; 7-day link rule covered natively (no route creates a login-only user)"
     assignee: "sonnet"
     attempt: 1
     lane: rust

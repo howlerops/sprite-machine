@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 116/278 (3 dropped) · in-flight M2B-019,M2-003e,WEB-006,M1B-008e · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 113/200
+done 118/278 (3 dropped) · in-flight M2B-019,WEB-006 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 113/200
 
 ## Per phase
 
@@ -10,8 +10,8 @@ done 116/278 (3 dropped) · in-flight M2B-019,M2-003e,WEB-006,M1B-008e · blocke
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 57 | 2 |
-| P3 | 27 | 7 | 2 |
+| P2 | 69 | 58 | 1 |
+| P3 | 27 | 8 | 1 |
 | P4 | 56 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
@@ -89,7 +89,7 @@ done 116/278 (3 dropped) · in-flight M2B-019,M2-003e,WEB-006,M1B-008e · blocke
 | M2B-014d | worker | rust | done | notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine |
 | M2B-010a | worker | rust | done | hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree |
 | M2B-010b | worker | rust | todo | cli e2e tui: sm TUI session with acp-mock against wrangler dev (/rc registers, a phone prompt shows in the TUI, tunnel drop and restore) |
-| M1B-008e | worker | docs | assigned | Bench prep for M1B-008c: run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its fixture output; terminal/approval repaints are logged |
+| M1B-008e | worker | docs | done | Bench prep for M1B-008c: run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its fixture output; terminal/approval repaints are logged |
 
 ## Waiting on the human
 
