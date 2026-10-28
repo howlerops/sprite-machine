@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 69/227 (3 dropped) · in-flight M1A-006f,M2-008e,M2B-005 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 66/120
+done 71/229 (3 dropped) · in-flight M1B-008b,M2-008e,M2B-006 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 68/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 69/227 (3 dropped) · in-flight M1A-006f,M2-008e,M2B-005 · blocked 11 (hum
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 47 | 16 | 3 |
+| P2 | 49 | 18 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -26,7 +26,7 @@ done 69/227 (3 dropped) · in-flight M1A-006f,M2-008e,M2B-005 · blocked 11 (hum
 | M0-018 | human | rust | done | Provide a Cloudflare account + API token |
 | M1A-004a | worker | rust | done | sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn |
 | M1A-006c | worker | rust | done | runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume |
-| M1B-008b | worker | client | todo | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
+| M1B-008b | worker | client | assigned | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
 | M1B-008c | leader | docs | todo | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
 | M1B-009 | leader | docs | todo | ADR 0001a: desktop client stack (no devices needed) |
 | M2-008b | worker | rust | done | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
@@ -41,10 +41,12 @@ done 69/227 (3 dropped) · in-flight M1A-006f,M2-008e,M2B-005 · blocked 11 (hum
 | M2B-004d | worker | rust | done | runner: OS sleep hook calls SleepHint::asleep (macOS willSleep, Linux logind PrepareForSleep); TunnelSink tracks opened threads (thread_open once per thread, events for an unopened local thread refused) |
 | M2-008d | worker | rust | done | hub authz: POST /v1/threads only for a machine of the caller's org (not revoked); POST /v1/threads in the auth policy table |
 | CI-002 | worker | docs | todo | scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree's hub.wasm stand in) |
-| M1A-006f | worker | rust | assigned | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
+| M1A-006f | worker | rust | done | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
 | M2B-004e | worker | rust | todo | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
 | M2-008e | worker | rust | assigned | hub authz (security): every thread route checks the thread belongs to the caller's org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404 |
 | M1A-006g | worker | rust | todo | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
+| M2B-005a | worker | rust | todo | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
+| M2B-005b | worker | rust | todo | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | todo | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
@@ -53,8 +55,8 @@ done 69/227 (3 dropped) · in-flight M1A-006f,M2-008e,M2B-005 · blocked 11 (hum
 | M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
 | M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
-| M2B-005 | worker | rust | assigned | runner: `sm login` device-code pairing + trusted device + keychain |
-| M2B-006 | worker | rust | todo | runner: local harness discovery + local logins/MCP passthrough |
+| M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
+| M2B-006 | worker | rust | assigned | runner: local harness discovery + local logins/MCP passthrough |
 | M2B-007 | worker | rust | todo | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
 | M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |
 | M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |

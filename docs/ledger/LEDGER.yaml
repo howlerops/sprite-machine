@@ -1621,6 +1621,9 @@ items:
     title: 'gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript'
     milestone: M1b
     phase: "P2"
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: client
     size: M
     risk: low
@@ -2299,7 +2302,8 @@ items:
     title: 'Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts'
     milestone: M1a
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 80b58f8; protocol+sidecar 293 passed (golden harness_exit_two_open_interrupts, bridge_robust 9), schemas 32 OK, clippy clean, hub wasm builds, tracer PASS. Criterion 1 (tracer spawn_with) moved to M2B-007 acceptance; SPEC-004 amended 1e1126d"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2824,7 +2828,8 @@ items:
     title: 'runner: `sm login` device-code pairing + trusted device + keychain'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 0ed5a67; hub+runner 251 passed, clippy native/live/wasm clean, no tokio runtime, hub-test devices 6 / machine_do / authz PASS, tracer PASS, no openssl-sys. require_trusted_devices not enforced at the tunnel yet and approve not rate-limited -> M2B-005a (priority 1)"
     attempt: 1
     assignee: "worker:sonnet"
     deps: [M2B-004, M2B-002, M2-003a]
@@ -2848,6 +2853,9 @@ items:
     title: 'runner: local harness discovery + local logins/MCP passthrough'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [M2B-003]
     paths:
       - 'crates/runner/src/harness/**'

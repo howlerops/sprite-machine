@@ -154,3 +154,5 @@
 2026-10-28T09:20Z M2-008e assigned (sonnet, priority 1 security). M1A-006f assigned (haiku)
 2026-10-28T09:25Z M2B-005 merged 0ed5a67 (sonnet; out-of-path db/mod.rs MIGRATIONS entry accepted). Review: device-code remote-phishing risk (attacker approves a guessed code into their org) → M2B-005a (priority 1: tunnel trust gate, approve rate limit, runner confirms approving org). M2B-005b (logout/status/run). Verify running
 2026-10-28T09:34Z M1A-006f back (haiku): criteria 2, 3 met (mapper resolves requests buffered during a pause; fail_stale_interrupts removed); criterion 1 (tracer spawn_with) blocked again by a test file outside paths (leader scoping) → folded into M2B-007 acceptance (sm rc builds bridges with spawn_with; KeychainCredentials; sleep watcher; thread_open). SPEC-004 amended 1e1126d (one resume run per buffered request)
+2026-10-28T09:38Z M2B-005 → done (verify: hub+runner 251, devices/machine_do/authz live, tracer, no openssl). M1A-006f merged 80b58f8 → done (293 passed, tracer)
+2026-10-28T09:38Z M2B-006 assigned (haiku), M1B-008b assigned (haiku). WEB-001 held until M2-008e lands (hub auth files)
