@@ -28,7 +28,7 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 
 use super::backoff::{Backoff, Jitter, RandomJitter};
-use super::io::{Shared, TunnelCommands, TunnelSink, frame_text};
+use super::io::{AnswerReply, Shared, TunnelCommands, TunnelSink, frame_text};
 use super::tls;
 use super::{SystemWallClock, TunnelConfig, WallClock};
 
@@ -600,6 +600,13 @@ impl<C: CredentialSource> TunnelClient<C> {
                                 store.ack_outbound(seq)?;
                                 tracing::warn!(seq, ?code, %message, "hub rejected an up frame");
                                 if let Some(body) = rejected {
+                                    // An answer typed here that the hub refused outright.
+                                    if let Some(id) =
+                                        body.body.get("answer_id").and_then(Value::as_str)
+                                    {
+                                        self.shared
+                                            .finish_answer(id, Err(format!("{code:?}: {message}")));
+                                    }
                                     fail_task(
                                         &self.shared,
                                         self.wall.as_ref(),
@@ -623,6 +630,19 @@ impl<C: CredentialSource> TunnelClient<C> {
                                     self.accept_command(seq, idempotency_key, command)?;
                                 }
                             },
+                            Frame::InterruptAnswerResult {
+                                answer_id,
+                                status,
+                                resolved_by,
+                                message,
+                            } => self.shared.finish_answer(
+                                &answer_id,
+                                Ok(AnswerReply {
+                                    status,
+                                    resolved_by,
+                                    message,
+                                }),
+                            ),
                             Frame::Ping => {
                                 send(&mut sink, serde_json::to_string(&Frame::Pong)?).await?
                             }

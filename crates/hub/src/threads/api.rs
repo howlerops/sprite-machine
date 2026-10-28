@@ -30,6 +30,7 @@
 //! | `GET  /internal/threads/{id}/commands?limit=N`    | `{commands: [...]}` not yet acked  |
 //! | `POST /internal/threads/{id}/commands/ack`        | `{ids: [..]}`                      |
 //! | `POST /internal/threads/{id}/init`                | `{machine_id, agent, workspace, permission_mode, title}` |
+//! | `POST /internal/threads/{id}/interrupt-answers`   | `{answer_id, interrupt_id, outcome, actor}` from a terminal answer; `{status, resolved_by?, message}` |
 //!
 //! The subscription WebSocket (`GET /v1/threads/{id}/subscribe`) needs the runtime and lives in
 //! `do/thread.rs`; its messages come from [`ThreadCore::catch_up`].
@@ -205,6 +206,25 @@ fn route<S: ThreadStore>(
             let body: AckBody = parse_body(&request.body)?;
             let acked = core.ack_commands(&body.ids)?;
             Ok(Reply::new(200, json!({ "acked": acked })))
+        }
+        // An answer typed on the machine's terminal, forwarded by the Machine DO (tunnel.md
+        // §3.6a): resolved like the phone's `POST /interrupts/{id}`, the actor is the local user.
+        ("POST", ["internal", "threads", _, "interrupt-answers"]) => {
+            #[derive(Deserialize)]
+            struct MachineAnswer {
+                answer_id: String,
+                interrupt_id: String,
+                outcome: ResolvedOutcome,
+                actor: Actor,
+            }
+            let body: MachineAnswer = parse_body(&request.body)?;
+            core.answer_from_machine(
+                &body.actor,
+                &body.answer_id,
+                &body.interrupt_id,
+                body.outcome,
+                now_ms,
+            )
         }
         ("POST", ["internal", "threads", _, "create"]) => {
             let body: CreateThreadBody = parse_body(&request.body)?;

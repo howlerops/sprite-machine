@@ -12,7 +12,7 @@ use worker::{Env, Headers, Method, Request, RequestInit};
 
 use super::admin::{self, MachineControl};
 use super::core::{PresenceChange, PushCommand};
-use super::driver::{HostError, ThreadHost, push_command_from_json};
+use super::driver::{AnswerVerdict, HostError, MachineAnswer, ThreadHost, push_command_from_json};
 use super::store::HostKind;
 use crate::db::d1::D1;
 use crate::db::queries;
@@ -150,6 +150,49 @@ impl ThreadHost for WorkerHost<'_> {
         } else {
             Err(host_error(status, &body))
         }
+    }
+
+    async fn answer_interrupt(
+        &self,
+        thread_id: &str,
+        answer: &MachineAnswer<'_>,
+    ) -> Result<AnswerVerdict, HostError> {
+        let path = format!("/internal/threads/{thread_id}/interrupt-answers");
+        let body = json!({
+            "answer_id": answer.answer_id,
+            "interrupt_id": answer.interrupt_id,
+            "outcome": answer.outcome,
+            "actor": answer.actor,
+        });
+        let (status, text) = call(
+            self.env,
+            THREAD_BINDING,
+            thread_id,
+            Method::Post,
+            &path,
+            Some(&body),
+        )
+        .await
+        .map_err(unavailable)?;
+        if status != 200 {
+            return Err(host_error(status, &text));
+        }
+        serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|value| {
+                Some(AnswerVerdict {
+                    status: serde_json::from_value(value.get("status")?.clone()).ok()?,
+                    resolved_by: value
+                        .get("resolved_by")
+                        .and_then(|actor| serde_json::from_value(actor.clone()).ok()),
+                    message: value
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+            })
+            .ok_or_else(|| HostError::Unavailable(format!("interrupt answer reply: {text}")))
     }
 
     async fn thread_machine(&self, thread_id: &str) -> Result<Option<String>, HostError> {

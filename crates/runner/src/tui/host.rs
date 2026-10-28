@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
-use protocol::tunnel::{Command, CommandErrorCode, Workspace};
+use protocol::tunnel::{AnswerStatus, Command, CommandErrorCode, Outcome, Workspace};
 use protocol::turn_event::Envelope;
 use sidecar::bridge::{
     Bridge, CommandFailure, CommandSource, Config, EventSink, IdGenerator, McpProvider, UlidIds,
@@ -25,7 +25,8 @@ use tokio::sync::{OnceCell, oneshot};
 use super::app::App;
 use super::driver;
 use super::session::{
-    Handle, Identity, Processed, Registrar, Registration, Session, Upstream, UpstreamFuture,
+    Handle, HubAnswerFuture, HubVerdict, Identity, Processed, Registrar, Registration, Session,
+    Upstream, UpstreamFuture,
 };
 use super::term::{self, TerminalGuard};
 use crate::harness;
@@ -36,6 +37,9 @@ use crate::server::{PermissionMode, host_prefix, session_dir, session_name};
 use crate::settings::Settings;
 use crate::trust::{self, Asker, Audit, TrustStore};
 use crate::tunnel::{Timing, TunnelCommands, TunnelConfig, TunnelSink, tunnel};
+
+/// How long an answer typed here waits for the hub's verdict.
+const ANSWER_WAIT: Duration = Duration::from_secs(10);
 
 /// How long the tunnel gets to say goodbye at exit.
 const GOODBYE: Duration = Duration::from_secs(2);
@@ -331,6 +335,32 @@ impl Upstream for TunnelUpstream {
                 .await
                 .map_err(|error| error.to_string())
         })
+    }
+
+    fn answer<'a>(
+        &'a self,
+        thread_id: &'a str,
+        interrupt_id: &'a str,
+        outcome: &'a Outcome,
+    ) -> HubAnswerFuture<'a> {
+        Box::pin(async move {
+            self.0
+                .interrupt_answer(thread_id, interrupt_id, outcome, ANSWER_WAIT)
+                .await
+                .map(Self::verdict)
+        })
+    }
+}
+
+impl TunnelUpstream {
+    fn verdict(reply: crate::tunnel::AnswerReply) -> HubVerdict {
+        match reply.status {
+            AnswerStatus::Accepted => HubVerdict::Accepted,
+            AnswerStatus::AlreadyResolved => HubVerdict::AlreadyAnswered {
+                by: reply.resolved_by,
+            },
+            AnswerStatus::Rejected => HubVerdict::Rejected(reply.message),
+        }
     }
 }
 

@@ -1383,6 +1383,55 @@ impl<S: ThreadStore> ThreadCore<S> {
         ))
     }
 
+    /// An interrupt answer that came up the tunnel from the machine's own terminal (tunnel.md
+    /// §3.6a): [`ThreadCore::answer_interrupt`] with the machine's local user as the actor, and
+    /// `answer_id` as the idempotency key. The verdict is always a 200 body
+    /// `{status, resolved_by?, message}` so the Machine DO can pass it on: `accepted`,
+    /// `already_resolved` (naming the winner) or `rejected` (unknown, expired, not allowed).
+    pub fn answer_from_machine(
+        &mut self,
+        actor: &Actor,
+        answer_id: &str,
+        interrupt_id: &str,
+        outcome: ResolvedOutcome,
+        now_ms: u64,
+    ) -> Result<Reply, ApiError> {
+        if !valid_idempotency_key(answer_id) {
+            return Err(ApiError::invalid_request(
+                "answer_id must be 1-128 characters of [A-Za-z0-9_:.-], not starting with local:",
+            ));
+        }
+        let hash = request_hash(
+            "POST",
+            interrupt_id,
+            &serde_json::to_value(&outcome).unwrap_or(Value::Null),
+        );
+        self.idempotent(actor, answer_id, &hash, now_ms, |core| {
+            let verdict = match core.answer_interrupt(
+                actor,
+                answer_id,
+                interrupt_id,
+                outcome.clone(),
+                now_ms,
+            ) {
+                Ok(_) => {
+                    json!({ "status": "accepted", "resolved_by": actor, "message": "accepted" })
+                }
+                Err(error) if error.code == "already_resolved" => json!({
+                    "status": "already_resolved",
+                    "resolved_by": error.resolved_by,
+                    "message": error.message,
+                }),
+                Err(error) if (400..500).contains(&error.status) => json!({
+                    "status": "rejected",
+                    "message": format!("{}: {}", error.code, error.message),
+                }),
+                Err(error) => return Err(error),
+            };
+            Ok(Reply::new(200, verdict))
+        })
+    }
+
     // ---- cancel (client-api.md §5.5) --------------------------------------------------------
 
     /// `POST /cancel`: records the cancel and abandons the task's open interrupts

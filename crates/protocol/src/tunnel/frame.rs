@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::command::Command;
-use super::types::Workspace;
+use super::types::{Actor, Outcome, Workspace};
 
-/// Every tunnel frame. Sequenced frames (`event`, `thread_open`, `command_result` up;
+/// Every tunnel frame. Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer` up;
 /// `command` down) carry `seq`; the rest do not.
 ///
 /// `ping` and `pong` serialize to exactly `{"t":"ping"}` and `{"t":"pong"}` (§3.7), so the
@@ -58,6 +58,25 @@ pub enum Frame {
         idempotency_key: String,
         ok: bool,
         code: CommandErrorCode,
+        message: String,
+    },
+    /// Runner → hub: an interrupt answer typed on the runner; the Thread DO arbitrates it (§3.6a).
+    InterruptAnswer {
+        seq: u64,
+        event_id: String,
+        thread_id: String,
+        interrupt_id: String,
+        /// Chosen by the runner, unique per attempt: correlates the reply, keys the hub's dedupe.
+        answer_id: String,
+        outcome: Outcome,
+    },
+    /// Hub → runner: the verdict on one `interrupt_answer` (§3.6a). Not sequenced.
+    InterruptAnswerResult {
+        answer_id: String,
+        status: AnswerStatus,
+        /// Who won (`accepted`: the local user; `already_resolved`: the other answerer).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolved_by: Option<Actor>,
         message: String,
     },
     /// Hub → runner: one command (§3.5).
@@ -130,6 +149,18 @@ pub enum NackCode {
     /// The thread is not hosted by this machine.
     Forbidden,
     TooLarge,
+}
+
+/// The hub's verdict on an `interrupt_answer` (§3.6a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerStatus {
+    /// This answer won; the `approval` command follows.
+    Accepted,
+    /// Another answer won first (the phone route's `409`).
+    AlreadyResolved,
+    /// Unknown interrupt, expired, or an outcome the interrupt does not allow.
+    Rejected,
 }
 
 /// Why a runner could not apply a command (§3.6).

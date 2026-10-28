@@ -13,10 +13,13 @@
 //!   bridge's output and the answers typed here) also go up to it, after a `thread_open`; what
 //!   happened before `/rc` goes first, in order. `/rc` again stops sending; the next `/rc` sends
 //!   what was missed.
-//! - **First answer wins.** An answer typed here is accepted if the log has no answer to that
-//!   interrupt yet, else it is [`AnswerResult::AlreadyAnswered`] with the winner. A phone's
-//!   answer reaches the log through its command, so whichever reached this runner first wins.
-//!   The bridge refuses the second command (`unknown_interrupt`).
+//! - **First answer wins.** While the session is shared the hub decides (tunnel.md §3.6a): an
+//!   answer typed here goes up as an `interrupt_answer` and is applied only after the hub accepts
+//!   it, through the `approval` command the hub sends back like it does for a phone's answer.
+//!   If the phone answered first the hub says so ([`AnswerResult::AlreadyAnswered`] with the
+//!   winner) and the agent runs the phone's choice. Only a session that is not shared decides
+//!   alone: the first answer to reach its own log wins, and the bridge refuses a second
+//!   command (`unknown_interrupt`).
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -53,7 +56,31 @@ pub trait Upstream: Send + Sync {
 
     /// Sends envelopes (producer side, `seq` 0) in order.
     fn send<'a>(&'a self, envelopes: Vec<Envelope>) -> UpstreamFuture<'a>;
+
+    /// Sends an interrupt answer typed here and waits for the hub's verdict (tunnel.md §3.6a).
+    /// `Err` is "no verdict"; the answer then is not applied here.
+    fn answer<'a>(
+        &'a self,
+        thread_id: &'a str,
+        interrupt_id: &'a str,
+        outcome: &'a Outcome,
+    ) -> HubAnswerFuture<'a>;
 }
+
+/// The hub's verdict on an answer typed here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HubVerdict {
+    /// This answer won: the hub's `approval` command applies it.
+    Accepted,
+    /// Another answer won first.
+    AlreadyAnswered { by: Option<Actor> },
+    /// Unknown, expired or not allowed.
+    Rejected(String),
+}
+
+/// The future of [`Upstream::answer`].
+pub type HubAnswerFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<HubVerdict, String>> + Send + 'a>>;
 
 /// What a successful registration gives back.
 pub struct Registration {
@@ -436,6 +463,18 @@ impl Backend for Session {
         let Some(task_id) = inner.task_of(interrupt_id) else {
             return AnswerResult::Failed("unknown approval".to_owned());
         };
+        // Shared: the hub decides. Nothing is applied here; the hub's `approval` command (which
+        // reaches the log and the agent like a phone's answer) is the only way it gets applied.
+        if let Some(upstream) = inner.upstream.clone() {
+            let thread_id = inner.thread_id.clone();
+            drop(inner);
+            return match upstream.answer(&thread_id, interrupt_id, &outcome).await {
+                Ok(HubVerdict::Accepted) => AnswerResult::Accepted,
+                Ok(HubVerdict::AlreadyAnswered { by }) => AnswerResult::AlreadyAnswered { by },
+                Ok(HubVerdict::Rejected(message)) | Err(message) => AnswerResult::Failed(message),
+            };
+        }
+        // Not shared: the first answer to reach this log wins.
         // In the log first, so the bridge's events that follow come after it.
         let resolved = InterruptResolved {
             interrupt_id: interrupt_id.to_owned(),
@@ -464,9 +503,6 @@ impl Backend for Session {
             command,
             origin: Origin::Local,
         });
-        if let Err(error) = inner.flush().await {
-            tracing::warn!("could not send the answer to the hub: {error}");
-        }
         AnswerResult::Accepted
     }
 

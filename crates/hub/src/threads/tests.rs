@@ -987,6 +987,118 @@ fn interrupt_route_replays_the_winner_and_409s_other_keys() {
     assert_eq!(loser.body["resolved_by"]["id"], "usr_1");
 }
 
+fn approvals(core: &ThreadCore<MemoryStore>) -> Vec<Command> {
+    commands(core)
+        .into_iter()
+        .filter(|command| matches!(command, Command::Approval { .. }))
+        .collect()
+}
+
+fn machine_answer(
+    core: &mut ThreadCore<MemoryStore>,
+    answer_id: &str,
+    interrupt_id: &str,
+) -> Value {
+    let request = request(
+        "POST",
+        "/internal/threads/th_1/interrupt-answers",
+        "ignored",
+        None,
+        json!({
+            "answer_id": answer_id,
+            "interrupt_id": interrupt_id,
+            "outcome": {"type": "selected", "option_id": "allow"},
+            "actor": actor("local:mch_1"),
+        }),
+    );
+    let response = api::handle(core, &request, NOW);
+    assert_eq!(response.status, 200, "{:?}", response.body);
+    response.body
+}
+
+#[test]
+fn a_terminal_answer_that_wins_is_resolved_like_the_phone_route_and_the_phone_then_gets_409() {
+    let mut core = core();
+    paused_with_interrupt(&mut core, NOW + 600_000);
+
+    let verdict = machine_answer(&mut core, "ans_1", "int_1");
+    assert_eq!(verdict["status"], "accepted");
+    assert_eq!(verdict["resolved_by"]["id"], "local:mch_1");
+    let appended = core.take_appended();
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].event.type_name(), "InterruptResolved");
+    // The approval command goes to the runner like a phone's answer would.
+    assert!(matches!(
+        &approvals(&core)[..],
+        [Command::Approval { interrupt_id, outcome: Outcome::Selected { option_id }, resolved_by, .. }]
+            if interrupt_id == "int_1" && option_id == "allow" && resolved_by.id == "local:mch_1"
+    ));
+
+    // The phone's POST now loses, naming the terminal.
+    let loser = api::handle(
+        &mut core,
+        &request(
+            "POST",
+            "/v1/threads/th_1/interrupts/int_1",
+            "usr_1",
+            Some("idk_p"),
+            json!({"outcome": {"type": "selected", "option_id": "allow"}}),
+        ),
+        NOW,
+    );
+    assert_eq!(loser.status, 409);
+    assert_eq!(loser.body["resolved_by"]["id"], "local:mch_1");
+    assert_eq!(
+        approvals(&core).len(),
+        1,
+        "only the winner's command is queued"
+    );
+}
+
+#[test]
+fn a_terminal_answer_that_loses_to_the_phone_is_refused_with_the_winner_and_changes_nothing() {
+    let mut core = core();
+    paused_with_interrupt(&mut core, NOW + 600_000);
+    core.answer_interrupt(&actor("usr_1"), "idk_a1", "int_1", allow(), NOW)
+        .expect("phone answer");
+    core.take_appended();
+
+    let verdict = machine_answer(&mut core, "ans_1", "int_1");
+    assert_eq!(verdict["status"], "already_resolved");
+    assert_eq!(verdict["resolved_by"]["id"], "usr_1");
+    assert!(core.take_appended().is_empty());
+    assert!(
+        matches!(
+            &approvals(&core)[..],
+            [Command::Approval { outcome: Outcome::Selected { option_id }, resolved_by, .. }]
+                if option_id == "allow" && resolved_by.id == "usr_1"
+        ),
+        "the agent is told the phone's choice only"
+    );
+}
+
+#[test]
+fn a_repeated_terminal_answer_gets_its_first_verdict_and_an_unknown_interrupt_is_rejected() {
+    let mut core = core();
+    paused_with_interrupt(&mut core, NOW + 600_000);
+    let first = machine_answer(&mut core, "ans_1", "int_1");
+    let again = machine_answer(&mut core, "ans_1", "int_1");
+    assert_eq!(
+        first, again,
+        "a retransmit does not turn the winner into a loser"
+    );
+    assert_eq!(approvals(&core).len(), 1);
+
+    let rejected = machine_answer(&mut core, "ans_2", "int_9");
+    assert_eq!(rejected["status"], "rejected");
+    assert!(rejected["resolved_by"].is_null());
+    assert!(
+        rejected["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("int_9"))
+    );
+}
+
 #[test]
 fn dev_and_internal_routes() {
     let mut core = core();

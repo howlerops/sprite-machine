@@ -45,7 +45,7 @@ runner                                   Machine DO (hub)                       
 ## 3. Frames
 
 Every frame is an object with a `t` (type) field. Field names are `snake_case`.
-Sequenced frames (`event`, `thread_open`, `command_result` up; `command` down) carry
+Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer` up; `command` down) carry
 `seq`; the rest do not.
 
 | Frame            | Direction | Sequenced | Purpose                                                     |
@@ -55,6 +55,8 @@ Sequenced frames (`event`, `thread_open`, `command_result` up; `command` down) c
 | `event`          | up        | yes       | One TurnEvent envelope.                                     |
 | `thread_open`    | up        | yes       | Registers a thread started on the runner (TUI, `/rc`).      |
 | `command_result` | up        | yes       | Outcome of a command that the runner could not apply.       |
+| `interrupt_answer` | up      | yes       | An interrupt answer typed on the runner (TUI); the hub arbitrates it. |
+| `interrupt_answer_result` | down | no     | The hub's verdict on one `interrupt_answer`.                |
 | `command`        | down      | yes       | prompt, approval, dispatch, cancel.                         |
 | `ack`            | both      | no        | Cumulative ack of the peer's stream.                        |
 | `nack`           | down      | no        | The hub rejected one up frame (it still counts as acked).   |
@@ -289,6 +291,61 @@ Sent only when a command **cannot** be applied (success shows up as TurnEvents):
 Codes: `capacity`, `unknown_thread`, `unknown_interrupt`, `workspace_untrusted`,
 `harness_missing`, `unsupported`, `invalid`.
 
+### 3.6a `interrupt_answer` (up) and `interrupt_answer_result` (down)
+
+An answer typed on the runner itself (the `sm` TUI) is **not** an `event`. The runner does not
+write `InterruptResolved` to its own log or to the agent first; it sends the answer up and
+waits for the hub, so a phone and the terminal race under one rule.
+
+```json
+{
+  "t": "interrupt_answer",
+  "seq": 122,
+  "event_id": "evt_01JBW5E0A9",
+  "thread_id": "th_1",
+  "interrupt_id": "int_1",
+  "answer_id": "ans_01JBW5E0A8",
+  "outcome": { "type": "selected", "option_id": "allow" }
+}
+```
+
+- `outcome` is the `approval` command's union (§3.5): `selected`, `submitted`, `declined`,
+  `cancelled`. `answer_id` is chosen by the runner, unique per answer attempt; it correlates
+  the reply and is the hub's idempotency key for the answer.
+- The Machine DO checks the thread is hosted by this machine (else `nack{forbidden}`) and
+  passes the answer to the Thread DO, which resolves it **exactly as it resolves
+  `POST /v1/threads/{id}/interrupts/{interrupt_id}`**: the same first-answer-wins rule, the same
+  checks (unknown interrupt, expired, an outcome the interrupt does not allow), with the
+  actor being the machine's local user (`{kind: "user", id: "local:<machine_id>", name:
+  "terminal", device_id: <machine_id>}`). If the answer wins, the Thread DO appends
+  `InterruptResolved` and queues the `approval` command for the runner **the same way it does
+  for a phone's answer**, so the agent always runs the answer the hub's log names.
+- The Machine DO answers every `interrupt_answer` it processes with one down frame:
+
+```json
+{
+  "t": "interrupt_answer_result",
+  "answer_id": "ans_01JBW5E0A8",
+  "status": "already_resolved",
+  "resolved_by": { "kind": "user", "id": "usr_1", "device_id": "dev_phone" },
+  "message": "this interrupt was already answered"
+}
+```
+
+  `status` is `accepted` (this answer won; `resolved_by` is the local user), `already_resolved`
+  (another answer won first; `resolved_by` names it; this is the typed refusal, the equivalent
+  of the phone route's `409`), or `rejected` (`404` unknown interrupt, `410` expired, `400`
+  not allowed; `message` says which). `resolved_by` is absent for `rejected`.
+- The result is not sequenced: it is a prompt for the person at the keyboard, not state. If
+  the connection drops before it arrives the runner treats the answer as **not accepted** and
+  shows the interrupt as still open; the log catches up through the `approval` command (§3.5),
+  which is the only way an answer reaches the agent while the session is shared. A runner
+  that gets `already_resolved` shows "already answered", applies nothing, and runs the
+  phone's choice when its `approval` command arrives.
+- **Offline TUI.** A session that is not registered with a hub (no tunnel; `/rc` never ran or
+  was turned off) keeps the local rule: the first answer to reach the runner's own log wins,
+  and nothing is sent up. This is the only case in which the runner decides an answer itself.
+
 ### 3.7 `ack`, `nack`, `presence`, `ping` / `pong`
 
 ```json
@@ -376,7 +433,7 @@ connection has stayed up for 60 s.
 
 ### 4.1 Streams
 
-- **Up stream**: frames `event`, `thread_open`, `command_result`, numbered by the runner from
+- **Up stream**: frames `event`, `thread_open`, `command_result`, `interrupt_answer`, numbered by the runner from
   1, gap-free.
 - **Down stream**: `command` frames, numbered by the Machine DO from 1, gap-free.
 - A stream lives as long as its **resume-token chain** (§4.3). A fresh stream (§4.4)
@@ -451,7 +508,7 @@ On `resumed: false` both sides restart numbering at 1:
 For every up frame, the Machine DO checks, in order:
 
 1. The frame parses and matches this spec; else `close{protocol_error}`.
-2. `event.envelope.thread_id` (or `thread_open.thread_id`) is a thread hosted by this
+2. `event.envelope.thread_id` (or `thread_open.thread_id`, `interrupt_answer.thread_id`) is a thread hosted by this
    machine (registered by `thread_open` or created by a `dispatch` to it); else `nack{forbidden}`.
 3. The envelope validates against `crates/protocol/schemas/turn-event/envelope.schema.json`
    and its size ≤ 256 KiB; else `nack{invalid_envelope}` / `nack{too_large}`.
