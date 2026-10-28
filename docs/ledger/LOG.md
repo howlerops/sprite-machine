@@ -256,3 +256,4 @@
 2026-10-28T21:04Z M3-001k back (haiku) → merged, client-core 44/0 → done
 2026-10-28T21:04Z assign M2-003f (haiku)
 2026-10-28T21:29Z M2B-004f back (sonnet): found a real macOS compile error (struct Context vs anyhow::Context) that kept the macos CI job red; logind mock-bus tests → merged, done. CI now runs: linux + tracer green on run 178, macos red there (pre-fix). M2-003f back (haiku): live verify blocked on the shared cargo lock held by M3-002's gpui build → merged, leader running its verify. MVP-000h (strip step without the shared lock) moved up
+2026-10-28T21:29Z assign MVP-000h (haiku)
