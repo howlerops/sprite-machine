@@ -203,7 +203,7 @@ in_xvfb() {
   GPUI_SPIKE_WORKLOAD="$WORKLOAD" GPUI_SPIKE_FIXTURE_ADDR="$fixture_addr" GPUI_SPIKE_BENCH_LOG="$frames" \
     "$bin" > "$log" 2>&1 &
   pid=$!
-  trap 'kill "$pid" 2>/dev/null || true' EXIT
+  trap 'kill "${pid:-}" 2>/dev/null || true' EXIT
   sample_rss "$pid" "$rss" &
   sampler=$!
   until grep -q '^BENCH_MARKER first_interactive_frame ' "$log" 2>/dev/null; do
