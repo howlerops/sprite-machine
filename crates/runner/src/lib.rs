@@ -2,3 +2,4 @@
 //! The `sm` binary is `src/main.rs`.
 
 pub mod tracer;
+pub mod tunnel;
