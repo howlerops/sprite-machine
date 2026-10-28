@@ -239,6 +239,11 @@ code:"invalid"}`.
 }
 ```
 
+MCP servers for the thread's ACP session (`session/new`, `session/resume`, `session/load`) are
+**not** carried by `dispatch` (SPEC-004): until loadouts (plan §4.6, M5) they come from the
+runner's local configuration (a default list plus per-thread entries). A later revision adds a
+loadout reference to `dispatch`; credentials never travel in commands.
+
 **`cancel`**: cancel the running task (ACP `session/cancel`; open permissions answered
 `cancelled`). The runner emits `InterruptResolved{cancelled}` for open interrupts and
 `RunError{cancelled}`.

@@ -273,6 +273,11 @@ These cases are not spelled out by ACP; `AcpTurnMapper` implements them and they
   `RunStarted{resume}` run that closes open tool calls with `ToolCallEnd{failed}`, then
   `RunError{cancelled}` / `RunError{error, code:"expired"}`. ACP updates queued during the pause
   are dropped.
+- **The harness process exits while a task runs** (or a runner restart finds interrupts stored
+  by its previous process, SPEC-004): every open interrupt of that task gets
+  `InterruptResolved{cancelled}` (nobody can answer it any more; `expired` is only for TTL
+  expiry), then `RunError{error, code:"harness_exited"}`. No resume run is emitted. The next
+  prompt respawns the harness and resumes the ACP session.
 - **A tool call still open at the end of a turn**: closed with `ToolCallEnd{completed}` when the
   stop reason is `end_turn`, `ToolCallEnd{failed}` for any other stop reason or error.
 - **`session_info_update`**: only the title maps (`StateDelta{thread}` on `/title`). The hub owns
