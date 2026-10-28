@@ -7,7 +7,8 @@
 //!
 //! - `events (seq PK, json)`: the append-only log;
 //! - `runs`, `states (scope, seq)`, `tasks (ord, task_id, status)`, `interrupts`, `commands`
-//!   (the outbox), `idempotency (user_id, key)`, `meta (key)`.
+//!   (the outbox), `idempotency (user_id, key)`, `event_ids (event_id, seen_ms)` (24 h),
+//!   `meta (key)`.
 
 use protocol::tunnel::Command;
 use protocol::turn_event::{Envelope, StateScope};
@@ -16,13 +17,13 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use worker::{SqlStorage, SqlStorageValue};
 
-use super::core::scope_name;
+use super::core::{EVENT_ID_TTL_MS, scope_name};
 use super::store::{
     CommandRecord, IdempotencyRecord, InterruptRecord, RunRecord, StoreError, StoreResult,
     TaskRecord, TaskStatus, ThreadStore,
 };
 
-const SCHEMA: [&str; 8] = [
+const SCHEMA: [&str; 9] = [
     "CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, json TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS runs (
        run_id TEXT PRIMARY KEY, start_seq INTEGER NOT NULL, end_seq INTEGER, json TEXT NOT NULL)",
@@ -40,6 +41,8 @@ const SCHEMA: [&str; 8] = [
     "CREATE TABLE IF NOT EXISTS idempotency (
        user_id TEXT NOT NULL, key TEXT NOT NULL, created_ms INTEGER NOT NULL,
        json TEXT NOT NULL, PRIMARY KEY (user_id, key))",
+    "CREATE TABLE IF NOT EXISTS event_ids (
+       event_id TEXT PRIMARY KEY, seen_ms INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, json TEXT NOT NULL)",
 ];
 
@@ -335,7 +338,7 @@ impl ThreadStore for SqlStore {
 
     fn retract_prompt_command(&mut self, task_id: &str) -> StoreResult<bool> {
         let rows: Vec<Value> = self.rows(
-            "DELETE FROM commands WHERE kind = 'prompt' AND task_id = ? AND acked = 0
+            "DELETE FROM commands WHERE kind IN ('prompt', 'dispatch') AND task_id = ? AND acked = 0
              RETURNING 1 AS n",
             vec![text(task_id)],
         )?;
@@ -366,6 +369,25 @@ impl ThreadStore for SqlStore {
         self.run(
             "DELETE FROM idempotency WHERE created_ms < ?",
             vec![int(older_than_ms)],
+        )
+    }
+
+    fn event_seen(&self, event_id: &str, now_ms: u64) -> StoreResult<bool> {
+        let rows: Vec<Value> = self.rows(
+            "SELECT 1 AS n FROM event_ids WHERE event_id = ? AND seen_ms + ? > ?",
+            vec![text(event_id), int(EVENT_ID_TTL_MS), int(now_ms)],
+        )?;
+        Ok(!rows.is_empty())
+    }
+
+    fn record_event(&mut self, event_id: &str, now_ms: u64) -> StoreResult<()> {
+        self.run(
+            "DELETE FROM event_ids WHERE seen_ms + ? <= ?",
+            vec![int(EVENT_ID_TTL_MS), int(now_ms)],
+        )?;
+        self.run(
+            "INSERT OR REPLACE INTO event_ids (event_id, seen_ms) VALUES (?, ?)",
+            vec![text(event_id), int(now_ms)],
         )
     }
 

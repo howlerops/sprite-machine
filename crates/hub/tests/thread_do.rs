@@ -737,3 +737,62 @@ fn routes_require_the_dev_token_and_invalid_sequences_are_422() {
         404
     );
 }
+
+#[test]
+fn a_repeated_event_id_is_acknowledged_without_a_second_append() {
+    let thread = unique_thread("event_id");
+    let path = format!("/v1/threads/{thread}/subscribe");
+    let mut client = Ws::connect(&path);
+    assert!(client.catch_up().events.is_empty());
+
+    // The Machine DO's shape for an event frame: `{event_id, envelope}` (tunnel.md §3.3).
+    let prompted = prompt(&thread, "tk_1", "idk_event_id_1", "hello");
+    assert_eq!(prompted.status, 202, "prompt: {}", prompted.body);
+    let _user_message = client.events(1);
+    let frame = |event_id: &str, event: Value| {
+        json!({
+            "event_id": event_id,
+            "envelope": envelope(&thread, "tk_1", Some("run_1"), event),
+        })
+    };
+    let route = format!("/v1/dev/threads/{thread}/events");
+
+    let first = http(
+        "POST",
+        &route,
+        true,
+        None,
+        Some(&frame("evt_dedupe_1", started())),
+    );
+    assert_eq!(first.status, 200, "{}", first.body);
+    assert_eq!(first.json()["stored"][0]["seq"], 2);
+
+    // The retransmit: acknowledged, nothing appended, nothing broadcast.
+    let again = http(
+        "POST",
+        &route,
+        true,
+        None,
+        Some(&frame("evt_dedupe_1", started())),
+    );
+    assert_eq!(again.status, 200, "{}", again.body);
+    assert_eq!(again.json(), json!({ "stored": [], "duplicate": true }));
+    let head = http("GET", &format!("/v1/threads/{thread}"), true, None, None).json();
+    assert_eq!(head["head_seq"], 2, "the retransmit appended nothing");
+
+    // A new event_id is a new event.
+    let fresh = http(
+        "POST",
+        &route,
+        true,
+        None,
+        Some(&frame("evt_dedupe_2", text_start())),
+    );
+    assert_eq!(fresh.status, 200, "{}", fresh.body);
+    assert_eq!(fresh.json()["stored"][0]["seq"], 3);
+    assert_eq!(
+        client.events(2)[1]["seq"],
+        3,
+        "the subscriber sees one RunStarted and one text event"
+    );
+}

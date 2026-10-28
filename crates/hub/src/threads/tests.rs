@@ -11,7 +11,10 @@ use protocol::turn_event::{
 use serde_json::{Value, json};
 
 use super::api::{self, ApiRequest};
-use super::{IDEMPOTENCY_TTL_MS, MemoryStore, PromptBody, ThreadCore, ThreadStore, event_message};
+use super::{
+    EVENT_ID_TTL_MS, IDEMPOTENCY_TTL_MS, MemoryStore, PromptBody, ThreadCore, ThreadStore,
+    event_message,
+};
 
 /// 2026-10-27T22:00:03Z.
 const NOW: u64 = 1_793_138_403_000;
@@ -1060,4 +1063,303 @@ fn event_messages_wrap_the_envelope() {
     assert_eq!(message["type"], "event");
     assert_eq!(message["envelope"]["seq"], 1);
     assert_eq!(message["envelope"]["event"]["type"], "StateSnapshot");
+}
+
+// ---- M2-008c: event_id dedupe (tunnel.md §4.2) and POST /v1/threads ------------------------
+
+/// `{event_id, envelope}`: the frame shape the Machine DO sends to the internal events route.
+fn framed(event_id: &str, envelope: &Envelope) -> Value {
+    json!({ "event_id": event_id, "envelope": envelope })
+}
+
+#[test]
+fn a_repeated_event_id_is_acknowledged_without_a_second_append() {
+    let mut core = core();
+    start_task(&mut core, "tk_1", "run_1");
+    core.take_appended();
+
+    let body = framed("evt_1", &text_start("tk_1", "run_1"));
+    let first = api::handle(
+        &mut core,
+        &request(
+            "POST",
+            "/internal/threads/th_1/events",
+            "usr_1",
+            None,
+            body.clone(),
+        ),
+        NOW,
+    );
+    assert_eq!(first.status, 200, "{:?}", first.body);
+    assert_eq!(first.body["stored"][0]["seq"], 3);
+    let head = core.head_seq();
+
+    // A retransmit inside the 24 h window: 200, nothing appended, nothing broadcast.
+    let again = api::handle(
+        &mut core,
+        &request(
+            "POST",
+            "/internal/threads/th_1/events",
+            "usr_1",
+            None,
+            body.clone(),
+        ),
+        NOW + 60_000,
+    );
+    assert_eq!(again.status, 200);
+    assert_eq!(again.body, json!({ "stored": [], "duplicate": true }));
+    assert_eq!(core.head_seq(), head);
+    assert_eq!(
+        core.take_appended().len(),
+        1,
+        "only the first delivery appended"
+    );
+
+    // The dev route runs the same handler, so the same duplicate.
+    let mut dev = request("POST", "/v1/dev/threads/th_1/events", "usr_1", None, body);
+    dev.dev_fixtures = true;
+    assert_eq!(
+        api::handle(&mut core, &dev, NOW + 120_000).body["duplicate"],
+        true
+    );
+    assert_eq!(core.head_seq(), head);
+}
+
+#[test]
+fn event_ids_are_remembered_for_24_hours_and_a_failed_append_is_not() {
+    let mut core = core();
+    start_task(&mut core, "tk_1", "run_1");
+
+    // A refused envelope (its run is unknown) leaves its event_id unrecorded.
+    let bad = framed(
+        "evt_bad",
+        &Envelope::new(
+            "th_1",
+            Some("tk_1".to_owned()),
+            Some("run_missing".to_owned()),
+            format_timestamp(NOW),
+            TextMessageStart {
+                message_id: "m".to_owned(),
+                role: Default::default(),
+            },
+        ),
+    );
+    let refused = api::handle(
+        &mut core,
+        &request("POST", "/internal/threads/th_1/events", "usr_1", None, bad),
+        NOW,
+    );
+    assert_eq!(refused.status, 422);
+    assert!(!core.store().event_seen("evt_bad", NOW).expect("seen"));
+
+    let ok = framed("evt_ok", &text_start("tk_1", "run_1"));
+    let stored = api::handle(
+        &mut core,
+        &request("POST", "/internal/threads/th_1/events", "usr_1", None, ok),
+        NOW,
+    );
+    assert_eq!(stored.status, 200, "{:?}", stored.body);
+    // Remembered inside the window, forgotten at its end.
+    assert!(
+        core.store()
+            .event_seen("evt_ok", NOW + EVENT_ID_TTL_MS - 1)
+            .expect("seen")
+    );
+    assert!(
+        !core
+            .store()
+            .event_seen("evt_ok", NOW + EVENT_ID_TTL_MS)
+            .expect("seen")
+    );
+
+    // A malformed event_id is a 400, not a dedupe key.
+    let malformed = json!({ "event_id": "not valid!", "envelope": {} });
+    let reply = api::handle(
+        &mut core,
+        &request(
+            "POST",
+            "/internal/threads/th_1/events",
+            "usr_1",
+            None,
+            malformed,
+        ),
+        NOW,
+    );
+    assert_eq!(reply.status, 400);
+}
+
+fn create_body(prompt: bool) -> Value {
+    let mut body = json!({
+        "machine_id": "mch_1",
+        "agent": "claude",
+        "workspace": { "path": "/tmp/work", "spawn": "worktree" },
+        "permission_mode": "default",
+        "title": "Upgrade axum",
+    });
+    if prompt {
+        body["prompt"] = json!({
+            "task_id": "tk_1",
+            "message_id": "msg_1",
+            "parts": [{ "type": "text", "text": "Upgrade axum to 0.8" }],
+        });
+    }
+    body
+}
+
+fn create(core: &mut ThreadCore<MemoryStore>, key: &str, body: Value) -> api::ApiResponse {
+    api::handle(
+        core,
+        &request(
+            "POST",
+            "/internal/threads/th_1/create",
+            "usr_1",
+            Some(key),
+            body,
+        ),
+        NOW,
+    )
+}
+
+/// The Machine DO's view of the thread's unacked commands.
+fn queued(core: &mut ThreadCore<MemoryStore>) -> Vec<Value> {
+    api::handle(
+        core,
+        &request(
+            "GET",
+            "/internal/threads/th_1/commands",
+            "usr_1",
+            None,
+            Value::Null,
+        ),
+        NOW,
+    )
+    .body["commands"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn creating_a_thread_records_the_host_and_queues_the_dispatch_of_its_first_task() {
+    let mut core = core();
+    let reply = create(&mut core, "idk_create_1", create_body(true));
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(
+        reply.body,
+        json!({ "thread_id": "th_1", "task_id": "tk_1", "status": "started" })
+    );
+
+    // Thread state (the init hook), then the hub's UserMessage.
+    let info = api::handle(
+        &mut core,
+        &request("GET", "/v1/threads/th_1", "usr_1", None, Value::Null),
+        NOW,
+    )
+    .body;
+    assert_eq!(info["machine_id"], "mch_1");
+    assert_eq!(info["title"], "Upgrade axum");
+    assert_eq!(info["head_seq"], 2);
+    assert_eq!(info["states"]["thread"]["machine_id"], "mch_1");
+    let types: Vec<&str> = core
+        .store()
+        .read_range(1, 2)
+        .expect("range")
+        .iter()
+        .map(|e| e.event.type_name())
+        .collect();
+    assert_eq!(types, ["StateSnapshot", "UserMessage"]);
+
+    let commands = queued(&mut core);
+    assert_eq!(commands.len(), 1);
+    let command = &commands[0];
+    assert_eq!(command["machine_id"], "mch_1");
+    assert_eq!(command["idempotency_key"], "idk_create_1");
+    assert_eq!(command["command"]["kind"], "dispatch");
+    assert_eq!(command["command"]["thread_id"], "th_1");
+    assert_eq!(command["command"]["task_id"], "tk_1");
+    assert_eq!(command["command"]["agent"], "claude");
+    assert_eq!(command["command"]["workspace"]["path"], "/tmp/work");
+    assert_eq!(command["command"]["permission_mode"], "default");
+    assert_eq!(command["command"]["message_id"], "msg_1");
+    assert_eq!(command["command"]["author"]["id"], "usr_1");
+
+    // Replay: the stored answer, no second thread, no second command.
+    let replay = create(&mut core, "idk_create_1", create_body(true));
+    assert_eq!(replay, reply);
+    assert_eq!(core.head_seq(), 2);
+    assert_eq!(queued(&mut core).len(), 1);
+
+    // The same key with another body is refused.
+    let mut other = create_body(true);
+    other["title"] = json!("Something else");
+    assert_eq!(create(&mut core, "idk_create_1", other).status, 422);
+}
+
+#[test]
+fn a_thread_created_without_a_prompt_is_idle_and_queues_nothing() {
+    let mut core = core();
+    let reply = create(&mut core, "idk_idle", create_body(false));
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(
+        reply.body,
+        json!({ "thread_id": "th_1", "task_id": null, "status": "idle" })
+    );
+    assert_eq!(core.head_seq(), 1);
+    assert!(queued(&mut core).is_empty());
+    // A second create of the same thread is a conflict.
+    assert_eq!(
+        create(&mut core, "idk_again", create_body(false)).status,
+        409
+    );
+}
+
+#[test]
+fn a_rejected_create_writes_nothing() {
+    let mut core = core();
+    let mut bad = create_body(true);
+    bad["machine_id"] = json!("not valid!");
+    assert_eq!(create(&mut core, "idk_bad", bad).status, 400);
+    let mut no_parts = create_body(true);
+    no_parts["prompt"]["parts"] = json!([]);
+    assert_eq!(create(&mut core, "idk_bad_2", no_parts).status, 400);
+    assert_eq!(core.head_seq(), 0);
+    assert!(queued(&mut core).is_empty());
+    assert_eq!(
+        api::handle(
+            &mut core,
+            &request("GET", "/v1/threads/th_1", "usr_1", None, Value::Null),
+            NOW,
+        )
+        .status,
+        404
+    );
+}
+
+#[test]
+fn cancelling_a_dispatch_the_runner_never_received_retracts_it() {
+    let mut core = core();
+    assert_eq!(
+        create(&mut core, "idk_create_x", create_body(true)).status,
+        201
+    );
+    assert_eq!(queued(&mut core).len(), 1);
+    let cancel = request(
+        "POST",
+        "/v1/threads/th_1/cancel",
+        "usr_1",
+        Some("idk_cancel_x"),
+        json!({ "task_id": "tk_1" }),
+    );
+    let reply = api::handle(&mut core, &cancel, NOW);
+    assert_eq!(reply.status, 202, "{:?}", reply.body);
+    // The dispatch is gone; the hub ends the task itself (RunStarted + RunError cancelled).
+    assert!(queued(&mut core).is_empty());
+    let types: Vec<&str> = core
+        .store()
+        .read_range(3, 4)
+        .expect("range")
+        .iter()
+        .map(|e| e.event.type_name())
+        .collect();
+    assert_eq!(types, ["RunStarted", "RunError"]);
 }

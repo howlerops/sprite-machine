@@ -17,11 +17,13 @@
 //! | `POST /v1/dev/threads/{id}/events`                | only with `DEV_FIXTURES=1`         |
 //!
 //! Internal routes (only reachable through a Durable Object stub; the Worker never exposes
-//! them). They are the hooks the Machine DO (M2B-002) and thread creation call:
+//! them). They are the hooks the Machine DO (M2B-002) and thread creation call (`POST /v1/threads`
+//! is forwarded here by the Worker with the thread id it derived from the `Idempotency-Key`):
 //!
 //! | Route                                             | Body / answer                      |
 //! | ------------------------------------------------- | ---------------------------------- |
-//! | `POST /internal/threads/{id}/events`              | envelope(s) with `seq: 0` in, stamped out |
+//! | `POST /internal/threads/{id}/events`              | `{event_id, envelope}` (deduped 24 h), or envelope(s) with `seq: 0` in, stamped out |
+//! | `POST /internal/threads/{id}/create`              | `POST /v1/threads` body; creates the thread (`201`) |
 //! | `GET  /internal/threads/{id}/commands?limit=N`    | `{commands: [...]}` not yet acked  |
 //! | `POST /internal/threads/{id}/commands/ack`        | `{ids: [..]}`                      |
 //! | `POST /internal/threads/{id}/init`                | `{machine_id, agent, workspace, permission_mode, title}` |
@@ -34,7 +36,11 @@ use protocol::turn_event::{Envelope, ResolvedOutcome};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::core::{PromptBody, Reply, ThreadCore, request_hash, valid_idempotency_key};
+use protocol::turn_event::is_valid_id;
+
+use super::core::{
+    CreateThreadBody, PromptBody, Reply, ThreadCore, request_hash, valid_idempotency_key,
+};
 use super::error::ApiError;
 use super::store::ThreadStore;
 
@@ -178,6 +184,12 @@ fn route<S: ThreadStore>(
             let acked = core.ack_commands(&body.ids)?;
             Ok(Reply::new(200, json!({ "acked": acked })))
         }
+        ("POST", ["internal", "threads", _, "create"]) => {
+            let body: CreateThreadBody = parse_body(&request.body)?;
+            write(core, request, now_ms, |core, actor, key| {
+                core.create_thread(actor, key, body, now_ms)
+            })
+        }
         ("POST", ["internal", "threads", _, "init"]) => {
             let info: Map<String, Value> = parse_body(&request.body)?;
             core.init_thread(&info, now_ms)?;
@@ -228,11 +240,33 @@ where
 
 /// Appends one envelope (the body) or several (`{"envelopes": [...]}`); answers
 /// `{"stored": [...]}` with the stamped envelopes. Stops at the first rejected one.
+///
+/// `{"event_id": "...", "envelope": {...}}` (the frame's shape, tunnel.md §3.3) appends one
+/// envelope at most once per `event_id` in 24 hours: a repeat answers `{"stored": [],
+/// "duplicate": true}` without a second append (tunnel.md §4.2).
 fn append_events<S: ThreadStore>(
     core: &mut ThreadCore<S>,
     body: &Value,
     now_ms: u64,
 ) -> Result<Reply, ApiError> {
+    if let Some(event_id) = body.get("event_id") {
+        let event_id = event_id
+            .as_str()
+            .filter(|id| is_valid_id(id))
+            .ok_or_else(|| {
+                ApiError::invalid_request("event_id must be 1-128 characters of [A-Za-z0-9_:.-]")
+            })?;
+        let envelope = body
+            .get("envelope")
+            .cloned()
+            .ok_or_else(|| ApiError::invalid_request("event_id needs an envelope"))?;
+        let envelope: Envelope = serde_json::from_value(envelope)
+            .map_err(|error| ApiError::invalid_request(format!("invalid envelope: {error}")))?;
+        return Ok(match core.append_once(event_id, envelope, now_ms)? {
+            Some(stored) => Reply::new(200, json!({ "stored": [stored] })),
+            None => Reply::new(200, json!({ "stored": [], "duplicate": true })),
+        });
+    }
     let raw: Vec<Value> = match body.get("envelopes") {
         Some(Value::Array(list)) => list.clone(),
         _ => vec![body.clone()],
