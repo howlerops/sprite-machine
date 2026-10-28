@@ -5938,6 +5938,9 @@ items:
     title: 'Bootstrap owner gets a GitHub login (BOOTSTRAP_OWNER_GITHUB_LOGIN), so the first owner can sign in with GitHub'
     milestone: M2
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
