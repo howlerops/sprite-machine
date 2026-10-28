@@ -3,3 +3,4 @@
 
 pub mod checkpoint;
 pub mod tracer;
+pub mod tunnel;

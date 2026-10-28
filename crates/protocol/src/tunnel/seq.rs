@@ -39,6 +39,35 @@ impl<T> Sender<T> {
         }
     }
 
+    /// Rebuilds a sender from a durable outbox (a restarted runner): `acked_upto` is the
+    /// highest seq the peer acked, `next_seq` the seq the next `enqueue` gets, and `unacked`
+    /// the outbox in seq order. Nothing counts as sent on the new connection yet. The window is
+    /// the default 256 (§4.2).
+    ///
+    /// Panics if `unacked` is not gap-free from `acked_upto + 1` up to `next_seq - 1`, since a
+    /// store that hands out such an outbox is corrupt.
+    pub fn from_parts(acked_upto: u64, next_seq: u64, unacked: Vec<(u64, T)>) -> Self {
+        for (i, (seq, _)) in unacked.iter().enumerate() {
+            assert_eq!(
+                *seq,
+                acked_upto + 1 + i as u64,
+                "outbox is not gap-free after the acked cursor"
+            );
+        }
+        assert_eq!(
+            next_seq,
+            acked_upto + 1 + unacked.len() as u64,
+            "next_seq does not follow the outbox"
+        );
+        Self {
+            outbox: unacked.into(),
+            next_seq,
+            sent_upto: acked_upto,
+            acked_upto,
+            max_inflight: 256,
+        }
+    }
+
     /// Appends a frame body with the next seq and returns that seq. The caller writes the
     /// body to its durable outbox before this call returns to the wire layer.
     pub fn enqueue(&mut self, body: T) -> u64 {
@@ -237,5 +266,42 @@ impl Receiver {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Sender;
+
+    #[test]
+    fn from_parts_rebuilds_a_sender_from_a_durable_outbox() {
+        let mut sender = Sender::from_parts(4, 8, vec![(5, "a"), (6, "b"), (7, "c")]);
+        assert_eq!(sender.acked_upto(), 4);
+        assert_eq!(sender.next_seq(), 8);
+        assert_eq!(sender.len(), 3);
+        // Nothing was sent on this connection: a resumed welcome drops the processed frames
+        // and the rest goes out in order.
+        sender.on_welcome(true, 5).unwrap();
+        assert_eq!(sender.next_to_send(), Some((6, "b")));
+        assert_eq!(sender.next_to_send(), Some((7, "c")));
+        assert_eq!(sender.next_to_send(), None);
+        assert_eq!(sender.enqueue("d"), 8);
+        sender.on_ack(7).unwrap();
+        assert_eq!(sender.next_to_send(), Some((8, "d")));
+    }
+
+    #[test]
+    fn from_parts_then_a_fresh_welcome_renumbers_from_one() {
+        let mut sender = Sender::from_parts(4, 7, vec![(5, "a"), (6, "b")]);
+        sender.on_welcome(false, 0).unwrap();
+        assert_eq!(sender.next_to_send(), Some((1, "a")));
+        assert_eq!(sender.next_to_send(), Some((2, "b")));
+        assert_eq!(sender.next_seq(), 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "gap-free")]
+    fn from_parts_rejects_a_gap() {
+        let _ = Sender::from_parts(0, 4, vec![(1, "a"), (3, "b")]);
     }
 }
