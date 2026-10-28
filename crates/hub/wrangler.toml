@@ -67,6 +67,20 @@ queue = "sm-notify"
 queue = "sm-notify"
 max_batch_size = 10
 max_batch_timeout = 1
+# A push service answering 5xx or 429 makes the consumer retry the message (M2-011).
+max_retries = 5
+retry_delay = 5
+
+# ---- Web Push (M2-011) ---------------------------------------------------------------------
+
+[vars]
+# Dev placeholder only: the public half of a throwaway VAPID key, there so a client can be tried
+# against `wrangler dev`. The hub derives the real public key from the secret VAPID_PRIVATE_KEY
+# (base64url, 32-byte P-256 scalar; set with `wrangler secret put`, never in this file) and serves
+# it at GET /v1/push/vapid-public-key; this var is only the answer when no secret is set.
+VAPID_PUBLIC_KEY = "BDev-placeholder-not-a-real-key-replace-with-the-public-key-of-VAPID_PRIVATE_KEY"
+# The `sub` claim of the VAPID JWT: a contact for the push service operators.
+VAPID_SUBJECT = "mailto:push@sprite-machine.invalid"
 
 # ---- Static Assets: the mobile web page (plan §4.2) ----------------------------------------
 
