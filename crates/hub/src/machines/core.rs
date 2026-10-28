@@ -790,13 +790,14 @@ fn presence_name(state: MachinePresence) -> &'static str {
     }
 }
 
-/// `prompt`, `approval`, `dispatch` or `cancel`.
+/// `prompt`, `approval`, `dispatch`, `cancel` or `session_config`.
 pub fn command_kind(command: &Command) -> &'static str {
     match command {
         Command::Prompt { .. } => "prompt",
         Command::Approval { .. } => "approval",
         Command::Dispatch { .. } => "dispatch",
         Command::Cancel { .. } => "cancel",
+        Command::SessionConfig { .. } => "session_config",
     }
 }
 
@@ -806,16 +807,18 @@ pub fn command_thread(command: &Command) -> &str {
         Command::Prompt { thread_id, .. }
         | Command::Approval { thread_id, .. }
         | Command::Dispatch { thread_id, .. }
-        | Command::Cancel { thread_id, .. } => thread_id,
+        | Command::Cancel { thread_id, .. }
+        | Command::SessionConfig { thread_id, .. } => thread_id,
     }
 }
 
-/// The task a command is for.
+/// The task a command is for; empty for `session_config`, which belongs to the thread.
 pub fn command_task(command: &Command) -> String {
     match command {
         Command::Prompt { task_id, .. }
         | Command::Approval { task_id, .. }
         | Command::Dispatch { task_id, .. }
         | Command::Cancel { task_id, .. } => task_id.clone(),
+        Command::SessionConfig { .. } => String::new(),
     }
 }
