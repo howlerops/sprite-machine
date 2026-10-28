@@ -28,9 +28,11 @@ use protocol::turn_event::{
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use std::collections::VecDeque;
 
 use super::error::ApiError;
 use super::patch::apply_patch;
+use super::redact::redact_envelope;
 use super::store::{
     CommandRecord, IdempotencyRecord, InterruptRecord, MemoryStore, Resolution, RunRecord,
     TaskRecord, TaskStatus, ThreadStore,
@@ -64,6 +66,17 @@ const PREVIEW_CHARS: usize = 80;
 
 /// Stored envelopes read per chunk when rebuilding the validator.
 const REBUILD_CHUNK: u64 = 500;
+
+/// Stored envelopes read per page by the catch-up (turn-event.md §6): a replay holds at most
+/// this many rows at a time, however long the thread is.
+pub const CATCH_UP_PAGE: u64 = 500;
+
+/// How many of the newest runs keep their state history addressable by default. Older state
+/// changes are compacted (see [`ThreadCore::with_state_retention`]).
+pub const RETAINED_RUNS: usize = 50;
+
+/// The meta key of the state floor: the seq the state history is compacted to (0 = not compacted).
+const STATE_FLOOR_KEY: &str = "state_floor";
 
 /// The four state scopes, in the order of the `snapshot` message.
 pub const SCOPES: [StateScope; 4] = [
@@ -153,6 +166,8 @@ pub struct ThreadCore<S: ThreadStore> {
     head: u64,
     /// Everything appended since the last [`ThreadCore::take_appended`], for broadcasting.
     outbox: Vec<Envelope>,
+    /// `None`: never compact the state history.
+    retained_runs: Option<usize>,
 }
 
 impl<S: ThreadStore> std::fmt::Debug for ThreadCore<S> {
@@ -173,6 +188,54 @@ impl ThreadCore<MemoryStore> {
             validator: SequenceValidator::new(),
             head: 0,
             outbox: Vec::new(),
+            retained_runs: Some(RETAINED_RUNS),
+        }
+    }
+}
+
+/// The messages of one subscription (turn-event.md §6), read lazily: `hello` and `snapshot` first,
+/// then the stored events in pages of [`CATCH_UP_PAGE`] rows, then `live`. It holds its own handle
+/// to the store, so it can be drained after the core is released (the Durable Object sends each
+/// message as it is produced; nothing is appended in between).
+pub struct CatchUp<S: ThreadStore> {
+    store: S,
+    head: u64,
+    next: u64,
+    pending: VecDeque<Value>,
+    done: bool,
+}
+
+impl<S: ThreadStore> Iterator for CatchUp<S> {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Value> {
+        loop {
+            if let Some(message) = self.pending.pop_front() {
+                return Some(message);
+            }
+            if self.done {
+                return None;
+            }
+            if self.next > self.head {
+                self.done = true;
+                return Some(json!({ "type": "live" }));
+            }
+            let to = (self.next + CATCH_UP_PAGE - 1).min(self.head);
+            match self.store.read_range(self.next, to) {
+                Ok(page) => {
+                    self.pending.extend(page.iter().map(event_message));
+                    self.next = to + 1;
+                }
+                Err(_) => {
+                    // The replay stops here; the subscriber reconnects with `?after=`.
+                    self.done = true;
+                    return Some(json!({
+                        "type": "error",
+                        "code": "internal",
+                        "message": "replay stopped; reconnect with after=<last seq>"
+                    }));
+                }
+            }
         }
     }
 }
@@ -187,9 +250,17 @@ impl<S: ThreadStore> ThreadCore<S> {
             validator: SequenceValidator::new(),
             head,
             outbox: Vec::new(),
+            retained_runs: Some(RETAINED_RUNS),
         };
         core.rebuild_validator()?;
         Ok(core)
+    }
+
+    /// Sets how many of the newest runs keep their state history addressable (`None`: keep all).
+    /// The default is [`RETAINED_RUNS`]; at least 1.
+    pub fn with_state_retention(mut self, retained_runs: Option<usize>) -> Self {
+        self.retained_runs = retained_runs.map(|runs| runs.max(1));
+        self
     }
 
     pub fn thread_id(&self) -> &str {
@@ -255,13 +326,16 @@ impl<S: ThreadStore> ThreadCore<S> {
         self.append_inner(envelope, now_ms)
     }
 
-    fn append_inner(&mut self, envelope: Envelope, now_ms: u64) -> Result<Envelope, ApiError> {
+    fn append_inner(&mut self, mut envelope: Envelope, now_ms: u64) -> Result<Envelope, ApiError> {
         if envelope.thread_id != self.thread_id {
             return Err(ApiError::invalid_request(format!(
                 "envelope thread_id {} is not this thread ({})",
                 envelope.thread_id, self.thread_id
             )));
         }
+        // Secrets never reach the log, the state or the subscribers (turn-event.md §2). Before
+        // the size check: the limit applies to what is stored.
+        redact_envelope(&mut envelope)?;
         let size = serde_json::to_vec(&envelope)
             .map_err(|error| ApiError::internal(error.to_string()))?
             .len();
@@ -373,6 +447,7 @@ impl<S: ThreadStore> ThreadCore<S> {
                     task.has_run = true;
                     self.store.put_task(&task)?;
                 }
+                self.compact_state_history()?;
             }
             Event::RunFinished(_) | Event::RunError(_) => {
                 self.end_run(envelope)?;
@@ -427,7 +502,8 @@ impl<S: ThreadStore> ThreadCore<S> {
     /// `R = min(boundary, after + 1)`, where the boundary is the `RunStarted` seq of the run
     /// open at `after` (§6 step 1). `after` is clamped to the head.
     pub fn replay_from(&self, after: u64) -> Result<u64, ApiError> {
-        let after = after.min(self.head);
+        // The state history before the state floor is compacted: catch-up never starts before it.
+        let after = after.min(self.head).max(self.state_floor()?);
         let boundary = self.store.run_boundary_at(after)?.unwrap_or(after + 1);
         Ok(boundary.min(after + 1))
     }
@@ -443,31 +519,62 @@ impl<S: ThreadStore> ThreadCore<S> {
         Ok(Value::Object(states))
     }
 
-    /// The messages a new subscriber gets for `?after=<after>`: `hello`, `snapshot` (as of
-    /// `R - 1`), every stored event with `seq >= R`, then `live`. Pure read: the caller sends
-    /// them without yielding, so no append can slip between the replay and the live stream.
-    pub fn catch_up(&self, after: u64) -> Result<Vec<Value>, ApiError> {
-        let replay_from = self.replay_from(after)?;
-        let mut messages = vec![
-            json!({ "type": "hello", "head_seq": self.head, "replay_from": replay_from }),
-            json!({
-                "type": "snapshot",
-                "at_seq": replay_from - 1,
-                "states": self.states_at(replay_from - 1)?,
-            }),
-        ];
-        let mut from = replay_from;
-        while from <= self.head {
-            let to = (from + REBUILD_CHUNK - 1).min(self.head);
-            for envelope in self.store.read_range(from, to)? {
-                messages.push(event_message(&envelope));
-            }
-            from = to + 1;
-        }
-        messages.push(json!({ "type": "live" }));
-        Ok(messages)
+    /// The state floor: the seq the state history is compacted to. `0` when nothing is compacted.
+    pub fn state_floor(&self) -> Result<u64, ApiError> {
+        Ok(self
+            .store
+            .get_meta(STATE_FLOOR_KEY)?
+            .and_then(|floor| floor.as_u64())
+            .unwrap_or(0))
     }
 
+    /// Compacts the state history older than the oldest of the newest `retained_runs` runs: each
+    /// scope keeps one snapshot (its latest change at or before the floor) and drops the older
+    /// changes. Runs once per `RunStarted`; a no-op when there are fewer runs or no retention.
+    fn compact_state_history(&mut self) -> Result<(), ApiError> {
+        let Some(retained) = self.retained_runs else {
+            return Ok(());
+        };
+        let back = u64::try_from(retained - 1).unwrap_or(u64::MAX);
+        let Some(oldest) = self.store.run_start_back(back)? else {
+            return Ok(());
+        };
+        let floor = oldest.saturating_sub(1);
+        if floor <= self.state_floor()? {
+            return Ok(());
+        }
+        for scope in SCOPES {
+            self.store.compact_states(scope, floor)?;
+        }
+        self.store.put_meta(STATE_FLOOR_KEY, &json!(floor))?;
+        Ok(())
+    }
+}
+
+impl<S: ThreadStore + Clone> ThreadCore<S> {
+    /// The messages a new subscriber gets for `?after=<after>`, as a lazy [`CatchUp`]: `hello`,
+    /// `snapshot` (as of `R - 1`), every stored event with `seq >= R` (read in pages), then
+    /// `live`. Built without reading the log, so the caller reads it after the core is released;
+    /// it is safe because nothing is appended between this call and the drain.
+    pub fn catch_up(&self, after: u64) -> Result<CatchUp<S>, ApiError> {
+        let replay_from = self.replay_from(after)?;
+        let hello = json!({ "type": "hello", "head_seq": self.head, "replay_from": replay_from });
+        let snapshot = json!({
+            "type": "snapshot",
+            "at_seq": replay_from - 1,
+            "states": self.states_at(replay_from - 1)?,
+        });
+        Ok(CatchUp {
+            store: self.store.clone(),
+            head: self.head,
+            next: replay_from,
+            pending: VecDeque::from([hello, snapshot]),
+            done: false,
+        })
+    }
+}
+
+impl<S: ThreadStore> ThreadCore<S> {
     // ---- thread info ------------------------------------------------------------------------
 
     /// Stores what the hub knows about the thread (`machine_id`, `agent`, `workspace`,

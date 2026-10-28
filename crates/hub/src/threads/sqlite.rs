@@ -46,7 +46,9 @@ const SCHEMA: [&str; 9] = [
     "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, json TEXT NOT NULL)",
 ];
 
-/// SQLite-backed [`ThreadStore`].
+/// SQLite-backed [`ThreadStore`]. Cloning it clones the handle to the same database (the catch-up
+/// iterator reads pages through its own handle, see `ThreadCore::catch_up`).
+#[derive(Clone)]
 pub struct SqlStore {
     sql: SqlStorage,
 }
@@ -186,6 +188,17 @@ impl ThreadStore for SqlStore {
             .and_then(|value| u64::try_from(value).ok()))
     }
 
+    fn run_start_back(&self, back: u64) -> StoreResult<Option<u64>> {
+        let rows: Vec<BoundaryRow> = self.rows(
+            "SELECT start_seq AS boundary FROM runs ORDER BY start_seq DESC LIMIT 1 OFFSET ?",
+            vec![int(back)],
+        )?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.boundary)
+            .and_then(|value| u64::try_from(value).ok()))
+    }
+
     fn put_state(&mut self, scope: StateScope, seq: u64, state: &Value) -> StoreResult<()> {
         self.run(
             "INSERT OR REPLACE INTO states (scope, seq, json) VALUES (?, ?, ?)",
@@ -197,6 +210,14 @@ impl ThreadStore for SqlStore {
         self.one_json(
             "SELECT json FROM states WHERE scope = ? AND seq <= ? ORDER BY seq DESC LIMIT 1",
             vec![text(scope_name(scope)), int(seq)],
+        )
+    }
+
+    fn compact_states(&mut self, scope: StateScope, floor: u64) -> StoreResult<()> {
+        self.run(
+            "DELETE FROM states WHERE scope = ? AND seq < (
+               SELECT COALESCE(MAX(seq), 0) FROM states WHERE scope = ? AND seq <= ?)",
+            vec![text(scope_name(scope)), text(scope_name(scope)), int(floor)],
         )
     }
 
