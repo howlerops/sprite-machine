@@ -6215,3 +6215,21 @@ items:
       - 'After sign-in the banner follows a real Connection (headless test with a fake hub); the hub field shows saved/refused messages from Fluent strings; saving a different hub while signed in signs out and says why'
     verify:
       - 'cargo test -p client-gpui --test shell'
+
+  - id: M2-008l
+    title: 'hub: strip a ticket whose key is percent-encoded (%74icket=) before the Thread DO; decode keys before matching'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-008i]
+    paths:
+      - 'crates/hub/src/auth/ticket.rs'
+      - 'crates/hub/src/router.rs'
+    context:
+      - 'docs/ledger/reports/M2-008i.md (Discovered work)'
+    acceptance:
+      - 'Any pair whose decoded key is ticket is dropped before forwarding; the pinned test flips to stripped'
+    verify:
+      - 'cargo test -p hub'
