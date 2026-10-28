@@ -323,6 +323,24 @@ fn refuses_outside_a_git_repository() {
 }
 
 #[test]
+fn list_restore_and_diff_refuse_invalid_thread_ids() {
+    let dir = repo_with_commit();
+    checkpoint::take(dir.path(), "th_victim", None).expect("take");
+    // `th_x/../th_victim` would otherwise address another thread's refs.
+    for bad in ["th_x/../th_victim", "a/b", ""] {
+        assert!(checkpoint::list(dir.path(), bad).is_err(), "list {bad:?}");
+        assert!(
+            checkpoint::restore(dir.path(), bad, 1).is_err(),
+            "restore {bad:?}"
+        );
+        assert!(
+            checkpoint::diff(dir.path(), bad, 1, Target::WorkingTree).is_err(),
+            "diff {bad:?}"
+        );
+    }
+}
+
+#[test]
 fn checkpoint_event_validates_against_the_turn_event_schema() {
     let dir = repo_with_commit();
     let snapshot = checkpoint::take(dir.path(), THREAD, Some("turn 1")).expect("take");

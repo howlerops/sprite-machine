@@ -117,6 +117,7 @@ pub fn take(dir: &Path, thread: &str, label: Option<&str>) -> Result<Snapshot> {
 
 /// The checkpoint numbers that exist for `thread`, unordered.
 pub fn list(dir: &Path, thread: &str) -> Result<Vec<u64>> {
+    ensure!(is_valid_id(thread), "invalid thread id {thread:?}");
     Repo::open(dir)?.checkpoint_numbers(thread)
 }
 
@@ -125,6 +126,7 @@ pub fn list(dir: &Path, thread: &str) -> Result<Vec<u64>> {
 /// Tracked and untracked (non-ignored) files are written back to the snapshot. Files that
 /// exist now but not in the snapshot are removed. Ignored files are not touched.
 pub fn restore(dir: &Path, thread: &str, n: u64) -> Result<()> {
+    ensure!(is_valid_id(thread), "invalid thread id {thread:?}");
     let repo = Repo::open(dir)?;
     let target = repo.checkpoint_tree(thread, n)?;
     let current = repo.working_tree()?;
@@ -147,6 +149,7 @@ pub fn restore(dir: &Path, thread: &str, n: u64) -> Result<()> {
 
 /// Diffs checkpoint `from` against checkpoint or working-tree state `to`.
 pub fn diff(dir: &Path, thread: &str, from: u64, to: Target) -> Result<Diff> {
+    ensure!(is_valid_id(thread), "invalid thread id {thread:?}");
     let repo = Repo::open(dir)?;
     let from_tree = repo.checkpoint_tree(thread, from)?;
     let to_tree = match to {
