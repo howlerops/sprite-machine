@@ -1,14 +1,19 @@
 //! Headless checks for the bench hooks: the composer has focus at startup, the window title is
 //! `gpui-spike`, a key delivered to the composer is logged as `key_to_glyph` once the frame that
-//! paints it is presented, and the transcript pane folds envelopes the way `build_rows` does.
+//! paints it is presented, the transcript pane folds envelopes the way `build_rows` does, and the
+//! terminal and approval card repaints are logged as frames too.
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 use agui_fixture::{Scenario, complete_log};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, TestAppContext};
+use gpui_spike::approval_pane::ApprovalCard;
 use gpui_spike::bench::BenchLog;
+use gpui_spike::common_workload::{ApprovalFixture, CommonInputs};
 use gpui_spike::composer::COMPOSER_ID;
+use gpui_spike::terminal_pane::TerminalPane;
 use gpui_spike::transcript_model::build_rows;
 use gpui_spike::transcript_pane::TranscriptPane;
 use gpui_spike::transcript_shell::{WINDOW_TITLE, open_shell_with, spike_window_options};
@@ -93,4 +98,92 @@ fn bench_pane_apply_folds_envelopes_like_build_rows(cx: &mut TestAppContext) {
     cx.update(|cx| pane.update(cx, |pane, cx| pane.apply(head, cx)));
     cx.update(|cx| pane.update(cx, |pane, cx| pane.apply(tail, cx)));
     cx.update(|cx| assert_eq!(pane.read(cx).rows(), build_rows(&log).as_slice()));
+}
+
+/// The `frame` lines in a bench log file so far.
+fn frame_lines(path: &Path) -> usize {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains(r#""kind":"frame""#))
+        .count()
+}
+
+#[gpui_kit::test]
+fn bench_terminal_output_repaints_are_logged_as_frames(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("bench_headless_terminal_frames.jsonl");
+    let _ = std::fs::remove_file(&path);
+    let bench = Rc::new(BenchLog::open(&path).expect("open bench log"));
+    // The terminal pane is the window's root, so only its own renders can log frames.
+    let (input, _keys) = mpsc::channel();
+    let (window, pane) = cx.update(move |cx| {
+        gpui_kit::open_window(spike_window_options(), cx, move |_, cx| {
+            cx.new(|cx| TerminalPane::new(Vec::<Vec<u8>>::new(), input, cx).with_bench(Some(bench)))
+        })
+        .expect("open test window")
+    });
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.simulate_next_frame(cx);
+    })
+    .expect("window is open");
+    let before = frame_lines(&path);
+    assert_eq!(before, 1, "the first render logs one frame");
+
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.feed(b"new terminal output\r\n", cx)));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.simulate_next_frame(cx);
+    })
+    .expect("window is open");
+    assert_eq!(
+        frame_lines(&path),
+        before + 1,
+        "the frame that paints terminal output is logged"
+    );
+}
+
+#[gpui_kit::test]
+fn bench_approval_clock_repaints_are_logged_as_frames(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("bench_headless_approval_frames.jsonl");
+    let _ = std::fs::remove_file(&path);
+    let bench = Rc::new(BenchLog::open(&path).expect("open bench log"));
+    let approval = ApprovalFixture::start().expect("approval fixture");
+    let CommonInputs {
+        approval: model,
+        sink,
+        approval_clock_start_ms: start_ms,
+        ..
+    } = CommonInputs::from_fixtures(&approval).expect("common inputs");
+    // The approval card is the window's root, so only its own renders can log frames.
+    let (window, card) = cx.update(move |cx| {
+        gpui_kit::open_window(spike_window_options(), cx, move |_, cx| {
+            cx.new(|_| ApprovalCard::new(model, sink, start_ms).with_bench(Some(bench)))
+        })
+        .expect("open test window")
+    });
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.simulate_next_frame(cx);
+    })
+    .expect("window is open");
+    let before = frame_lines(&path);
+    assert_eq!(before, 1, "the first render logs one frame");
+
+    // The clock's next displayed second repaints the card.
+    cx.update(|cx| card.update(cx, |card, cx| card.set_now(start_ms + 1_000, cx)));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.simulate_next_frame(cx);
+    })
+    .expect("window is open");
+    assert_eq!(
+        frame_lines(&path),
+        before + 1,
+        "the frame that paints the approval clock is logged"
+    );
 }

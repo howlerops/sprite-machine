@@ -9,6 +9,7 @@
 //! The fixture bytes come from the `terminal` scenario: the `append` chunks of the output, fed in
 //! order. The closing snapshot repeats the whole output, so it is not fed again.
 
+use std::rc::Rc;
 use std::sync::mpsc::Sender;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
@@ -16,6 +17,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use protocol::turn_event::{ActivityMode, ActivityType, Event, TerminalContent};
 
+use crate::bench::BenchLog;
 use crate::terminal_input::encode_key;
 use crate::terminal_model::{COLUMNS, SCREEN_LINES, StyledRow, TerminalModel};
 
@@ -74,6 +76,9 @@ pub struct TerminalPane {
     model: TerminalModel,
     input: Sender<Vec<u8>>,
     focus_handle: FocusHandle,
+    /// Calls to [`Self::feed`] so far (the output that arrived after the pane opened).
+    feeds: usize,
+    bench: Option<Rc<BenchLog>>,
 }
 
 impl TerminalPane {
@@ -91,7 +96,15 @@ impl TerminalPane {
             model,
             input,
             focus_handle: cx.focus_handle(),
+            feeds: 0,
+            bench: None,
         }
+    }
+
+    /// Logs this pane's repaints as frames in the bench log (see [`BenchLog::note_render`]).
+    pub fn with_bench(mut self, bench: Option<Rc<BenchLog>>) -> Self {
+        self.bench = bench;
+        self
     }
 
     pub fn model(&self) -> &TerminalModel {
@@ -102,8 +115,14 @@ impl TerminalPane {
         &self.focus_handle
     }
 
+    /// How many times [`Self::feed`] has been called.
+    pub fn feeds(&self) -> usize {
+        self.feeds
+    }
+
     /// Output that arrives after the pane opened (a live terminal).
     pub fn feed(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+        self.feeds += 1;
         self.model.feed(bytes);
         cx.notify();
     }
@@ -124,7 +143,10 @@ impl TerminalPane {
 }
 
 impl Render for TerminalPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(bench) = &self.bench {
+            bench.note_render(window);
+        }
         let theme = cx.theme();
         let default_fg = theme.foreground;
         let rows: Vec<_> = self

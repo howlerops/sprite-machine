@@ -2,6 +2,7 @@
 //! time left (or who resolved it), and one button per option. Allow kinds are green, reject kinds
 //! red. Every click goes to the view model, and the answer goes to the injected [`AnswerSink`].
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::component::{
@@ -14,6 +15,7 @@ use gpui_kit::*;
 
 use crate::approval_model::{ApprovalModel, ButtonTone};
 use crate::approval_sink::AnswerSink;
+use crate::bench::BenchLog;
 
 /// Element id of the card (its aria label is the title).
 pub const CARD_ID: &str = "approval-card";
@@ -31,6 +33,7 @@ pub struct ApprovalCard {
     model: ApprovalModel,
     sink: Arc<dyn AnswerSink>,
     now_ms: i64,
+    bench: Option<Rc<BenchLog>>,
 }
 
 impl ApprovalCard {
@@ -40,7 +43,15 @@ impl ApprovalCard {
             model,
             sink,
             now_ms,
+            bench: None,
         }
+    }
+
+    /// Logs this card's repaints (the clock's once-a-second ticks, answers) as frames in the bench
+    /// log (see [`BenchLog::note_render`]).
+    pub fn with_bench(mut self, bench: Option<Rc<BenchLog>>) -> Self {
+        self.bench = bench;
+        self
     }
 
     pub fn model(&self) -> &ApprovalModel {
@@ -98,7 +109,10 @@ fn option_button(
 }
 
 impl Render for ApprovalCard {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(bench) = &self.bench {
+            bench.note_render(window);
+        }
         let enabled = self.model.buttons_enabled(self.now_ms);
         let status = self.model.status_text(self.now_ms);
         let title = self.model.title().to_owned();

@@ -2,7 +2,6 @@
 //! composer under it. In the common workload (M1B-008b) a column beside the transcript holds the
 //! diff pane, the terminal pane and the approval card.
 
-use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, SystemTime};
@@ -34,7 +33,7 @@ const FEED_POLL: Duration = Duration::from_millis(16);
 pub const COMMON_COLUMN_WIDTH: f32 = 480.;
 /// Height of the terminal pane in the common workload.
 const TERMINAL_HEIGHT: f32 = 220.;
-/// Pause between two terminal output chunks; the `terminal` fixture streams over a few seconds.
+/// Pause between two terminal output chunks; one pass of the `terminal` fixture takes a few seconds.
 const TERMINAL_CHUNK_INTERVAL: Duration = Duration::from_millis(200);
 
 /// The panes of the common workload, beside the transcript.
@@ -79,8 +78,12 @@ impl AppShell {
             } = inputs;
             let (keys, keys_received) = mpsc::channel();
             let diff = cx.new(|cx| DiffPane::new(diff_files, cx));
-            let terminal = cx.new(|cx| TerminalPane::new(Vec::<Vec<u8>>::new(), keys, cx));
-            let approval = cx.new(|_| ApprovalCard::new(approval, sink, approval_clock_start_ms));
+            let terminal = cx.new(|cx| {
+                TerminalPane::new(Vec::<Vec<u8>>::new(), keys, cx).with_bench(bench.clone())
+            });
+            let approval = cx.new(|_| {
+                ApprovalCard::new(approval, sink, approval_clock_start_ms).with_bench(bench.clone())
+            });
             stream_terminal(terminal.clone(), terminal_output, cx);
             card_clock = Some((approval.clone(), CardClock::new(approval_clock_start_ms)));
             CommonPanes {
@@ -156,16 +159,17 @@ impl CommonPanes {
     }
 }
 
-/// Feeds the terminal's output chunks one by one, [`TERMINAL_CHUNK_INTERVAL`] apart, so the pane
-/// receives output while the window is open.
+/// Feeds the terminal's output chunks one by one, [`TERMINAL_CHUNK_INTERVAL`] apart, and then
+/// starts the output again from its first chunk, so the pane keeps receiving output until the app
+/// exits (a live terminal; the bench run is longer than one pass of the fixture).
 fn stream_terminal(
     terminal: Entity<TerminalPane>,
     output: Vec<Vec<u8>>,
     cx: &mut Context<AppShell>,
 ) {
-    let mut output: VecDeque<Vec<u8>> = output.into();
+    let mut output = output.into_iter().cycle();
     cx.spawn(async move |_, cx| {
-        while let Some(chunk) = output.pop_front() {
+        while let Some(chunk) = output.next() {
             cx.background_executor()
                 .timer(TERMINAL_CHUNK_INTERVAL)
                 .await;

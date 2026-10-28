@@ -54,6 +54,7 @@ SELF="$BENCH/run-desktop.sh"
 CANDIDATE="gpui-kit"
 DEVICE="desktop_linux"
 FIXTURE_SCENARIO="transcript-10k"
+WORKLOAD="common"   # GPUI_SPIKE_WORKLOAD for the spike: the transcript beside the diff, terminal, approval
 KEY_INTERVAL_S=0.2
 MARKER_TIMEOUT_S=120
 WINDOW_TITLE="gpui-spike"
@@ -199,7 +200,7 @@ in_xvfb() {
   mkdir -p "$run_dir"
   : > "$frames"
   date +%s%6N > "$run_dir/start_us.txt"          # pre-exec wall clock (cold start origin)
-  GPUI_SPIKE_FIXTURE_ADDR="$fixture_addr" GPUI_SPIKE_BENCH_LOG="$frames" \
+  GPUI_SPIKE_WORKLOAD="$WORKLOAD" GPUI_SPIKE_FIXTURE_ADDR="$fixture_addr" GPUI_SPIKE_BENCH_LOG="$frames" \
     "$bin" > "$log" 2>&1 &
   pid=$!
   trap 'kill "$pid" 2>/dev/null || true' EXIT
@@ -236,7 +237,7 @@ run_benchmarks() {
       dry "$FIXTURE_BIN --scenario $FIXTURE_SCENARIO --rate $EVENTS_PER_SECOND --addr 127.0.0.1:\$port > $run_dir/fixture.log"
       dry "wait until 127.0.0.1:\$port accepts connections"
       dry "VK_ICD_FILENAMES=\$ICD xvfb-run -a -s \"$XVFB_SCREEN\" bash $SELF --in-xvfb $SPIKE_BIN $run_dir 127.0.0.1:\$port"
-      dry "    inside xvfb: start spike (GPUI_SPIKE_FIXTURE_ADDR, GPUI_SPIKE_BENCH_LOG=$run_dir/frames.jsonl); sample VmHWM -> $run_dir/rss.txt;"
+      dry "    inside xvfb: start spike (GPUI_SPIKE_WORKLOAD=$WORKLOAD, GPUI_SPIKE_FIXTURE_ADDR, GPUI_SPIKE_BENCH_LOG=$run_dir/frames.jsonl); sample VmHWM -> $run_dir/rss.txt;"
       dry "    wait for 'BENCH_MARKER first_interactive_frame' in $run_dir/app.log; xdotool: scroll + one key per ${KEY_INTERVAL_S}s for ${RUN_SECONDS}s; kill spike"
       dry "stop agui-fixture"
       continue
