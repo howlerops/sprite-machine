@@ -2101,7 +2101,8 @@ items:
     title: 'runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 8df4417; runner 65 passed 0 failed on merged tree (tunnel_client 45), clippy clean, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2201,6 +2202,28 @@ items:
       - 'cargo test -p acp-mock'
       - 'cargo run -p cli -- e2e tracer'
 
+  - id: M2B-004d
+    title: 'runner: OS sleep hook calls SleepHint::asleep (macOS willSleep, Linux logind PrepareForSleep); TunnelSink tracks opened threads (thread_open once per thread, events for an unopened local thread refused)'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-004c]
+    paths:
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/src/sleep/**'
+      - 'crates/runner/tests/tunnel_client.rs'
+      - 'crates/runner/tests/sleep_hook.rs'
+    context:
+      - 'docs/ledger/reports/M2B-004c.md (Discovered work)'
+      - 'docs/specs/tunnel.md §3.4, §3.7'
+    acceptance:
+      - 'A sleep watcher (Linux: logind PrepareForSleep over D-Bus behind a trait; macOS: IOKit/NSWorkspace notification behind the same trait, cfg-gated) calls SleepHint::asleep before sleep; tested with a fake watcher'
+      - 'thread_open is queued at most once per thread id; an event for a runner-started thread that was never opened is refused with an error (tests)'
+    verify:
+      - 'cargo test -p runner'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -2230,6 +2253,9 @@ items:
     title: 'hub: attachments in R2 + signed URLs'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [M2-003a, M2-008]
     paths:
       - 'crates/hub/src/attachments/**'

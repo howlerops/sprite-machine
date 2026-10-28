@@ -133,3 +133,5 @@
 2026-10-28T07:50Z M1A-006d assigned→done merged e747f34 (sonnet). End-to-end crash window closed
 2026-10-28T07:50Z M1A-006e acceptance += prune applied-keys set; assigned (haiku). M2B-004c assigned (haiku)
 2026-10-28T07:51Z leader: disk 3.6 GB free → deleted 52 stale test executables (1.9 GB) + stale workspace rlibs older than 60 min from the shared target; 5.4 GB free
+2026-10-28T07:56Z M2B-004c assigned→done merged 8df4417 (haiku); added M2B-004d (sleep hook, thread_open once). Call sites of thread_open belong to the local-session items (M2B-007 sm rc / TUI)
+2026-10-28T07:56Z M2-009 assigned (haiku)
