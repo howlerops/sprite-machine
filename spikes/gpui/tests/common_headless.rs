@@ -9,7 +9,7 @@ use gpui_kit::{AppContext, TestAppContext};
 use gpui_spike::approval_pane::{CARD_ID, STATUS_ID, option_button_id};
 use gpui_spike::common_workload::{ApprovalFixture, CommonInputs};
 use gpui_spike::diff_pane::{LINE_ID as DIFF_LINE_ID, PANE_ID as DIFF_PANE_ID};
-use gpui_spike::terminal_pane::PANE_ID as TERMINAL_PANE_ID;
+use gpui_spike::terminal_pane::{PANE_ID as TERMINAL_PANE_ID, fixture_output_chunks};
 use gpui_spike::transcript_pane::{PANE_ID as TRANSCRIPT_PANE_ID, ROW_ID as TRANSCRIPT_ROW_ID};
 use gpui_spike::transcript_shell::{fixture_rows, open_shell_in, spike_window_options};
 use protocol::turn_event::{Event, InterruptResolved, ResolvedOutcome};
@@ -112,6 +112,46 @@ fn common_workload_terminal_receives_its_output_while_the_window_is_open(cx: &mu
     assert!(
         has_last_line(cx),
         "the terminal shows the fixture's last line"
+    );
+}
+
+#[gpui_kit::test]
+fn common_workload_terminal_keeps_receiving_output_past_one_pass_of_the_fixture(
+    cx: &mut TestAppContext,
+) {
+    cx.update(gpui_kit::init);
+    let passes = fixture_output_chunks().expect("terminal fixture").len();
+    let approval = ApprovalFixture::start().expect("approval fixture");
+    let inputs = CommonInputs::from_fixtures(&approval).expect("common inputs");
+    let (_window, shell) = cx.update(|cx| {
+        open_shell_in(
+            spike_window_options(),
+            Vec::new(),
+            None,
+            None,
+            Some(inputs),
+            cx,
+        )
+        .expect("open test window")
+    });
+    let terminal = cx.update(|cx| {
+        shell
+            .read(cx)
+            .common()
+            .expect("common panes")
+            .terminal()
+            .clone()
+    });
+
+    // Three passes of the fixture's chunks, one chunk per step.
+    for _ in 0..3 * passes {
+        cx.executor().advance_clock(TERMINAL_STEP);
+        cx.run_until_parked();
+    }
+    let feeds = cx.update(|cx| terminal.read(cx).feeds());
+    assert!(
+        feeds > 2 * passes,
+        "the terminal received {feeds} chunks: more than two passes of {passes}"
     );
 }
 
