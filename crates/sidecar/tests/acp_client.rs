@@ -6,7 +6,6 @@
 //! The subprocess tests run `acp-mock` over real stdio: the test binary re-runs itself as
 //! the agent (see [`subprocess_agent_child`]).
 
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -599,6 +598,16 @@ async fn agent_requests_route_to_the_handler() {
     assert_eq!(message_texts(&drain(&mut updates)), ["done"]);
 }
 
+/// Whether a process with this pid exists (Linux and macOS: `kill -0` succeeds for any live or
+/// zombie process we may signal).
+fn process_exists(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 #[tokio::test]
 async fn subprocess_is_reaped_on_drop() {
     let mut command = tokio::process::Command::new("sleep");
@@ -607,14 +616,14 @@ async fn subprocess_is_reaped_on_drop() {
     let (updates, _rx) = mpsc::unbounded_channel();
     let client = AcpClient::spawn(command, Handler::open(), updates).expect("spawn");
     let pid = client.child_id().expect("a spawned child has a pid");
-    let proc_entry = format!("/proc/{pid}");
-    assert!(Path::new(&proc_entry).exists(), "the child runs");
+    assert!(process_exists(pid), "the child runs");
 
     drop(client);
 
-    // kill_on_drop kills the child, and tokio reaps it, so its /proc entry goes away.
+    // kill_on_drop kills the child, and tokio reaps it, so its pid stops existing (an unreaped
+    // zombie would still answer `kill -0`).
     let started = std::time::Instant::now();
-    while Path::new(&proc_entry).exists() {
+    while process_exists(pid) {
         assert!(
             started.elapsed() < IO_TIMEOUT,
             "child {pid} was not killed and reaped after the client was dropped"
