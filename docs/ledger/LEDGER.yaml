@@ -2515,7 +2515,8 @@ items:
     title: 'Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 7d65ece; runner 112 passed (discovery 25), clippy clean. Warning texts not asserted (no tracing test subscriber) - minor, not filed"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust

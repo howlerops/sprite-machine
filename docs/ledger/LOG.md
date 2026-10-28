@@ -163,3 +163,4 @@
 2026-10-28T09:57Z leader: disk full again — M2-008e worker built into a private worktree target/ (4.7 GB) against the brief; asked it to switch to the shared target and delete it
 2026-10-28T09:58Z M1B-008b → done (leader verify: spike 86 passed, clippy). M1B-008c acceptance += workload var, continuous terminal output, frame coverage. Disk 1.5 GB → deleted the M2-008e worker's private target (5.5 GB); 7.4 GB free
 2026-10-28T09:59Z M2B-007 assigned (sonnet; paths += main.rs). M2B-006c assigned (haiku). Briefs now say: never build into a worktree target/
+2026-10-28T10:04Z M2B-006c assigned→done merged 7d65ece (haiku); signature change announced to the M2B-007 worker. Discovered M2B-006f/g (warning assertions, project-relative commands) noted, not filed (low value)
