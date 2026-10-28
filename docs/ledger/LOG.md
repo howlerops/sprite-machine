@@ -209,3 +209,4 @@
 - assign M2B-005b, M2B-009 (haiku; runner only, no live hub runs while verify17 holds wrangler)
 - M2B-005b back (haiku): sm logout/status, Linux persistence = 0600 file (keyutils dropped; reboot-lost), sm rc dials with stored login (fake-hub test). Accepted: KeychainCredentials::new(CredentialStore::from_env) is the same store as ::from_env. Follow-up M2B-005g; Options type change and secret-service backend not filed (no behaviour gain). Merge held until verify17 finishes
 - M2B-009 back (haiku): qr/settings modules + sm mobile wired; sm rc URL/spacebar not wired (my scoping: main.rs/server not in paths). Accept modules; M2B-009a (P2) wires sm rc; autoConnect criterion moved to M2B-010 (the TUI is what it applies to). Merge held until verify17
+- merged M2B-005b and M2B-009 (main.rs usage/imports conflict resolved); runner: fmt, clippy clean, 169 tests passed on the merged tree
