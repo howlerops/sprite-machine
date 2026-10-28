@@ -43,6 +43,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0004_machines.sql",
         include_str!("../../migrations/0004_machines.sql"),
     ),
+    (
+        "0005_devices.sql",
+        include_str!("../../migrations/0005_devices.sql"),
+    ),
 ];
 
 /// One result row: column name to JSON value (what D1 returns for an object row).

@@ -7,6 +7,7 @@ pub mod attachments;
 pub mod audit;
 pub mod auth;
 pub mod db;
+pub mod devices;
 pub mod machines;
 pub mod router;
 pub mod threads;
