@@ -42,6 +42,11 @@ fn hub_url() -> String {
 
 /// `GET path` against `HUB_URL` with `Connection: close`.
 fn get(path: &str, extra_headers: &[(&str, &str)]) -> Reply {
+    send("GET", path, extra_headers, "")
+}
+
+/// One request against `HUB_URL` with `Connection: close` and a `body` (empty for none).
+fn send(method: &str, path: &str, extra_headers: &[(&str, &str)], body: &str) -> Reply {
     let url = hub_url();
     let authority = url
         .strip_prefix("http://")
@@ -52,11 +57,15 @@ fn get(path: &str, extra_headers: &[(&str, &str)]) -> Reply {
         .set_read_timeout(Some(Duration::from_secs(30)))
         .expect("set read timeout");
 
-    let mut request = format!("GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n");
+    let mut request =
+        format!("{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n");
     for (name, value) in extra_headers {
         request.push_str(&format!("{name}: {value}\r\n"));
     }
-    request.push_str("\r\n");
+    if !body.is_empty() {
+        request.push_str("Content-Type: application/json\r\n");
+    }
+    request.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
     stream.write_all(request.as_bytes()).expect("send request");
 
     let mut raw = Vec::new();
@@ -145,6 +154,49 @@ fn unknown_route_is_a_json_404_in_the_client_api_shape() {
         json["message"].is_string(),
         "404 body has no message: {json}"
     );
+}
+
+/// The dev fixture routes (`/v1/dev/fixtures/*`, and the `/v1/dev/machines|threads` routes of
+/// M2B-002) answer 404 when `DEV_FIXTURES` is unset, even with the dev token. `scripts/hub-test.sh`
+/// sets `HUB_DEV_FIXTURES=0` for a hub started without it; the default run (`1`) checks the other
+/// side: the same routes do answer with the var on, so the 404 is the gate and not a dead route.
+#[test]
+fn dev_fixture_routes_are_404_when_dev_fixtures_is_unset() {
+    let dev_on = std::env::var("HUB_DEV_FIXTURES").map_or(true, |v| v.trim() != "0");
+    let auth = [("authorization", "Bearer dev")];
+    let probes = [
+        ("POST", "/v1/dev/machines/mch_gate/credential", ""),
+        ("POST", "/v1/dev/machines/mch_gate/commands", "{}"),
+        ("GET", "/v1/dev/machines/mch_gate/state", ""),
+        ("POST", "/v1/dev/threads/th_gate/init", "{}"),
+        ("POST", "/v1/dev/threads/th_gate/host", "{}"),
+        ("POST", "/v1/dev/fixtures/machines/mch_gate/presence", "{}"),
+        ("POST", "/v1/dev/fixtures/threads", "{}"),
+    ];
+    for (method, path, body) in probes {
+        let reply = send(method, path, &auth, body);
+        if dev_on {
+            assert_ne!(
+                reply.status, 404,
+                "{method} {path} with DEV_FIXTURES on: {}",
+                reply.body
+            );
+        } else {
+            assert_eq!(
+                reply.status, 404,
+                "{method} {path} with DEV_FIXTURES unset: {}",
+                reply.body
+            );
+            let json: Value = serde_json::from_str(&reply.body)
+                .unwrap_or_else(|error| panic!("404 body is not JSON ({error}): {}", reply.body));
+            assert_eq!(json["error"], "not_found", "{method} {path}: {json}");
+        }
+    }
+    if dev_on {
+        // The gate itself: the credential route answers 201 with the var on.
+        let reply = send("POST", "/v1/dev/machines/mch_gate/credential", &auth, "");
+        assert_eq!(reply.status, 201, "dev credential: {}", reply.body);
+    }
 }
 
 #[test]

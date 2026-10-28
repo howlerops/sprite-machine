@@ -288,6 +288,18 @@ impl ThreadHost for WorkerHost<'_> {
             worker::console_log!("machine {machine_id}: presence mirror failed: {error}");
         }
     }
+
+    async fn record_capabilities(&self, machine_id: &str, capabilities: &Value) {
+        // Best effort, as the presence mirror: the Machine DO keeps the capabilities too.
+        let Ok(database) = self.env.d1("DB") else {
+            return;
+        };
+        if let Err(error) =
+            admin::record_capabilities(&D1::new(&database), machine_id, capabilities).await
+        {
+            worker::console_log!("machine {machine_id}: capabilities mirror failed: {error}");
+        }
+    }
 }
 
 /// The admin API's handle on the Machine DO.
