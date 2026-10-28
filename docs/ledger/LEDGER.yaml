@@ -1972,7 +1972,8 @@ items:
     title: 'hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged fe49dee + leader bc9ef61 (event_id through ThreadHost::append, mutation-checked) + fmt; hub 134 passed, clippy (native, live, wasm) clean, no tokio runtime, hub-test thread_do 7 / thread_create 3 / machine_do 9 / authz 10, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2228,6 +2229,9 @@ items:
     title: 'hub authz: POST /v1/threads only for a machine of the caller''s org (not revoked); POST /v1/threads in the auth policy table'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     lane: rust
     size: S
     risk: high
