@@ -39,3 +39,35 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+
+  tracer:
+    # Runs the tracer bullet end to end: worker-build + wrangler dev --local + the
+    # in-process runner, acp-mock and headless client. Local only: no Cloudflare
+    # credentials are used or needed, so no secrets are referenced here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ''
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lld + GPUI build deps
+        run: >-
+          sudo apt-get update -qq && sudo apt-get install -y -qq lld
+          libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev
+          libfontconfig1-dev libfreetype-dev libvulkan-dev libssl-dev pkg-config
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Install worker-build 0.8.7
+        uses: taiki-e/install-action@v2
+        with:
+          tool: worker-build@0.8.7
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install wrangler 4.154.0
+        run: npm install -g wrangler@4.154.0
+      - name: Tracer bullet (e2e tracer)
+        run: cargo run -p cli -- e2e tracer
