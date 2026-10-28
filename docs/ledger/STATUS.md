@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 76/235 (3 dropped) · in-flight MVP-000f,M2B-005a,M2B-007a,M2B-007 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 74/120
+done 78/235 (3 dropped) · in-flight M2B-005a,M2B-007a · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 74/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 76/235 (3 dropped) · in-flight MVP-000f,M2B-005a,M2B-007a,M2B-007 · block
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 53 | 23 | 4 |
+| P2 | 53 | 25 | 2 |
 | P3 | 20 | 1 | 0 |
 | P4 | 36 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -21,7 +21,7 @@ done 76/235 (3 dropped) · in-flight MVP-000f,M2B-005a,M2B-007a,M2B-007 · block
 
 | Item | Owner | Lane | Status | Title |
 | ---- | ----- | ---- | ------ | ----- |
-| MVP-000f | worker | rust | assigned | Hub wasm: drop the name section (34% of the binary) without strip |
+| MVP-000f | worker | rust | done | Hub wasm: drop the name section (34% of the binary) without strip |
 | M0-009 | leader | rust | blocked | Sandbox spike: start/exec/stop on the deployed preview env; cold start + wake timings |
 | M0-018 | human | rust | done | Provide a Cloudflare account + API token |
 | M1A-004a | worker | rust | done | sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn |
@@ -61,7 +61,7 @@ done 76/235 (3 dropped) · in-flight MVP-000f,M2B-005a,M2B-007a,M2B-007 · block
 | M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | done | runner: local harness discovery + local logins/MCP passthrough |
-| M2B-007 | worker | rust | assigned | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
+| M2B-007 | worker | rust | done | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
 | M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |
 | M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |
 | M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |

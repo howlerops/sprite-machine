@@ -216,7 +216,8 @@ items:
     title: 'Hub wasm: drop the name section (34% of the binary) without strip'
     milestone: M0
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 2868c5c; cli strip-names walker (7 unit tests), wrangler [build] + tracer strip name/producers; bundle 672,484 -> 585,142 B gzip (-13%), wasm -35% raw; thread_do + tracer PASS (verify8)"
     attempt: 1
     assignee: "worker:haiku"
     priority: 2
@@ -3025,7 +3026,8 @@ items:
     title: 'runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue)'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 7e31975; runner+cli 137 passed (server_mode 11: dispatch, capacity, harness_missing, worktree, --continue, respawn after kill, permission mode), clippy clean, no openssl, hub-test thread_do/machine_do, tracer PASS. Follow-ups M2B-007a (priority 1: permission mode before first prompt)"
     attempt: 1
     assignee: "worker:sonnet"
     size: M
