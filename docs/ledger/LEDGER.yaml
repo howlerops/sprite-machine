@@ -2656,6 +2656,9 @@ items:
     title: 'hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     priority: 1
     lane: rust
     size: M
