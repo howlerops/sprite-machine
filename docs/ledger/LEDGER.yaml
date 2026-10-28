@@ -6305,6 +6305,9 @@ items:
     title: 'tunnel/hub: a runner-typed prompt in a shared session is enqueued at the hub (up frame) and comes back as a prompt command, so the hub alone orders local and phone prompts; remove the TUI settle window'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: M
     risk: high
