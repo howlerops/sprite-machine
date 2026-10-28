@@ -38,6 +38,10 @@ qrcode = { version = "0.14", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native"] }
 
+# The spacebar's raw mode on stdin (qr/keys.rs): termios, which `libc` already has in the tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # logind PrepareForSleep (sleep/linux.rs). No default features: no async-io, so no second runtime.
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["tokio"] }

@@ -21,9 +21,11 @@ use tokio::task::JoinHandle;
 use super::local;
 use super::project::{LastSession, Projects};
 use super::session::{SessionCommands, SessionSink, SessionState};
+use super::signin;
 use super::worktree::Worktree;
-use super::{PermissionMode, SpawnMode, names, session_dir};
+use super::{PermissionMode, Sink, SpawnMode, names, session_dir};
 use crate::harness::{self, Found};
+use crate::qr;
 use crate::trust::{self, Asker, Audit, TrustStore, Verdict};
 use crate::tunnel::{Exit, TunnelCommands, TunnelSink};
 
@@ -32,6 +34,8 @@ const WIND_DOWN: Duration = Duration::from_secs(10);
 
 pub(super) struct Context {
     pub machine_id: String,
+    /// The hub as the tunnel names it (`ws(s)://`): the session links are built from it.
+    pub hub: String,
     pub state_dir: PathBuf,
     pub cwd: PathBuf,
     pub home: PathBuf,
@@ -46,6 +50,8 @@ pub(super) struct Context {
     pub asker: Option<Asker>,
     /// How each session's bridge fetches user file parts.
     pub file_policy: FilePolicy,
+    /// Where each started session's link (`<hub>/t/<thread id>`) goes. `None`: nowhere.
+    pub session_started: Option<Sink>,
 }
 
 struct Session {
@@ -636,7 +642,20 @@ impl Router {
                 cwd,
             },
         );
+        self.announce(thread_id);
         Ok(())
+    }
+
+    /// Hands the session's link to the sink. The hub is the tunnel's `ws(s)` form, mapped to http
+    /// the way the sign-in link maps it.
+    fn announce(&self, thread_id: &str) {
+        let Some(sink) = &self.ctx.session_started else {
+            return;
+        };
+        match signin::http_base(&self.ctx.hub).and_then(|hub| qr::session_url(&hub, thread_id)) {
+            Ok(url) => sink(&url),
+            Err(error) => tracing::warn!("no session link: {error:#}"),
+        }
     }
 
     /// A bridge stopped by itself: its session is over.

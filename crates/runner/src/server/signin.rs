@@ -45,7 +45,7 @@ fn render(link: &Link) -> String {
 }
 
 /// The HTTP base of the hub: the stored login may name the tunnel's `ws(s)` form.
-fn http_base(hub: &str) -> Result<String> {
+pub(super) fn http_base(hub: &str) -> Result<String> {
     let hub = hub.trim();
     let hub = if let Some(rest) = hub.strip_prefix("wss://") {
         format!("https://{rest}")

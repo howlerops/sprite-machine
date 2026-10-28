@@ -473,6 +473,31 @@ async fn a_dispatch_runs_a_session_and_its_events_reach_the_hub() {
     running.stop().await;
 }
 
+/// `start`, with the session links going to `sink`.
+fn start_announcing(options: Options, sink: server::Sink) -> Running {
+    let (stop, rx) = oneshot::channel::<()>();
+    let task = tokio::spawn(server::run_announcing(options, sink, async {
+        let _ = rx.await;
+    }));
+    Running { stop, task }
+}
+
+#[tokio::test]
+async fn a_started_session_hands_its_link_to_the_sink() {
+    let rig = Rig::new(&[one("hello")]).await;
+    let (sink, printed) = collecting_sink();
+    let running = start_announcing(rig.options(), sink);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &rig.work()).await;
+    conn.until(run_finished("tk_1")).await;
+
+    // The hub is the tunnel's ws form; the link is its http form, the thread's deep link.
+    let hub = rig.hub.base().replacen("ws://", "http://", 1);
+    assert_eq!(until_len(&printed, 1).await, [format!("{hub}/t/th_1")]);
+    running.stop().await;
+}
+
 #[tokio::test]
 async fn the_permission_mode_is_set_on_the_session() {
     let mut script = one("done");

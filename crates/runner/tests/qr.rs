@@ -1,6 +1,7 @@
 //! The session link, the terminal QR, the spacebar toggle and the `autoConnect` setting (M2B-009,
 //! PLAN-v2-ade.md §4.10). All pure: no hub, no terminal.
 
+use runner::qr::keys::{Latest, RawMode, pump};
 use runner::qr::{QrToggle, block, mobile_url, render, session_url};
 use runner::settings::{self, Settings};
 use tempfile::TempDir;
@@ -147,4 +148,52 @@ fn auto_connect_true_is_read_from_the_state_dir() {
             auto_connect: false
         }
     );
+}
+
+// ---- the spacebar of `sm rc` (keys read from an injected reader) -------------------------------
+
+fn latest_at(url: &str) -> Latest {
+    let latest = Latest::default();
+    latest.set(url);
+    latest
+}
+
+/// The keys in `input` through the key reader; what it wrote.
+fn keys(input: &[u8], latest: &Latest) -> String {
+    let mut out = Vec::new();
+    pump(input, latest, &mut out).unwrap();
+    String::from_utf8(out).unwrap()
+}
+
+#[test]
+fn the_spacebar_shows_then_hides_the_qr_of_the_latest_url() {
+    let url = session_url("https://hub.example", THREAD).unwrap();
+    let latest = latest_at(&url);
+    // A space shows the block, and the next space hides it (it prints nothing); other keys do
+    // nothing.
+    assert_eq!(keys(b" ", &latest), block(&url));
+    assert_eq!(keys(b"  ", &latest), block(&url));
+    assert_eq!(keys(b" x  ", &latest), block(&url).repeat(2));
+}
+
+#[test]
+fn the_qr_shown_is_the_one_of_the_latest_session() {
+    let first = session_url("https://hub.example", THREAD).unwrap();
+    let second = session_url("https://hub.example", "th_02ABCD").unwrap();
+    let latest = latest_at(&first);
+    latest.set(&second);
+    assert_eq!(keys(b" ", &latest), block(&second));
+}
+
+#[test]
+fn other_keys_and_a_space_before_any_session_print_nothing() {
+    let url = session_url("https://hub.example", THREAD).unwrap();
+    assert_eq!(keys(b"abc\n", &latest_at(&url)), "");
+    assert_eq!(keys(b" ", &Latest::default()), "");
+}
+
+#[test]
+fn raw_mode_is_not_turned_on_without_a_terminal() {
+    // No terminal: nothing is changed and there is no guard to restore anything.
+    assert!(RawMode::enable(false).unwrap().is_none());
 }
