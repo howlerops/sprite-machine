@@ -671,8 +671,8 @@ pub async fn set_policy(
 }
 
 /// Turning the setting on closes the live tunnels of the org's machines that are no longer
-/// trusted (M2B-005c): the Machine DO closes the socket with `auth_revoked` (tunnel.md §3.8) and
-/// the machine must re-pair. The org's machines are its registry rows and the machines its
+/// trusted (M2B-005c): the Machine DO closes the socket with `device_untrusted` (SPEC-007) without
+/// revoking, so the machine connects again once the setting is off (M2B-005f). The org's machines are its registry rows and the machines its
 /// threads are hosted on (`thread_hosts`), which also reaches machines without a row. Every
 /// machine is tried; the first failure is returned after the rest were. Returns how many were told.
 async fn close_untrusted_tunnels(
@@ -699,7 +699,7 @@ async fn close_untrusted_tunnels(
         if verdict != Verdict::Untrusted {
             continue;
         }
-        match control.revoke(&machine_id).await {
+        match control.disconnect(&machine_id).await {
             Ok(()) => closed += 1,
             // A thread host whose Machine DO was never provisioned has no tunnel to close.
             Err(error) if error.status == 404 => {}

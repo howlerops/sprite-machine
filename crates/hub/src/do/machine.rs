@@ -11,7 +11,7 @@
 //!   other (a queue drained by one loop), because handling a frame awaits the Thread DO.
 //! - `alarm()` is the heartbeat watchdog: no traffic for 3 x `heartbeat_ms` closes the socket
 //!   with `heartbeat_timeout` and publishes presence `offline`.
-//! - Internal routes (only reachable through a DO stub): `provision`, `revoke`, `commands`
+//! - Internal routes (only reachable through a DO stub): `provision`, `revoke`, `disconnect`, `commands`
 //!   (the push of a Thread DO) and `state`.
 //!
 //! All rules live in `machines::{core, driver}`, which are native-tested; this file only wires
@@ -137,6 +137,7 @@ impl DurableObject for Machine {
                 match *action {
                     "provision" => self.provision(machine_id, &body),
                     "revoke" => self.revoke().await,
+                    "disconnect" => self.disconnect().await,
                     "commands" => self.push(&body).await,
                     _ => json_response(404, &error_body("no such internal route")),
                 }
@@ -536,6 +537,24 @@ impl Machine {
             close_socket(&ws, CloseCode::AuthRevoked, "the machine was revoked");
         }
         json_response(200, &json!({ "status": "revoked" }))
+    }
+
+    /// Closes the live tunnel with `device_untrusted` (SPEC-007) but leaves the machine usable: nothing is
+    /// persisted as revoked, so its credential works again on the next connect. The socket's
+    /// close takes presence offline like any other drop.
+    async fn disconnect(&self) -> worker::Result<Response> {
+        let core = self.core()?;
+        if !core.borrow().is_provisioned() {
+            return json_response(404, &error_body("no such machine"));
+        }
+        for ws in self.state.get_websockets_with_tag(TUNNEL_TAG) {
+            close_socket(
+                &ws,
+                CloseCode::DeviceUntrusted,
+                "the machine is not a trusted device",
+            );
+        }
+        json_response(200, &json!({ "status": "disconnected" }))
     }
 
     async fn push(&self, body: &Value) -> worker::Result<Response> {

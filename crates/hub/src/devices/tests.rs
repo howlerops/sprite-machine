@@ -116,6 +116,7 @@ impl Db for Fake {
 struct FakeControl {
     provisioned: RefCell<Vec<(String, String, String)>>,
     revoked: RefCell<Vec<String>>,
+    disconnected: RefCell<Vec<String>>,
     fail_provision: bool,
 }
 
@@ -140,6 +141,11 @@ impl MachineControl for FakeControl {
 
     fn revoke(&self, machine_id: &str) -> impl Future<Output = Result<(), ApiError>> {
         self.revoked.borrow_mut().push(machine_id.to_owned());
+        ready(Ok(()))
+    }
+
+    fn disconnect(&self, machine_id: &str) -> impl Future<Output = Result<(), ApiError>> {
+        self.disconnected.borrow_mut().push(machine_id.to_owned());
         ready(Ok(()))
     }
 }
@@ -545,7 +551,14 @@ fn the_tunnel_verdict_follows_origin_revocation_and_the_org_setting() {
     assert!(!block_on(trust::machine_may_connect(&db, &device_id)).expect("may connect"));
     set_trusted(&db, &owner, false);
     assert_eq!(verdict(&db, &device_id, false), Allowed);
-    set_trusted(&db, &owner, true);
+    assert!(control.disconnected.borrow().is_empty());
+    set_trusted_with(&db, &control, false, &owner, true);
+    // The flip closes the untrusted machine's tunnel (disconnect), never revoking it (M2B-005f).
+    assert_eq!(
+        control.disconnected.borrow().as_slice(),
+        std::slice::from_ref(&device_id)
+    );
+    assert!(!control.revoked.borrow().contains(&device_id));
 
     // A revoked machine goes to the DO, which closes it with auth_revoked.
     block_on(crate::machines::admin::revoke_machine(

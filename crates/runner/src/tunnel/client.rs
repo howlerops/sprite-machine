@@ -295,6 +295,10 @@ impl<C: CredentialSource> TunnelClient<C> {
                     self.backoff.reset();
                     Duration::ZERO
                 }
+                Ended::Close(CloseCode::DeviceUntrusted) => {
+                    warn_untrusted();
+                    self.backoff.next_delay()
+                }
                 Ended::Close(code) => {
                     tracing::warn!(?code, "tunnel closed by the hub; reconnecting");
                     self.backoff.next_delay()
@@ -878,6 +882,23 @@ fn parse(text: &str) -> Inbound {
     }
 }
 
+/// Whether an upgrade refusal body is the `device_untrusted` error (SPEC-007).
+fn is_device_untrusted(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .is_ok_and(|v| v["error"] == "device_untrusted")
+}
+
+/// Says once per process that the machine must be vouched for; the credential is kept.
+fn warn_untrusted() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tracing::warn!(
+            "the hub does not trust this machine (the org requires trusted devices); \
+             keeping the credential and retrying until it is vouched for or the setting is off"
+        );
+    });
+}
+
 enum ConnectError {
     /// The hub refused the upgrade for a reason retrying cannot fix.
     Fatal(String),
@@ -911,7 +932,11 @@ async fn connect(
         Err(tungstenite::Error::Http(response)) => {
             let status = response.status().as_u16();
             let message = format!("hub refused the tunnel upgrade: HTTP {status}");
-            if matches!(status, 401 | 403 | 426) {
+            // SPEC-007: 403 `device_untrusted` is not a bad credential; keep it and retry.
+            if status == 403 && response.body().as_deref().is_some_and(is_device_untrusted) {
+                warn_untrusted();
+                Err(ConnectError::Retry(message))
+            } else if matches!(status, 401 | 403 | 426) {
                 Err(ConnectError::Fatal(message))
             } else {
                 Err(ConnectError::Retry(message))

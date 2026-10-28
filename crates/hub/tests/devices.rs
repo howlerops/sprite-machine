@@ -265,7 +265,11 @@ impl Ws {
         }
         let head = String::from_utf8_lossy(&head).into_owned();
         if !head.starts_with("HTTP/1.1 101") {
-            return Err(head);
+            // A refusal carries its error body; read what arrives (the head alone for a 101).
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+            let mut body = Vec::new();
+            let _ = stream.read_to_end(&mut body);
+            return Err(format!("{head}{}", String::from_utf8_lossy(&body)));
         }
         Ok(Self {
             stream,
@@ -634,20 +638,21 @@ fn the_tunnel_refuses_a_machine_that_is_not_vouched_for_when_the_org_requires_tr
     live.send_text(&hello(&machine).to_string());
     assert_eq!(live.json()["t"], "welcome");
 
-    // Setting on (M2B-005c): the open tunnel is closed with auth_revoked ...
+    // Setting on (M2B-005c, SPEC-007): the open tunnel is closed with device_untrusted ...
     policy(true);
     let close = live.json();
     assert_eq!(
         (close["t"].as_str(), close["code"].as_str()),
-        (Some("close"), Some("auth_revoked")),
+        (Some("close"), Some("device_untrusted")),
         "{close}"
     );
-    // ... and a new one is refused before the upgrade, the status of a missing credential
-    // (tunnel.md §2).
+    // ... and a new one is refused before the upgrade with 403 device_untrusted, not the 401 of
+    // a bad credential.
     let refused = Ws::try_open_tunnel(&machine, &credential)
         .err()
         .expect("an unvouched machine must be refused");
-    assert!(refused.starts_with("HTTP/1.1 401"), "{refused}");
+    assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+    assert!(refused.contains("\"device_untrusted\""), "{refused}");
 
     // Admin-issued and device-paired machines of an org with the setting on still connect.
     let admin = http(
@@ -674,13 +679,13 @@ fn the_tunnel_refuses_a_machine_that_is_not_vouched_for_when_the_org_requires_tr
     ws.send_text(&hello(&device_id).to_string());
     assert_eq!(ws.json()["t"], "welcome");
 
-    // The Machine DO revoked the unvouched machine when the setting turned on; an admin-issued
-    // or paired machine was left alone (above), and turning the setting off does not undo that.
+    // The flip only disconnected the unvouched machine (M2B-005f): it was not revoked, so with
+    // the setting off again the same machine and credential connect.
     policy(false);
-    let mut revoked = Ws::open_tunnel(&machine, &credential);
-    revoked.send_text(&hello(&machine).to_string());
-    let close = revoked.json();
-    assert_eq!(close["code"], "auth_revoked", "{close}");
+    let mut again = Ws::open_tunnel(&machine, &credential);
+    again.send_text(&hello(&machine).to_string());
+    let first = again.json();
+    assert_eq!(first["t"], "welcome", "{first}");
 }
 
 #[test]
