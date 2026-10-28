@@ -8,7 +8,7 @@ models: { default: haiku, high_risk_or_retry: sonnet, never: opus } # user cost 
 max_parallel: 3 # Rust workers; the docs and client lanes add their own slots (see lanes)
 lanes: { rust: 3, docs: 1, client: 1, ts: 1 } # per-lane in-flight caps; client (GPUI) is serialized
 budget: # sized for P0–P2; the leader re-raises max_total_attempts at each phase review
-  max_total_attempts: 120
+  max_total_attempts: 200 # raised 2026-10-28 under the user's go-ahead to drive the plan through (P2 still open)
   max_worker_minutes: 45
   max_worker_minutes_client: 60 # lane: client items
 env:

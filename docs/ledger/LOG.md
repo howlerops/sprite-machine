@@ -218,3 +218,4 @@
 2026-10-28T15:12Z disk hit 245 MB free (CI-002 worker-build failed ENOSPC; other workers at risk). Leader cleared stale test exes (debug/deps 23 GB) → 9.5 GB free; background janitor deletes stale test exes whenever free < 5 GB. CI-002 resumed on the same attempt with one wasm profile (its CI-002b proposal)
 2026-10-28T15:39Z CI-002 done (merged; smoke + tracer on merged tree; janitor now removes wasm-<hash> dirs of removed worktrees). WEB-002 attempt 2 back (sonnet) → merged, playwright transcript+pairing 18/18 → done. M2-010a back (sonnet) → merged; verify18 running. Follow-ups: M2-010f (live reconcile test), M2-010g (reconcile paging), WEB-005 (answer interrupts/send prompts from the thread view)
 2026-10-28T15:40Z assign WEB-003 (sonnet), M2B-014 (haiku). Added M2-010f, M2-010g (P4)
+2026-10-28T15:40Z budget max_total_attempts 120 → 200 (user: drive it all the way through)
