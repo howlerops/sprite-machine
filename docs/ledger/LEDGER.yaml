@@ -2885,6 +2885,9 @@ items:
     title: 'hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006)'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     priority: 1
     lane: rust
     size: S

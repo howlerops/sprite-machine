@@ -196,3 +196,4 @@
 2026-10-28T12:55Z M2B-002b assigned (haiku), M2B-012 assigned (haiku, e2e)
 2026-10-28T12:56Z M2B-012 blocked on paths (FilePolicy hardcoded in sidecar bridge runtime) → leader widened paths (sidecar bridge Config file_policy, test-only), worker resumed on the same attempt. Lesson noted: include the call site of any policy the item must change
 2026-10-28T13:08Z WEB-002 blocked: browsers cannot send Authorization on a WebSocket. SPEC-006 done 1a9a23a (single-use 60 s subscribe ticket); added M2-008h (priority 1); WEB-002 back to todo with deps += M2-008h (attempt 1 spent on the finding)
+2026-10-28T13:09Z M2-008h assigned (sonnet, priority 1)
