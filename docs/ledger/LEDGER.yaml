@@ -228,6 +228,23 @@ items:
     verify:
       - grep -q 'e2e tracer' .github/workflows/rust.yml
 
+  - id: SPEC-001a
+    title: 'Spec: settle the open points found by the ACP→TurnEvent mapper (turn-event.md)'
+    milestone: M0
+    phase: P1
+    lane: docs
+    priority: 2
+    owner: leader
+    deps: [M1A-006a]
+    paths:
+      - docs/specs/turn-event.md
+    context:
+      - 'docs/ledger/reports/M1A-006a.md (spec issues 1-11)'
+    acceptance:
+      - 'turn-event.md names crates/protocol/src/mapping/acp_turn* and states the mapper''s choices for: user_message_chunk inside a run, cancel/expiry of a paused task (resume run then RunError), open tool call at RunFinished (completed on end_turn, failed otherwise), session_info_update (title only; hub owns pending_tasks), messageId boundaries, and the 128 KiB terminal snapshot cap'
+    verify:
+      - grep -q acp_turn docs/specs/turn-event.md
+
   - id: SPEC-003
     title: 'Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage'
     milestone: M0
@@ -840,7 +857,8 @@ items:
     title: 'protocol::mapping ACP→TurnEvent + golden tests'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged a41219c; verify: golden_acp_turn 79 (37 golden cases, 29 negative validator), protocol 132 tests, hub wasm32 + no tokio runtime, clippy clean"
     assignee: "worker:sonnet"
     attempt: 1
     size: M
