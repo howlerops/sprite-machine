@@ -1,28 +1,31 @@
-// TRACER STUB: replaced by M3-001 (client-core: subscription with resubscribe-on-gap, view models, cache, outbound queue)
-//! The tracer bullet's headless client: subscribes to one thread over the hub's WebSocket
-//! (turn-event.md §6), sends one prompt, answers the approval interrupt with an allow option
-//! through the HTTP API (with idempotency keys), and returns every envelope it applied once the
-//! task ends with `RunFinished{success}`.
+//! The tracer bullet's headless client, as a thin adapter over the real client: the
+//! subscription ([`crate::sync::Subscription`]) and the outbound queue ([`crate::outbox`]).
 //!
-//! It asserts what a real client relies on: envelope `seq` strictly increases by one per thread
-//! (duplicates are dropped, a gap is an error here instead of a resubscribe), and a second
-//! answer to the same interrupt is refused with HTTP 409 (first answer wins, §4.5).
+//! It subscribes to one thread (turn-event.md §6), enqueues one prompt, answers the approval
+//! interrupt with an allow option, then enqueues a second answer under a new key, which the hub
+//! refuses with HTTP 409 (first answer wins, client-api.md §4). It returns every envelope it
+//! applied once the task ends with `RunFinished{success}`.
 //!
-//! Stub limits: no reconnect / `?after=` resubscribe, no auth, one thread, one task.
+//! Envelopes are deduplicated by `seq`. A gap resubscribes from the last contiguous seq (the
+//! real client's behaviour) instead of failing. A dropped socket is reconnected with backoff.
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
-use futures_util::StreamExt;
+use anyhow::{Result, anyhow, bail, ensure};
 use protocol::tunnel::{Actor, ContentPart, Outcome};
 use protocol::turn_event::{Envelope, Event, InterruptKind, PermissionOptionKind, RunOutcome};
-use serde_json::{Value, json};
-use tokio_tungstenite::tungstenite::Message;
+
+use crate::cache::Cache;
+use crate::outbox::{
+    Clock, FlushReport, HttpTransport, Intent, IntentState, Outbox, RetryPolicy, SystemClock,
+    SystemRandom,
+};
+use crate::sync::{Applied, Subscription, SubscriptionError, ThreadSync};
 
 /// Client settings.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    /// `http://host:port` of the hub.
+    /// `http://host:port` of the hub (the tracer hub serves its routes without a prefix).
     pub http_base: String,
     pub thread_id: String,
     /// The machine that should host the thread.
@@ -43,6 +46,9 @@ pub struct Observed {
     pub second_answer_status: u16,
 }
 
+/// Reconnect attempts after a dropped socket before the exchange fails.
+const MAX_RECONNECTS: u32 = 5;
+
 /// Runs the whole client exchange; see the module docs.
 pub async fn run(config: ClientConfig) -> Result<Observed> {
     let timeout = config.timeout;
@@ -53,65 +59,49 @@ pub async fn run(config: ClientConfig) -> Result<Observed> {
 
 async fn exchange(config: ClientConfig) -> Result<Observed> {
     let base = config.http_base.trim_end_matches('/').to_owned();
-    let ws_base = base
-        .strip_prefix("http")
-        .map(|rest| format!("ws{rest}"))
-        .ok_or_else(|| anyhow!("http_base must start with http: {base}"))?;
-    let thread = &config.thread_id;
-    let seed = format!("{:x}", now_ms());
-    let http = reqwest::Client::new();
+    let thread = config.thread_id.clone();
+    let seed = format!("{:x}", SystemClock.now_ms());
+    let cache = Cache::open_in_memory()?;
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default())?;
+    let transport = HttpTransport::new(None);
+    let mut rng = SystemRandom;
 
-    let subscribe = format!("{ws_base}/threads/{thread}/subscribe?after=0");
-    let (mut socket, _) = tokio_tungstenite::connect_async(subscribe.as_str())
-        .await
-        .with_context(|| format!("subscribe {subscribe}"))?;
+    let mut subscription =
+        Subscription::connect(&base, ThreadSync::new(thread.clone()), None).await?;
 
     // Catch-up: hello, snapshot, replayed events, live (§6).
-    let hello = next_json(&mut socket).await?;
-    ensure!(
-        hello["type"] == "hello",
-        "first message is not hello: {hello}"
-    );
-    let mut state = Applied::default();
+    let mut envelopes = Vec::new();
     loop {
-        let message = next_json(&mut socket).await?;
-        match message["type"].as_str() {
-            Some("snapshot") => {}
-            Some("event") => {
-                state.apply(&message)?;
-            }
-            Some("live") => break,
-            _ => bail!("unexpected catch-up message {message}"),
+        match next_applied(&mut subscription, &mut rng).await? {
+            Applied::Live => break,
+            Applied::Event(envelope) => envelopes.push(*envelope),
+            _ => {}
         }
     }
 
-    let prompt = json!({
-        "machine_id": config.machine_id,
-        "task_id": config.task_id,
-        "message_id": format!("msg_u{seed}"),
-        "parts": [ContentPart::Text { text: config.prompt.clone() }],
-        "author": config.user,
-    });
-    let status = post(
-        &http,
-        &format!("{base}/threads/{thread}/prompts"),
-        &format!("idk_{seed}_prompt"),
-        &prompt,
-    )
-    .await?;
-    ensure!(status == 202, "prompt answered HTTP {status}");
+    let prompt = Intent::Prompt {
+        thread_id: thread.clone(),
+        task_id: config.task_id.clone(),
+        message_id: format!("msg_u{seed}"),
+        parts: vec![ContentPart::Text {
+            text: config.prompt.clone(),
+        }],
+        machine_id: Some(config.machine_id.clone()),
+        author: Some(config.user.clone()),
+    };
+    let prompt_id = outbox.enqueue(&cache, prompt, SystemClock.now_ms())?;
+    send(&mut outbox, &cache, &transport, &base, &mut rng).await?;
+    let prompt_status = status_of(&outbox, prompt_id)?;
+    ensure!(prompt_status == 202, "prompt answered HTTP {prompt_status}");
 
     let mut second_answer_status = 0;
     loop {
-        let message = next_json(&mut socket).await?;
-        match message["type"].as_str() {
-            Some("event") => {}
-            Some("pong") => continue,
-            _ => bail!("unexpected live message {message}"),
-        }
-        let Some(envelope) = state.apply(&message)? else {
+        let applied = next_applied(&mut subscription, &mut rng).await?;
+        let Applied::Event(envelope) = applied else {
             continue;
         };
+        let envelope = *envelope;
+        envelopes.push(envelope.clone());
         match &envelope.event {
             Event::Interrupt(interrupt) if interrupt.kind == InterruptKind::Approval => {
                 let option_id = interrupt
@@ -126,25 +116,37 @@ async fn exchange(config: ClientConfig) -> Result<Observed> {
                     })
                     .map(|option| option.option_id.clone())
                     .ok_or_else(|| anyhow!("approval interrupt without an allow option"))?;
-                let url = format!(
-                    "{base}/threads/{thread}/interrupts/{}",
-                    interrupt.interrupt_id
-                );
-                let answer = json!({
-                    "outcome": Outcome::Selected { option_id },
-                    "resolved_by": config.user,
-                });
-                let status = post(&http, &url, &format!("idk_{seed}_answer"), &answer).await?;
+                let answer = |actor: &Actor| Intent::Approval {
+                    thread_id: thread.clone(),
+                    interrupt_id: interrupt.interrupt_id.clone(),
+                    outcome: Outcome::Selected {
+                        option_id: option_id.clone(),
+                    },
+                    resolved_by: Some(actor.clone()),
+                };
+                let first = outbox.enqueue(&cache, answer(&config.user), SystemClock.now_ms())?;
+                send(&mut outbox, &cache, &transport, &base, &mut rng).await?;
+                let status = status_of(&outbox, first)?;
                 ensure!(status == 200, "answer answered HTTP {status}");
+
                 // A second device answering later loses (first answer wins).
-                second_answer_status =
-                    post(&http, &url, &format!("idk_{seed}_answer_late"), &answer).await?;
+                let late = outbox.enqueue(&cache, answer(&config.user), SystemClock.now_ms())?;
+                send(&mut outbox, &cache, &transport, &base, &mut rng).await?;
+                second_answer_status = status_of(&outbox, late)?;
+                for conflict in outbox.conflicts() {
+                    if let Some(winner) = conflict.resolved_by {
+                        subscription
+                            .sync_mut()
+                            .view_mut()
+                            .note_conflict(&conflict.interrupt_id, winner);
+                    }
+                }
             }
             Event::RunFinished(finished)
                 if matches!(finished.outcome, RunOutcome::Success { .. }) =>
             {
                 return Ok(Observed {
-                    envelopes: state.envelopes,
+                    envelopes,
                     second_answer_status,
                 });
             }
@@ -154,68 +156,53 @@ async fn exchange(config: ClientConfig) -> Result<Observed> {
     }
 }
 
-/// Envelopes applied so far, deduplicated by `seq`.
-#[derive(Default)]
-struct Applied {
-    last_seq: u64,
-    envelopes: Vec<Envelope>,
-}
-
-impl Applied {
-    /// Applies one `{"type":"event"}` message. Returns the envelope if it was new.
-    fn apply(&mut self, message: &Value) -> Result<Option<Envelope>> {
-        let envelope: Envelope = serde_json::from_value(message["envelope"].clone())
-            .with_context(|| format!("invalid envelope {message}"))?;
-        if envelope.seq <= self.last_seq {
-            return Ok(None);
-        }
-        ensure!(
-            envelope.seq == self.last_seq + 1,
-            "seq gap: after {} came {}",
-            self.last_seq,
-            envelope.seq
-        );
-        self.last_seq = envelope.seq;
-        self.envelopes.push(envelope.clone());
-        Ok(Some(envelope))
-    }
-}
-
-async fn post(http: &reqwest::Client, url: &str, key: &str, body: &Value) -> Result<u16> {
-    let response = http
-        .post(url)
-        .header("Idempotency-Key", key)
-        .json(body)
-        .send()
-        .await
-        .with_context(|| format!("POST {url}"))?;
-    Ok(response.status().as_u16())
-}
-
-async fn next_json<S>(socket: &mut S) -> Result<Value>
-where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
+/// Reads the next message. A dropped socket is reconnected from the last applied seq, with
+/// backoff, up to [`MAX_RECONNECTS`] times.
+async fn next_applied(subscription: &mut Subscription, rng: &mut SystemRandom) -> Result<Applied> {
+    let policy = RetryPolicy::default();
+    let mut reconnects = 0;
     loop {
-        let message = socket
-            .next()
-            .await
-            .ok_or_else(|| anyhow!("subscription closed by the hub"))?
-            .context("subscription read")?;
-        match message {
-            Message::Text(body) => {
-                return serde_json::from_str(body.as_str())
-                    .with_context(|| format!("invalid message {}", body.as_str()));
+        match subscription.next().await {
+            Ok(applied) => return Ok(applied),
+            Err(error @ (SubscriptionError::Closed | SubscriptionError::Read(_))) => {
+                reconnects += 1;
+                if reconnects > MAX_RECONNECTS {
+                    return Err(anyhow::Error::new(error).context("subscription lost"));
+                }
+                let delay = policy.delay_ms(reconnects, rng);
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                subscription.reconnect().await?;
             }
-            Message::Close(reason) => bail!("subscription closed by the hub: {reason:?}"),
-            _ => {}
+            Err(error) => return Err(error.into()),
         }
     }
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or(0)
+/// Flushes the outbox once; the tracer's hub never fails transiently, so a flush settles
+/// every entry it was given.
+async fn send(
+    outbox: &mut Outbox,
+    cache: &Cache,
+    transport: &HttpTransport,
+    base: &str,
+    rng: &mut SystemRandom,
+) -> Result<FlushReport> {
+    let report = outbox
+        .flush(cache, transport, base, &SystemClock, rng)
+        .await?;
+    Ok(report)
+}
+
+/// The HTTP status of a settled entry. A still-queued or failed entry is an error.
+fn status_of(outbox: &Outbox, local_id: i64) -> Result<u16> {
+    let entry = outbox
+        .get(local_id)
+        .ok_or_else(|| anyhow!("outbox entry {local_id} vanished"))?;
+    match &entry.state {
+        IntentState::Done { status, .. } | IntentState::Conflict { status, .. } => Ok(*status),
+        IntentState::Rejected { status, error } => {
+            Err(anyhow!("request refused with HTTP {status}: {error}"))
+        }
+        other => Err(anyhow!("request not answered: {other:?}")),
+    }
 }
