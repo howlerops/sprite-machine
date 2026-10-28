@@ -170,3 +170,4 @@
 2026-10-28T10:23Z M2B-007 back (sonnet). Review: --permission-mode applied after the first prompt starts (a safer mode like plan is not in force for prompt 1) → M2B-007a (priority 1, high) with mcp_capabilities exposure, worktree sweep, session end. Merge after the M2-008e verify
 2026-10-28T10:30Z M2-008e → done (full verify: 649 passed; 8 live suites, thread_create on re-run; tracer)
 2026-10-28T10:30Z M2B-007 merged 7e31975 (sonnet), MVP-000f merged 2868c5c (haiku; leader re-scoped criterion 2: 25% gzip unreachable by stripping names, -13% gzip/-35% raw accepted). Added MVP-000h (P4). Verify running
+2026-10-28T10:30Z M2B-007a assigned (sonnet, priority 1), M2B-005a assigned (sonnet, priority 1 security; paths += migration 0007, cron, DELETE /v1/devices/self)

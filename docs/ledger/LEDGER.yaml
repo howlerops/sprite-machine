@@ -2450,6 +2450,9 @@ items:
     title: 'hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     priority: 1
     lane: rust
     size: M
@@ -2585,6 +2588,9 @@ items:
     title: 'sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout)'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     priority: 1
     lane: rust
     size: M
