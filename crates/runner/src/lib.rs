@@ -2,5 +2,6 @@
 //! The `sm` binary is `src/main.rs`.
 
 pub mod checkpoint;
+pub mod sleep;
 pub mod tracer;
 pub mod tunnel;

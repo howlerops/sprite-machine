@@ -25,6 +25,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 rand = "0.9"
 
+# logind PrepareForSleep (sleep/linux.rs). No default features: no async-io, so no second runtime.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
 [dev-dependencies]
 # Schema check of the Checkpoint event. Same pin as crates/protocol.
 jsonschema = { version = "=0.60.2", default-features = false }

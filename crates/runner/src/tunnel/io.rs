@@ -1,8 +1,9 @@
 //! The bridge-facing side of the tunnel client: [`TunnelSink`] (`EventSink`) and
 //! [`TunnelCommands`] (`CommandSource`), plus the state they share with the connection task.
 
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use protocol::tunnel::{MAX_FRAME_BYTES, Workspace};
 use serde_json::{Value, json};
@@ -21,15 +22,27 @@ pub(crate) struct Shared {
     pub last_seq: AtomicU64,
     /// Set when the client stopped for good; the sink then refuses output.
     pub closed: AtomicBool,
+    /// Threads started on this runner (tunnel.md §3.4). `false`: marked, `thread_open` not yet
+    /// queued; `true`: opened. A thread not listed here was dispatched by the hub and needs no
+    /// `thread_open`. Held across the check and the enqueue, so `thread_open` is always the
+    /// first frame of its thread in the outbox.
+    pub local_threads: Mutex<HashMap<String, bool>>,
 }
 
 impl Shared {
+    fn lock_local_threads(&self) -> std::sync::MutexGuard<'_, HashMap<String, bool>> {
+        self.local_threads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub fn new(store: Arc<Store>) -> Self {
         Self {
             store,
             wake: Notify::new(),
             last_seq: AtomicU64::new(0),
             closed: AtomicBool::new(false),
+            local_threads: Mutex::new(HashMap::new()),
         }
     }
 
@@ -113,9 +126,17 @@ impl TunnelSink {
             .unwrap_or(0)
     }
 
+    /// Declares `thread_id` as started on this runner (a local session). Until
+    /// [`TunnelSink::thread_open`] is called for it, events for it are refused.
+    pub fn mark_local_thread(&self, thread_id: &str) {
+        let mut local = self.shared.lock_local_threads();
+        local.entry(thread_id.to_owned()).or_insert(false);
+    }
+
     /// Queues `thread_open` (tunnel.md §3.4) for a thread started on this runner. Call it
-    /// before the thread's first event. The outbox sends frames in seq order, so the hub sees
-    /// it first, also when the frames are resent after a reconnect. Returns the outbox seq.
+    /// before the thread's first event. At most once per thread id: a second call is an error.
+    /// The outbox sends frames in seq order, so the hub sees it first, also when the frames are
+    /// resent after a reconnect. Returns the outbox seq.
     pub fn thread_open(
         &self,
         thread_id: &str,
@@ -125,25 +146,46 @@ impl TunnelSink {
     ) -> Result<u64, SinkError> {
         let workspace = serde_json::to_value(workspace)
             .map_err(|e| SinkError(format!("unserialisable workspace: {e}")))?;
-        self.shared.enqueue(json!({
+        let mut local = self.shared.lock_local_threads();
+        if local.get(thread_id) == Some(&true) {
+            return Err(SinkError(format!("thread {thread_id} is already open")));
+        }
+        let seq = self.shared.enqueue(json!({
             "t": "thread_open",
             "thread_id": thread_id,
             "title": title,
             "agent": agent,
             "workspace": workspace,
-        }))
+        }))?;
+        local.insert(thread_id.to_owned(), true);
+        Ok(seq)
+    }
+
+    /// Queues event bodies, refusing the whole batch if an envelope belongs to a local thread
+    /// that was never opened.
+    fn send_events(&self, envelopes: &[Envelope]) -> Result<(), SinkError> {
+        let mut bodies = Vec::with_capacity(envelopes.len());
+        for envelope in envelopes {
+            let envelope = serde_json::to_value(envelope)
+                .map_err(|e| SinkError(format!("unserialisable envelope: {e}")))?;
+            bodies.push(json!({ "t": "event", "envelope": envelope }));
+        }
+        let local = self.shared.lock_local_threads();
+        for envelope in envelopes {
+            if local.get(&envelope.thread_id) == Some(&false) {
+                return Err(SinkError(format!(
+                    "thread {} was started on this runner but not opened (thread_open first)",
+                    envelope.thread_id
+                )));
+            }
+        }
+        self.shared.enqueue_all(bodies).map(|_| ())
     }
 }
 
 impl EventSink for TunnelSink {
     async fn send(&self, envelopes: Vec<Envelope>) -> Result<(), SinkError> {
-        let mut bodies = Vec::with_capacity(envelopes.len());
-        for envelope in &envelopes {
-            let envelope = serde_json::to_value(envelope)
-                .map_err(|e| SinkError(format!("unserialisable envelope: {e}")))?;
-            bodies.push(json!({ "t": "event", "envelope": envelope }));
-        }
-        self.shared.enqueue_all(bodies).map(|_| ())
+        self.send_events(&envelopes)
     }
 
     async fn command_result(&self, failure: CommandFailure) -> Result<(), SinkError> {
