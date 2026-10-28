@@ -1,14 +1,17 @@
-//! The OS sleep hook: each pre-sleep notification becomes `presence{asleep}` on the live tunnel
-//! (tunnel.md §3.7). The OS watcher is a fake here; the Linux watcher is only checked for its
-//! no-bus error.
+//! The OS sleep hook: each `WillSleep` becomes `presence{asleep}` on the live tunnel before the
+//! sleep delay is released (tunnel.md §3.7). The OS watcher is a fake here, with a fake delay
+//! that records `take` and `release`. The Linux watcher is only checked for its no-bus error,
+//! and the macOS decision logic (`power_action`) is checked on every host.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use futures_util::{SinkExt, StreamExt};
 use protocol::tunnel::Capabilities;
-use runner::sleep::{SleepWatcher, forward};
+use runner::sleep::{
+    Hint, PowerAction, PowerEvent, PowerMessage, SleepWatcher, forward, power_action,
+};
 use runner::tunnel::{StaticCredential, Timing, TunnelConfig, tunnel};
 use serde_json::{Value, json};
 use sidecar::store::Store;
@@ -37,15 +40,57 @@ impl Callback for EchoProtocol {
     }
 }
 
-/// A watcher whose notifications the test sends. Ends with an error when the sender is dropped.
-struct FakeWatcher(mpsc::UnboundedReceiver<()>);
+/// Shared record of what the forwarder did, in order.
+#[derive(Clone, Default)]
+struct Log(Arc<Mutex<Vec<&'static str>>>);
+
+impl Log {
+    fn push(&self, entry: &'static str) {
+        self.0.lock().unwrap().push(entry);
+    }
+
+    fn entries(&self) -> Vec<&'static str> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// A watcher whose events the test sends. Its delay is a fake inhibitor: `take_delay` and
+/// `release_delay` are recorded in `log`. Ends with an error when the sender is dropped.
+struct FakeWatcher {
+    events: mpsc::UnboundedReceiver<PowerEvent>,
+    log: Log,
+    take_fails: bool,
+}
 
 impl SleepWatcher for FakeWatcher {
-    async fn pre_sleep(&mut self) -> Result<()> {
-        self.0
+    async fn next_event(&mut self) -> Result<PowerEvent> {
+        self.events
             .recv()
             .await
             .ok_or_else(|| anyhow!("fake watcher closed"))
+    }
+
+    async fn take_delay(&mut self) -> Result<()> {
+        self.log.push("take");
+        if self.take_fails {
+            bail!("fake logind refused the inhibitor");
+        }
+        Ok(())
+    }
+
+    fn release_delay(&mut self) -> Result<()> {
+        self.log.push("release");
+        Ok(())
+    }
+}
+
+/// A hint that records when it is written.
+struct RecordingHint(Log);
+
+impl Hint for RecordingHint {
+    async fn send_asleep(&self) -> bool {
+        self.0.push("hint");
+        true
     }
 }
 
@@ -106,10 +151,15 @@ async fn each_pre_sleep_notification_sends_presence_asleep() {
     .unwrap();
 
     // Two pre-sleep notifications (say, two sleeps) give two presence frames.
-    let (notify, watcher) = mpsc::unbounded_channel();
-    let forwarding = tokio::spawn(forward(FakeWatcher(watcher), hint));
+    let (notify, events) = mpsc::unbounded_channel();
+    let watcher = FakeWatcher {
+        events,
+        log: Log::default(),
+        take_fails: false,
+    };
+    let forwarding = tokio::spawn(forward(watcher, hint));
     for _ in 0..2 {
-        notify.send(()).unwrap();
+        notify.send(PowerEvent::WillSleep).unwrap();
         assert_eq!(
             next_frame(&mut ws).await,
             json!({ "t": "presence", "state": "asleep", "reason": "os_sleep" })
@@ -127,6 +177,77 @@ async fn each_pre_sleep_notification_sends_presence_asleep() {
     );
     assert!(!run.is_finished(), "the tunnel client must keep running");
     run.abort();
+}
+
+#[tokio::test]
+async fn the_hint_is_written_before_the_delay_is_released() {
+    let log = Log::default();
+    let (notify, events) = mpsc::unbounded_channel();
+    let watcher = FakeWatcher {
+        events,
+        log: log.clone(),
+        take_fails: false,
+    };
+    for event in [
+        PowerEvent::WillSleep,
+        PowerEvent::Resumed,
+        PowerEvent::WillSleep,
+    ] {
+        notify.send(event).unwrap();
+    }
+    drop(notify);
+
+    // Queued events are drained before the closed channel ends the loop.
+    let outcome = forward(watcher, RecordingHint(log.clone())).await;
+    assert!(
+        outcome
+            .unwrap_err()
+            .to_string()
+            .contains("fake watcher closed")
+    );
+    assert_eq!(
+        log.entries(),
+        // Startup take; sleep: hint then release; resume: take again; sleep: hint then release.
+        ["take", "hint", "release", "take", "hint", "release"],
+    );
+}
+
+#[tokio::test]
+async fn a_refused_delay_still_gets_the_hint_before_the_sleep() {
+    let log = Log::default();
+    let (notify, events) = mpsc::unbounded_channel();
+    let watcher = FakeWatcher {
+        events,
+        log: log.clone(),
+        take_fails: true,
+    };
+    notify.send(PowerEvent::WillSleep).unwrap();
+    drop(notify);
+
+    let _ = forward(watcher, RecordingHint(log.clone())).await;
+    // No delay was held, but the hint is still written before the (no-op) release.
+    assert_eq!(log.entries(), ["take", "hint", "release"]);
+}
+
+#[test]
+fn can_system_sleep_is_allowed_at_once_without_a_hint() {
+    assert_eq!(
+        power_action(PowerMessage::CanSystemSleep),
+        PowerAction::AllowNow
+    );
+}
+
+#[test]
+fn will_system_sleep_is_hinted_and_then_allowed() {
+    assert_eq!(
+        power_action(PowerMessage::SystemWillSleep),
+        PowerAction::HintThenAllow
+    );
+}
+
+#[test]
+fn other_power_messages_are_ignored() {
+    assert_eq!(power_action(PowerMessage::Other), PowerAction::Ignore);
 }
 
 #[cfg(target_os = "linux")]
