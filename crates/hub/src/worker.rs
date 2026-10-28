@@ -11,6 +11,8 @@
 //! - `/v1/threads/...` and `/v1/dev/threads/...`: the Thread DO routes (M2-008, `threads/routes.rs`).
 //! - `/v1/machines/...` and `/v1/dev/machines/...`: the machine admin API and the runner tunnel to
 //!   the Machine DO (M2B-002, `machines/routes.rs`).
+//! - `/v1/attachments...`: the attachment create (session token) and the signed upload and content
+//!   URLs (M2-009, `attachments/routes.rs`).
 //! - tracer routes (MVP-000, NO AUTH, see `tracer/worker.rs`), forwarded to the `TracerHub`
 //!   Durable Object. `GET /health` is the tracer's liveness probe (`cli e2e tracer` polls it).
 //! - anything else: `404` with the client-api.md §4 error body.
@@ -49,6 +51,7 @@ pub fn router(env: Env) -> Router {
         .merge(crate::auth::routes::auth_routes())
         .merge(crate::threads::routes::thread_routes())
         .merge(crate::machines::routes::machine_routes())
+        .merge(crate::attachments::routes::attachment_routes())
         .merge(tracer_routes())
         .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)
