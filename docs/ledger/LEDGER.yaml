@@ -2725,7 +2725,8 @@ items:
     title: 'hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify16+17: fmt, clippy (native, live, wasm), workspace 836 passed --no-fail-fast, all 14 live suites incl. subscribe_ticket and HUB_DEV_FIXTURES=0 smoke, playwright pairing 9/9, e2e attachments PASS, tracer PASS"
     assignee: "sonnet"
     attempt: 1
     lane: rust
@@ -2749,7 +2750,8 @@ items:
     title: 'Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure)'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify16+17: fmt, clippy (native, live, wasm), workspace 836 passed --no-fail-fast, all 14 live suites incl. subscribe_ticket and HUB_DEV_FIXTURES=0 smoke, playwright pairing 9/9, e2e attachments PASS, tracer PASS"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -2822,7 +2824,8 @@ items:
     title: 'hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify16+17: fmt, clippy (native, live, wasm), workspace 836 passed --no-fail-fast, all 14 live suites incl. subscribe_ticket and HUB_DEV_FIXTURES=0 smoke, playwright pairing 9/9, e2e attachments PASS, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2896,7 +2899,8 @@ items:
     title: 'hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006)'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify16+17: fmt, clippy (native, live, wasm), workspace 836 passed --no-fail-fast, all 14 live suites incl. subscribe_ticket and HUB_DEV_FIXTURES=0 smoke, playwright pairing 9/9, e2e attachments PASS, tracer PASS"
     attempt: 1
     assignee: "worker:sonnet"
     priority: 1
@@ -3486,7 +3490,8 @@ items:
     title: 'Attachments from phone → local files / image blocks'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged tree verify16+17: fmt, clippy (native, live, wasm), workspace 836 passed --no-fail-fast, all 14 live suites incl. subscribe_ticket and HUB_DEV_FIXTURES=0 smoke, playwright pairing 9/9, e2e attachments PASS, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     deps: [M2B-004, M1A-014, M2-009]

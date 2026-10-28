@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 93/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 92/120
+done 98/254 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 92/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 93/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012 �
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 64 | 40 | 5 |
+| P2 | 64 | 45 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 44 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -54,12 +54,12 @@ done 93/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012 �
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
 | M2-003c | worker | rust | done | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
 | M2B-007b | worker | rust | done | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
-| M2B-005c | worker | rust | assigned | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
-| M2-011a | worker | rust | assigned | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
+| M2B-005c | worker | rust | done | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
+| M2-011a | worker | rust | done | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
 | M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
-| M2B-002b | worker | rust | assigned | hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES |
+| M2B-002b | worker | rust | done | hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES |
 | SPEC-006 | leader | docs | done | Spec: browser-usable auth for the thread subscription (single-use subscribe ticket) |
-| M2-008h | worker | rust | assigned | hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006) |
+| M2-008h | worker | rust | done | hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006) |
 | M2-008a | worker | rust | done | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | done | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
@@ -75,7 +75,7 @@ done 93/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012 �
 | M2B-009 | worker | rust | done | runner: session URL, QR code, `sm mobile`, auto-connect setting |
 | M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |
 | M2B-011a | worker | rust | done | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
-| M2B-012 | worker | rust | assigned | Attachments from phone → local files / image blocks |
+| M2B-012 | worker | rust | done | Attachments from phone → local files / image blocks |
 | M2B-014 | worker | rust | todo | Presence + reconnect notifications on the phone |
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
