@@ -5,7 +5,9 @@
 //! - failed user-code attempts on approve/deny: per user and per org, 5 per minute and 20 per
 //!   hour. A success writes nothing, so it never resets (or consumes) anyone's counter;
 //! - `POST /v1/devices/code`: per `CF-Connecting-IP` (when present) 10 per minute, and at most
-//!   [`MAX_PENDING`] live pairings on the hub.
+//!   [`MAX_PENDING`] live pairings on the hub;
+//! - `POST /v1/devices/token` (the runner's poll, M2B-005c): per `CF-Connecting-IP` (when
+//!   present) 60 per minute. Every call counts, since each one costs a D1 read.
 //!
 //! The clock is passed in. Expired pairings (after a grace period, so a late poll still sees
 //! `expired_token`) and old attempts are purged by [`purge`], from the cron trigger and
@@ -17,6 +19,7 @@ use crate::threads::ApiError;
 pub const APPROVE_FAILS_PER_MINUTE: i64 = 5;
 pub const APPROVE_FAILS_PER_HOUR: i64 = 20;
 pub const CODE_PER_IP_PER_MINUTE: i64 = 10;
+pub const TOKEN_PER_IP_PER_MINUTE: i64 = 60;
 /// Live (pending, unexpired) pairings the hub holds at once.
 pub const MAX_PENDING: i64 = 1000;
 
@@ -152,6 +155,28 @@ pub async fn record_approve_failure(
         record(db, &scope, now_ms).await?;
     }
     Ok(())
+}
+
+/// Gate for `POST /v1/devices/token`: `Some` when `client_ip` already polled
+/// [`TOKEN_PER_IP_PER_MINUTE`] times in the last minute; an allowed call is counted. No IP (local
+/// dev, no Cloudflare in front) means no limit.
+pub async fn check_token(
+    db: &impl Db,
+    client_ip: Option<&str>,
+    now_ms: i64,
+) -> Result<Option<Limited>, ApiError> {
+    let Some(ip) = client_ip.map(str::trim).filter(|ip| !ip.is_empty()) else {
+        return Ok(None);
+    };
+    let scope = format!("token:ip:{}", ip.chars().take(64).collect::<String>());
+    if let Some(hit) = over(db, &scope, now_ms, TOKEN_PER_IP_PER_MINUTE, MINUTE_MS)
+        .await
+        .map_err(db_failure)?
+    {
+        return Ok(Some(hit));
+    }
+    record(db, &scope, now_ms).await?;
+    Ok(None)
 }
 
 /// Gate for `POST /v1/devices/code`: the per-IP window (when the proxy gave an IP) and the cap

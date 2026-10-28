@@ -170,7 +170,10 @@ async fn code(State(env): State<AppState>, req: Request) -> Response {
 #[worker::send]
 async fn token(State(env): State<AppState>, req: Request) -> Response {
     let result: Result<Value, PollError> = async {
-        let (_, body) = read_body(req).await?;
+        let (headers, body) = read_body(req).await?;
+        let client_ip = headers
+            .get("cf-connecting-ip")
+            .and_then(|value| value.to_str().ok());
         let device_code = body
             .get("device_code")
             .and_then(Value::as_str)
@@ -179,6 +182,7 @@ async fn token(State(env): State<AppState>, req: Request) -> Response {
         service::poll(
             &D1::new(&database),
             &DoControl { env: &env },
+            client_ip,
             device_code,
             now_ms(),
         )
@@ -187,6 +191,7 @@ async fn token(State(env): State<AppState>, req: Request) -> Response {
     .await;
     match result {
         Ok(body) => (StatusCode::OK, Json(body)).into_response(),
+        Err(PollError::Api(error)) => respond(Err(error), StatusCode::OK),
         Err(error) => {
             let (status, body) = error.response();
             (
@@ -278,7 +283,15 @@ async fn policy(State(env): State<AppState>, req: Request) -> Response {
         let db = D1::new(&database);
         let caller =
             authenticate(&db, authorization(&headers).as_deref(), dev_fixtures(&env)).await?;
-        service::set_policy(&db, &caller, &body, &request_id_of(&headers)).await
+        service::set_policy(
+            &db,
+            &DoControl { env: &env },
+            dev_fixtures(&env),
+            &caller,
+            &body,
+            &request_id_of(&headers),
+        )
+        .await
     }
     .await;
     respond(result, StatusCode::OK)
