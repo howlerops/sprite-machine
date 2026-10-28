@@ -2580,6 +2580,32 @@ items:
       - 'bash scripts/hub-test.sh machine_do'
       - 'cargo test -p hub'
 
+  - id: M2B-007a
+    title: 'sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout)'
+    milestone: M2b
+    phase: P2
+    priority: 1
+    lane: rust
+    size: M
+    risk: high
+    deps: [M2B-007]
+    paths:
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/tests/server_mode.rs'
+      - 'crates/sidecar/src/bridge/**'
+      - 'crates/sidecar/tests/session_config.rs'
+    context:
+      - 'docs/ledger/reports/M2B-007.md (Decisions and limits, Discovered work)'
+    acceptance:
+      - 'The session''s permission mode (runner --permission-mode) is set on the ACP session before the first session/prompt is sent (bridge applies an initial mode at session/new / resume); test: with --permission-mode plan, acp-mock sees session/set_mode (or the mode in session/new) before the first session/prompt'
+      - 'The bridge exposes the agent''s initialize mcp_capabilities (or takes a capabilities-aware MCP provider) so sm rc passes http/sse servers the agent supports (test)'
+      - 'At sm rc start, worktrees under <state>/worktrees with no live session are removed when clean and listed in a warning when dirty (test)'
+      - 'A session ends on an explicit close (hub cancel of an idle thread or a local command) or after an idle timeout (default 2 h, flag), removing its clean worktree (test with a short timeout)'
+    verify:
+      - 'cargo test -p runner --test server_mode'
+      - 'cargo test -p sidecar'
+      - 'cargo run -p cli -- e2e tracer'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2

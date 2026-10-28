@@ -167,3 +167,4 @@
 2026-10-28T10:05Z M2B-006a blocked (human): the permission check refused installing/running third-party agent CLIs (Code from External); howto asks the user to run the probe or allow it
 2026-10-28T10:05Z MVP-000f re-scoped (Rust strip step in cli, no binaryen download; 25% vs the current bundle) and assigned (haiku)
 2026-10-28T10:06Z M2-008e merged 6d3f90f (sonnet; leader resolved MIGRATIONS conflict with M2B-005: both 0005 and 0006). Leader read the org check (one lookup, same 404 for missing/foreign, before audit). Full verify running. Added M2-008f (P4)
+2026-10-28T10:23Z M2B-007 back (sonnet). Review: --permission-mode applied after the first prompt starts (a safer mode like plan is not in force for prompt 1) → M2B-007a (priority 1, high) with mcp_capabilities exposure, worktree sweep, session end. Merge after the M2-008e verify
