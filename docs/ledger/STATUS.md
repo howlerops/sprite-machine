@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 75/232 (3 dropped) · in-flight M2-008e,M2B-007 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 71/120
+done 75/232 (3 dropped) · in-flight MVP-000f,M2-008e,M2B-007 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 72/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 75/232 (3 dropped) · in-flight M2-008e,M2B-007 · blocked 11 (human: M0-01
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 52 | 22 | 2 |
+| P2 | 52 | 22 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -21,7 +21,7 @@ done 75/232 (3 dropped) · in-flight M2-008e,M2B-007 · blocked 11 (human: M0-01
 
 | Item | Owner | Lane | Status | Title |
 | ---- | ----- | ---- | ------ | ----- |
-| MVP-000f | worker | rust | todo | Hub wasm: drop the name section (34% of the binary) without strip |
+| MVP-000f | worker | rust | assigned | Hub wasm: drop the name section (34% of the binary) without strip |
 | M0-009 | leader | rust | blocked | Sandbox spike: start/exec/stop on the deployed preview env; cold start + wake timings |
 | M0-018 | human | rust | done | Provide a Cloudflare account + API token |
 | M1A-004a | worker | rust | done | sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn |
@@ -47,7 +47,7 @@ done 75/232 (3 dropped) · in-flight M2-008e,M2B-007 · blocked 11 (human: M0-01
 | M1A-006g | worker | rust | todo | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
 | M2B-005a | worker | rust | todo | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
 | M2B-005b | worker | rust | todo | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
-| M2B-006a | worker | rust | todo | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
+| M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
 | M2B-006c | worker | rust | done | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
 | M2B-004f | worker | rust | todo | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |

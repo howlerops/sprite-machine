@@ -216,19 +216,22 @@ items:
     title: 'Hub wasm: drop the name section (34% of the binary) without strip'
     milestone: M0
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     priority: 2
     deps: [MVP-000c]
     paths:
-      - Cargo.toml
-      - crates/hub/wrangler.toml
-      - crates/hub/Cargo.toml
-      - crates/cli/src/e2e/tracer*
-      - docs/spikes/hub-size.md
+      - "Cargo.toml"
+      - "crates/hub/wrangler.toml"
+      - "crates/hub/Cargo.toml"
+      - "crates/cli/**"
+      - "docs/spikes/hub-size.md"
     context:
       - 'docs/spikes/hub-size.md (twiggy: function names + data names = 692 KB of 2,048,503 B; strip=true breaks worker-build 0.8.7 with "failed to generate catch wrappers")'
     acceptance:
-      - 'The deployed hub wasm has no name section (e.g. a wasm-opt --strip-debug/--strip-producers pass after worker-build, `[package.metadata.wasm-pack.profile.release] wasm-opt` flags, or a worker-build/wasm-bindgen version that supports strip); the tracer prints the new gzip bundle and it is at least 25% smaller than 587,905 B'
-      - 'The hub still builds via the wrangler [build] command, thread_do and the tracer pass, and docs/spikes/hub-size.md has the after numbers'
+      - "The deployed hub wasm has no name section: after worker-build, a step in the wrangler [build] command removes the `name` (and `producers`) custom sections, implemented in Rust in the cli crate (e.g. `cargo run -p cli -- wasm strip-names <file>` using wasmparser/wasm-encoder from crates.io; no wasm-opt/binaryen download); the tracer prints the new gzip bundle and it is at least 25% smaller than the bundle measured on this tree before the change"
+      - "The hub still builds via the wrangler [build] command, thread_do and the tracer pass, a stack trace in the Worker still works (code offsets), and docs/spikes/hub-size.md has the before/after numbers"
     verify:
       - cargo run -p cli -- e2e tracer
       - bash scripts/hub-test.sh thread_do
@@ -2494,6 +2497,9 @@ items:
     title: 'Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES'
     milestone: M2b
     phase: P2
+    status: "blocked"
+    howto: "Confirming the harness invocations needs installing and running third-party agent CLIs (npm/pip packages: claude-agent-acp, codex-acp, opencode, gemini-cli, goose, pi adapter); the session permission check refused that (Code from External). Either run the probe yourself on a machine where these are installed (for each: start its ACP entry point and send an ACP initialize; note package, version and exact command) and paste the results, or allow the leader to install them into a scratch prefix in this container. No logins or keys are needed for initialize."
+    blocked_on: "human"
     lane: rust
     size: S
     risk: medium
