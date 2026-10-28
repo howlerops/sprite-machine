@@ -15,6 +15,9 @@
 //! current modes and options (the script's at start), reject an unknown mode, option or value
 //! with `-32602`, and send `current_mode_update` / `config_option_update` before the answer.
 //!
+//! `initialize` advertises the script's `mcp_capabilities` (`http` and `sse`, both off when the
+//! script says nothing), so a client can tell which remote MCP servers the agent takes.
+//!
 //! [`run_recorded`] keeps every message the agent received in a [`Recorder`], so a test can
 //! check what the client sent (for example `mcpServers` on `session/new`).
 //!
@@ -24,6 +27,7 @@
 //! {
 //!   "modes": { "currentModeId": "code", "availableModes": [{ "id": "code", "name": "Code" }] },
 //!   "config_options": [],
+//!   "mcp_capabilities": { "http": true, "sse": true },
 //!   "turns": [
 //!     {
 //!       "steps": [
@@ -63,6 +67,8 @@
 //!
 //! `modes` and `config_options` are optional. They are the ACP `SessionModeState` and the list of
 //! `SessionConfigOption`, returned by `session/new`, `session/resume` and `session/load`.
+//! `mcp_capabilities` is optional too: the ACP `McpCapabilities` (`http`, `sse`) that `initialize`
+//! returns.
 //!
 //! Each step has exactly one step key, plus an optional `expect` on the two client
 //! requests. Payloads are ACP v1 JSON, checked against the `protocol::acp` types when the

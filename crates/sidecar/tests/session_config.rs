@@ -21,7 +21,6 @@ use sidecar::bridge::{
 };
 use sidecar::store::{ManualClock, Store};
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -95,7 +94,7 @@ impl Rig {
     }
 
     /// [`Rig::start`] with `configure` applied to the bridge's config. With `advertise_http` the
-    /// agent's `initialize` response says it takes http and sse MCP servers (acp-mock does not).
+    /// agent's script says it takes http MCP servers (`mcp_capabilities`).
     async fn start_with(
         steps: Vec<Value>,
         advertise_http: bool,
@@ -103,33 +102,17 @@ impl Rig {
     ) -> Self {
         let (client_io, agent_io) = tokio::io::duplex(1 << 16);
         let (agent_r, agent_w) = tokio::io::split(agent_io);
-        let agent = acp_mock::Script::from_value(&script(steps)).expect("a valid script");
+        let mut agent_script = script(steps);
+        if advertise_http {
+            agent_script["mcp_capabilities"] = json!({ "http": true });
+        }
+        let agent = acp_mock::Script::from_value(&agent_script).expect("a valid script");
         let recorder = Recorder::new();
         let agent_recorder = recorder.clone();
-        let (mock_out, relay_in) = tokio::io::duplex(1 << 16);
         tokio::spawn(async move {
-            acp_mock::run_recorded(agent, agent_recorder, agent_r, mock_out)
+            acp_mock::run_recorded(agent, agent_recorder, agent_r, agent_w)
                 .await
                 .expect("acp-mock runs");
-        });
-        tokio::spawn(async move {
-            let mut agent_w = agent_w;
-            let mut lines = tokio::io::BufReader::new(relay_in).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let mut line = line;
-                if advertise_http
-                    && let Ok(mut message) = serde_json::from_str::<Value>(&line)
-                    && message["result"]["agentCapabilities"].is_object()
-                {
-                    message["result"]["agentCapabilities"]["mcpCapabilities"] =
-                        json!({ "http": true });
-                    line = message.to_string();
-                }
-                line.push('\n');
-                if agent_w.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
-            }
         });
         let (reader, writer) = tokio::io::split(client_io);
 

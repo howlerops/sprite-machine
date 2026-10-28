@@ -243,7 +243,9 @@ where
         match method {
             "initialize" => {
                 let _: InitializeRequest = parse(params)?;
-                let capabilities = AgentCapabilities::new().load_session(true);
+                let capabilities = AgentCapabilities::new()
+                    .load_session(true)
+                    .mcp_capabilities(self.script.mcp_capabilities());
                 // ACP v1 is `1`. The version type is not re-exported by `protocol::acp`,
                 // so it is inferred from the constructor.
                 let version = serde_json::from_value(json!(1))

@@ -23,11 +23,15 @@
 //! (`Config::initial_mode`, an ACP `session/set_mode`) right after the session is attached and
 //! before the first prompt; a mode the agent refuses fails the task.
 //!
-//! A session ends when the hub cancels its idle thread, or after `--idle-timeout` (default 2 h)
-//! without a task; its clean worktree is removed and its slot is free. At start, worktrees under
+//! A session ends when the hub cancels its idle thread, after `--idle-timeout` (default 2 h)
+//! without a task, or when `sm rc close <thread id>` asks for it ([`local`], a unix socket at
+//! `<state dir>/rc.sock`). Its clean worktree is removed and its slot is free. A later prompt for
+//! the thread starts the session again: a worktree is added back on the session's branch
+//! (`sm/<name>`) and the agent resumes its ACP session. At start, worktrees under
 //! `<state dir>/worktrees` that no session owns are removed when clean and listed in one
 //! warning when they have changes.
 
+mod local;
 mod names;
 mod project;
 mod router;
@@ -49,6 +53,7 @@ use crate::login::{CredentialStore, KeychainCredentials};
 use crate::sleep;
 use crate::tunnel::{Timing, TunnelConfig, tunnel};
 
+pub use self::local::close_session;
 pub use self::names::{host_prefix, session_name};
 pub use self::project::{LastSession, Projects};
 pub use self::signin::Sink;
@@ -251,6 +256,8 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
     let projects = Projects::new(&options.state_dir);
     std::fs::create_dir_all(&options.state_dir)
         .with_context(|| format!("create {}", options.state_dir.display()))?;
+    // Held until `run` ends: the socket is removed with it.
+    let (_control, local_requests) = local::Listener::bind(&options.state_dir)?;
 
     let spawn = match options.spawn {
         Some(mode) => {
@@ -313,6 +320,7 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
         sink,
         commands,
         projects,
+        local_requests,
     )
     .run(options.continue_last, shutdown, client_task, stop_tx)
     .await;

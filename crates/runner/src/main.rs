@@ -11,14 +11,18 @@ use runner::tunnel::Timing;
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags]";
+const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags] | sm rc close <thread id>";
 const LOGIN_USAGE: &str = "usage: sm login --hub <url> [--yes]";
+const CLOSE_USAGE: &str = "usage: sm rc close <thread id>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("login") => run_login(&args[1..]).await,
+        Some("rc") if args.get(1).map(String::as_str) == Some("close") => {
+            run_close(&args[2..]).await
+        }
         Some("rc" | "run") => run_rc(&args[1..]).await,
         Some(other) => bail!("unknown command {other:?}\n{USAGE}"),
         None => {
@@ -95,6 +99,17 @@ async fn run_rc(args: &[String]) -> Result<()> {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await
+}
+
+/// `sm rc close <thread id>`: asks the `sm rc` running on this machine to end the session of an
+/// idle thread (the thread stays; its next prompt starts the session again).
+async fn run_close(args: &[String]) -> Result<()> {
+    let [thread_id] = args else {
+        bail!("{CLOSE_USAGE}");
+    };
+    server::close_session(&state_dir()?, thread_id).await?;
+    println!("closed {thread_id}");
+    Ok(())
 }
 
 /// Where the sidecar keeps its state: `SM_STATE_DIR`, else `$XDG_STATE_HOME/sm`, else
