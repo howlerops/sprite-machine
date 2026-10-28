@@ -6412,6 +6412,7 @@ dependencies = [
  "futures-util",
  "protocol",
  "serde_json",
+ "sidecar",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
