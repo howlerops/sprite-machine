@@ -135,3 +135,6 @@
 2026-10-28T07:51Z leader: disk 3.6 GB free → deleted 52 stale test executables (1.9 GB) + stale workspace rlibs older than 60 min from the shared target; 5.4 GB free
 2026-10-28T07:56Z M2B-004c assigned→done merged 8df4417 (haiku); added M2B-004d (sleep hook, thread_open once). Call sites of thread_open belong to the local-session items (M2B-007 sm rc / TUI)
 2026-10-28T07:56Z M2-009 assigned (haiku)
+2026-10-28T08:06Z M2-008c merged (haiku); criterion 1 Machine-DO half done by leader bc9ef61 (ThreadHost::append carries event_id; test mutation-checked); verify running. Added M2-008d (high: POST /v1/threads accepts a foreign/unknown machine_id → org check) and CI-002 (per-worktree hub wasm target)
+2026-10-28T08:06Z leader: SPEC-004 amended 65e63e4 (harness exit uses the resume run like cancel/expiry). Added M1A-006f (tracer spawn_with, mapper N interrupts, remove fail_stale_interrupts)
+2026-10-28T08:06Z leader: disk — deleted a worker's private target in the scratchpad (4.3 GB) and the stale /root/.cargo-target-shared (3.9 GB); 14 GB free

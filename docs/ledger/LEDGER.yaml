@@ -2224,6 +2224,81 @@ items:
     verify:
       - 'cargo test -p runner'
 
+  - id: M2-008d
+    title: 'hub authz: POST /v1/threads only for a machine of the caller''s org (not revoked); POST /v1/threads in the auth policy table'
+    milestone: M2
+    phase: P2
+    lane: rust
+    size: S
+    risk: high
+    deps: [M2-008c, M2B-002]
+    paths:
+      - 'crates/hub/src/threads/routes.rs'
+      - 'crates/hub/src/auth/policy.rs'
+      - 'crates/hub/src/auth/tests.rs'
+      - 'crates/hub/tests/thread_create.rs'
+      - 'crates/hub/tests/authz.rs'
+    context:
+      - 'docs/ledger/reports/M2-008c.md (Spec issues 2 and 6, Discovered work 2 and 3)'
+      - 'docs/specs/client-api.md §2 (a thread is visible to members of the org that owns its machine), §5.2'
+      - 'crates/hub/migrations/0004_machines.sql (machines.org_id, revoked_at)'
+    acceptance:
+      - 'POST /v1/threads with a machine_id that does not exist, is revoked, or belongs to another org answers 404 not_found (no existence leak across orgs) and writes nothing: no Thread DO, no dispatch, no audit row other than a denied entry if the policy table records denials (live tests in thread_create.rs, incl. a second org)'
+      - 'auth/policy.rs has a (POST, /v1/threads) rule (member, thread.create) and the route uses it instead of hand-rolled checks; viewer gets 403 (native + live tests)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh thread_create'
+      - 'bash scripts/hub-test.sh authz'
+
+  - id: CI-002
+    title: 'scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree''s hub.wasm stand in)'
+    milestone: M0
+    phase: P2
+    lane: docs
+    size: S
+    risk: low
+    deps: []
+    paths:
+      - 'scripts/hub-test.sh'
+      - 'crates/cli/src/e2e/tracer*'
+    context:
+      - 'docs/ledger/reports/M2-008c.md (Spec issues 3), docs/ledger/reports/M2B-002.md (Spec issues 11)'
+    acceptance:
+      - 'The wasm32 build used by hub-test.sh and the tracer goes to a target dir keyed by the worktree root (e.g. $CARGO_TARGET_DIR/wasm-<hash of repo root>), so two worktrees never share hub wasm artifacts; native builds keep the shared dir'
+      - 'A check after the build asserts the bundle was built from this tree (e.g. the build log names this worktree''s crates/hub path)'
+    verify:
+      - 'bash scripts/hub-test.sh smoke'
+      - 'cargo run -p cli -- e2e tracer'
+
+  - id: M1A-006f
+    title: 'Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts'
+    milestone: M1a
+    phase: P2
+    lane: rust
+    size: M
+    risk: medium
+    deps: [M1A-006e]
+    paths:
+      - 'crates/sidecar/src/tracer.rs'
+      - 'crates/cli/src/e2e/tracer*'
+      - 'crates/sidecar/src/bridge/**'
+      - 'crates/sidecar/src/acp/reattach*'
+      - 'crates/protocol/src/mapping/**'
+      - 'crates/protocol/tests/golden_acp_turn.rs'
+      - 'crates/protocol/tests/golden/**'
+      - 'crates/sidecar/tests/bridge_robust.rs'
+    context:
+      - 'docs/ledger/reports/M1A-006e.md (criterion 1 blocked, Discovered work 1-4)'
+      - 'docs/specs/turn-event.md §4.9 (harness exit bullet, amended 65e63e4)'
+    acceptance:
+      - 'sidecar::tracer::run builds the bridge with spawn_with from a command factory the cli e2e passes, so the tracer path can respawn a killed agent (test kills the agent mid-run through that path; the next prompt completes)'
+      - 'A harness exit or startup end with N open interrupts on one task emits N InterruptResolved{cancelled}, then RunStarted{resume} closing open tool calls with ToolCallEnd{failed}, then RunError{error, code:"harness_exited"} (mapper golden test + bridge test)'
+      - 'acp::reattach::fail_stale_interrupts is removed (or delegates to the bridge path); nothing in the tree ends a stale interrupt as expired'
+    verify:
+      - 'cargo test -p protocol --test golden_acp_turn'
+      - 'cargo test -p sidecar'
+      - 'cargo run -p cli -- e2e tracer'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
