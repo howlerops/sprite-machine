@@ -503,34 +503,7 @@ impl Store {
     /// The outbox as it must be restored after a restart: the acked cursor, the next seq, and
     /// the un-acked frames in seq order.
     pub fn outbox_state(&self) -> Result<OutboxState, StoreError> {
-        let conn = self.conn();
-        let acked_upto = meta_u64_in(&conn, KEY_ACKED_UPTO)?.unwrap_or(0);
-        let next_seq = next_seq_in(&conn)?;
-        let mut stmt = conn.prepare("SELECT seq, event_id, body FROM outbox ORDER BY seq")?;
-        let raws = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let unacked = raws
-            .into_iter()
-            .map(|(seq, event_id, body)| {
-                Ok(OutboxRow {
-                    seq: from_i64(seq),
-                    event_id,
-                    body: serde_json::from_str(&body)?,
-                })
-            })
-            .collect::<Result<Vec<_>, StoreError>>()?;
-        Ok(OutboxState {
-            acked_upto,
-            next_seq,
-            unacked,
-        })
+        outbox_state_in(&self.conn())
     }
 
     /// Un-acked frames in seq order (what to resend after a reconnect).
@@ -538,15 +511,22 @@ impl Store {
         Ok(self.outbox_state()?.unacked)
     }
 
+    /// Frames with `seq` above `after`, in seq order (the tail the sender has not seen yet).
+    pub fn outbound_since(&self, after: u64) -> Result<Vec<OutboxRow>, StoreError> {
+        outbound_since_in(&self.conn(), after)
+    }
+
     /// Applies a `welcome{resumed:false}`: renumbers the outbox from 1, keeping order and
     /// `event_id`s, and resets the acked cursor (tunnel.md §4.3, mirrors `Sender::on_welcome`).
+    /// One transaction, so a concurrent enqueue lands either before the renumbering (and is
+    /// renumbered) or after it (and gets the next seq); it is never lost.
     pub fn restart_outbound_stream(&self) -> Result<(), StoreError> {
-        let state = self.outbox_state()?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        let rows = outbound_since_in(&tx, 0)?;
         tx.execute("DELETE FROM outbox", [])?;
         let mut count = 0u64;
-        for row in &state.unacked {
+        for row in &rows {
             count += 1;
             tx.execute(
                 "INSERT INTO outbox (seq, event_id, body) VALUES (?1, ?2, ?3)",
@@ -609,6 +589,23 @@ impl Store {
         }
         tx.commit()?;
         Ok(disposition)
+    }
+
+    /// Whether `key` was recorded within the 7-day window. Read-only: use it to skip a command
+    /// that was already applied, then record it with [`Store::commit_down_frame`].
+    pub fn seen_key(&self, key: &str) -> Result<bool, StoreError> {
+        let now = self.now_ms();
+        let cutoff = now.saturating_sub(IDEMPOTENCY_KEY_TTL_MS);
+        let seen: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT seen_ms FROM idempotency_keys WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        // Mirrors `observe_key_in`: a key is kept while `now - seen < ttl`.
+        Ok(seen.is_some_and(|seen_ms| now < IDEMPOTENCY_KEY_TTL_MS || from_i64(seen_ms) > cutoff))
     }
 
     /// Records `key` if new (7-day window); expired keys are pruned first.
@@ -763,6 +760,40 @@ fn set_meta_in(conn: &Connection, key: &str, value: &str) -> Result<(), StoreErr
 
 fn next_seq_in(conn: &Connection) -> Result<u64, StoreError> {
     Ok(meta_u64_in(conn, KEY_NEXT_SEQ)?.unwrap_or(1))
+}
+
+fn outbox_state_in(conn: &Connection) -> Result<OutboxState, StoreError> {
+    let acked_upto = meta_u64_in(conn, KEY_ACKED_UPTO)?.unwrap_or(0);
+    let next_seq = next_seq_in(conn)?;
+    let unacked = outbound_since_in(conn, 0)?;
+    Ok(OutboxState {
+        acked_upto,
+        next_seq,
+        unacked,
+    })
+}
+
+fn outbound_since_in(conn: &Connection, after: u64) -> Result<Vec<OutboxRow>, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT seq, event_id, body FROM outbox WHERE seq > ?1 ORDER BY seq")?;
+    let raws = stmt
+        .query_map([to_i64(after)], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    raws.into_iter()
+        .map(|(seq, event_id, body)| {
+            Ok(OutboxRow {
+                seq: from_i64(seq),
+                event_id,
+                body: serde_json::from_str(&body)?,
+            })
+        })
+        .collect()
 }
 
 fn observe_key_in(tx: &Transaction<'_>, key: &str, now: u64) -> Result<Disposition, StoreError> {

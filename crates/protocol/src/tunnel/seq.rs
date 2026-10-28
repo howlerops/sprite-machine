@@ -68,6 +68,12 @@ impl<T> Sender<T> {
         }
     }
 
+    /// Sets the window to the hub's `welcome.max_inflight` (at least 1). Frames already in
+    /// flight stay in flight; no new frame goes out until the unacked count drops below it.
+    pub fn set_max_inflight(&mut self, max_inflight: u64) {
+        self.max_inflight = max_inflight.max(1);
+    }
+
     /// Appends a frame body with the next seq and returns that seq. The caller writes the
     /// body to its durable outbox before this call returns to the wire layer.
     pub fn enqueue(&mut self, body: T) -> u64 {
@@ -288,6 +294,30 @@ mod tests {
         assert_eq!(sender.enqueue("d"), 8);
         sender.on_ack(7).unwrap();
         assert_eq!(sender.next_to_send(), Some((8, "d")));
+    }
+
+    #[test]
+    fn welcome_max_inflight_caps_the_unacked_frames_in_flight() {
+        let mut sender = Sender::from_parts(0, 6, (1..=5).map(|n| (n, n)).collect());
+        sender.set_max_inflight(2);
+        sender.on_welcome(false, 0).unwrap();
+        assert_eq!(sender.next_to_send(), Some((1, 1)));
+        assert_eq!(sender.next_to_send(), Some((2, 2)));
+        assert_eq!(sender.next_to_send(), None, "window of 2 is full");
+        sender.on_ack(1).unwrap();
+        assert_eq!(sender.next_to_send(), Some((3, 3)));
+        assert_eq!(sender.next_to_send(), None);
+        sender.on_ack(3).unwrap();
+        assert_eq!(sender.next_to_send(), Some((4, 4)));
+        assert_eq!(sender.next_to_send(), Some((5, 5)));
+        assert_eq!(sender.next_to_send(), None);
+        // A window of 0 is clamped to 1.
+        sender.set_max_inflight(0);
+        sender.on_ack(5).unwrap();
+        let seq = sender.enqueue(6);
+        sender.enqueue(7);
+        assert_eq!(sender.next_to_send(), Some((seq, 6)));
+        assert_eq!(sender.next_to_send(), None);
     }
 
     #[test]

@@ -363,6 +363,90 @@ fn fresh_stream_renumbers_the_outbox_from_one() {
 }
 
 #[test]
+fn restart_outbound_stream_never_loses_a_concurrent_enqueue() {
+    let dir = TempDir::new("restart-race");
+    let clock = Arc::new(ManualClock::new(0));
+    let store = Arc::new(open_store(&dir, &clock));
+    for n in 0..3u64 {
+        store
+            .enqueue_outbound(&format!("pre_{n}"), &json!(n))
+            .expect("enqueue");
+    }
+    let writer = {
+        let store = Arc::clone(&store);
+        std::thread::spawn(move || {
+            for n in 0..300u64 {
+                store
+                    .enqueue_outbound(&format!("live_{n}"), &json!(n))
+                    .expect("concurrent enqueue");
+            }
+        })
+    };
+    while !writer.is_finished() {
+        store.restart_outbound_stream().expect("restart");
+    }
+    writer.join().expect("writer");
+    store.restart_outbound_stream().expect("final restart");
+
+    let state = store.outbox_state().expect("state");
+    assert_eq!(state.unacked.len(), 303, "an enqueue was lost");
+    let seqs: Vec<u64> = state.unacked.iter().map(|row| row.seq).collect();
+    assert_eq!(seqs, (1..=303).collect::<Vec<u64>>());
+    assert_eq!(state.next_seq, 304);
+    let live: Vec<&str> = state
+        .unacked
+        .iter()
+        .filter(|row| row.event_id.starts_with("live_"))
+        .map(|row| row.event_id.as_str())
+        .collect();
+    let expected: Vec<String> = (0..300).map(|n| format!("live_{n}")).collect();
+    assert_eq!(live, expected, "order of the concurrent writer changed");
+}
+
+#[test]
+fn outbound_since_returns_only_the_tail_in_order() {
+    let dir = TempDir::new("since");
+    let clock = Arc::new(ManualClock::new(0));
+    let store = open_store(&dir, &clock);
+    for n in 1..=5u64 {
+        store
+            .enqueue_outbound(&format!("ev_{n}"), &json!(n))
+            .expect("enqueue");
+    }
+    store.ack_outbound(2).expect("ack");
+    let seqs = |after| -> Vec<u64> {
+        store
+            .outbound_since(after)
+            .expect("since")
+            .iter()
+            .map(|row| row.seq)
+            .collect()
+    };
+    assert_eq!(seqs(0), [3, 4, 5]);
+    assert_eq!(seqs(3), [4, 5]);
+    assert!(seqs(5).is_empty());
+}
+
+#[test]
+fn seen_key_reads_without_recording() {
+    let dir = TempDir::new("seen-key");
+    let clock = Arc::new(ManualClock::new(10 * DAY_MS));
+    let store = open_store(&dir, &clock);
+    assert!(!store.seen_key("k").expect("unseen"));
+    assert!(
+        !store
+            .seen_key("k")
+            .expect("still unseen: reads do not record")
+    );
+    store.commit_down_frame(1, Some("k")).expect("commit");
+    assert!(store.seen_key("k").expect("seen"));
+    clock.advance(IDEMPOTENCY_KEY_TTL_MS - 1);
+    assert!(store.seen_key("k").expect("within the window"));
+    clock.advance(1);
+    assert!(!store.seen_key("k").expect("expired"));
+}
+
+#[test]
 fn idempotency_keys_are_remembered_for_seven_days() {
     let dir = TempDir::new("idem");
     let clock = Arc::new(ManualClock::new(10 * DAY_MS));

@@ -195,6 +195,15 @@ impl HubConn {
         .await;
     }
 
+    /// A `welcome` that advertises a smaller send window.
+    async fn welcome_with_window(&mut self, resumed: bool, token: &str, max_inflight: u64) {
+        self.send(json!({
+            "t": "welcome", "proto": 1, "resumed": resumed, "resume_token": token,
+            "last_up_seq": 0, "heartbeat_ms": 20_000, "max_inflight": max_inflight,
+        }))
+        .await;
+    }
+
     async fn ack(&mut self, seq: u64) {
         self.send(json!({ "t": "ack", "seq": seq })).await;
     }
@@ -712,6 +721,103 @@ async fn a_repeated_idempotency_key_is_acked_but_not_applied_twice() {
     }
     let extra = tokio::time::timeout(Duration::from_millis(100), rig.commands.next()).await;
     assert!(extra.is_err(), "the duplicate key reached the bridge");
+}
+
+#[tokio::test]
+async fn a_command_received_but_not_processed_is_redelivered_after_a_crash() {
+    let dir = TempDir::new().unwrap();
+    // First runner: receives the command, dies before the bridge reports it processed.
+    {
+        let hub = FakeHub::start().await;
+        let mut rig = Rig::build(hub, dir.path(), timing(5, 40), 0.0);
+        let mut conn = rig.connect(20_000).await;
+        conn.command(1, "idk_1", cancel("tk_1")).await;
+        let first = rig.commands.next().await.unwrap();
+        assert_eq!(first.idempotency_key, "idk_1");
+        // Received, fed to the bridge, but not processed: nothing acked, nothing committed.
+        assert!(conn.recv_within(Duration::from_millis(200)).await.is_none());
+        assert_eq!(rig.store.last_down_seq().unwrap(), 0);
+        assert!(!rig.store.seen_key("idk_1").unwrap());
+    }
+    // Second runner on the same store: hello says 0, so the hub redelivers.
+    let hub = FakeHub::start().await;
+    let mut rig = Rig::build(hub, dir.path(), timing(5, 40), 0.0);
+    rig.start();
+    let mut conn = rig.hub.next_conn().await;
+    assert_eq!(conn.hello().await["last_down_seq"], 0);
+    conn.welcome(true, "rt_2", 0, 20_000).await;
+    conn.command(1, "idk_1", cancel("tk_1")).await;
+    let again = rig.commands.next().await.unwrap();
+    assert_eq!((again.seq, again.idempotency_key.as_str()), (1, "idk_1"));
+    rig.commands.processed(1).await;
+    assert_eq!(conn.recv().await, json!({ "t": "ack", "seq": 1 }));
+    assert_eq!(rig.store.last_down_seq().unwrap(), 1);
+    // A hub replay of the same key (renumbered stream) is acked but applied no more.
+    conn.close(CloseCode::ServerRestart).await;
+    let mut c3 = rig.hub.next_conn().await;
+    assert_eq!(c3.hello().await["last_down_seq"], 1);
+    c3.welcome(false, "rt_3", 0, 20_000).await;
+    c3.command(1, "idk_1", cancel("tk_1")).await;
+    assert_eq!(c3.recv().await, json!({ "t": "ack", "seq": 1 }));
+    let extra = tokio::time::timeout(Duration::from_millis(100), rig.commands.next()).await;
+    assert!(extra.is_err(), "the command was applied twice");
+}
+
+#[tokio::test]
+async fn a_late_processed_from_before_a_fresh_stream_cannot_ack_a_new_command() {
+    let mut rig = Rig::new().await;
+    let mut c1 = rig.connect(20_000).await;
+    c1.command(1, "idk_old", cancel("tk_1")).await;
+    let old = rig.commands.next().await.unwrap();
+    assert_eq!(old.idempotency_key, "idk_old");
+    c1.drop_socket();
+
+    // A fresh stream whose first command reuses seq 1.
+    let mut c2 = rig.hub.next_conn().await;
+    c2.hello().await;
+    c2.welcome(false, "rt_2", 0, 20_000).await;
+    c2.command(1, "idk_new", cancel("tk_2")).await;
+    let new = rig.commands.next().await.unwrap();
+    assert_eq!((new.seq, new.idempotency_key.as_str()), (1, "idk_new"));
+
+    // The bridge finishes the OLD command now: seq 1 means the old numbering.
+    rig.commands.processed(1).await;
+    assert!(
+        c2.recv_within(Duration::from_millis(300)).await.is_none(),
+        "a late processed acked the new command"
+    );
+    assert_eq!(rig.store.last_down_seq().unwrap(), 0);
+    assert!(!rig.store.seen_key("idk_new").unwrap());
+    // The old command's effect is still recorded, without touching the cursor.
+    assert!(rig.store.seen_key("idk_old").unwrap());
+
+    rig.commands.processed(1).await;
+    assert_eq!(c2.recv().await, json!({ "t": "ack", "seq": 1 }));
+    assert_eq!(rig.store.last_down_seq().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn welcome_max_inflight_caps_unacked_up_frames() {
+    let mut rig = Rig::new().await;
+    rig.start();
+    let mut conn = rig.hub.next_conn().await;
+    conn.hello().await;
+    conn.welcome_with_window(false, "rt_1", 2).await;
+    for d in ["e1", "e2", "e3", "e4", "e5"] {
+        rig.emit(d).await;
+    }
+    let first = conn.events(2).await;
+    assert_eq!(first.iter().map(|e| e.0).collect::<Vec<_>>(), [1, 2]);
+    assert!(
+        conn.recv_within(Duration::from_millis(300)).await.is_none(),
+        "more than max_inflight frames were in flight"
+    );
+    conn.ack(1).await;
+    assert_eq!(conn.events(1).await[0].0, 3);
+    assert!(conn.recv_within(Duration::from_millis(200)).await.is_none());
+    conn.ack(3).await;
+    let rest = conn.events(2).await;
+    assert_eq!(rest.iter().map(|e| e.0).collect::<Vec<_>>(), [4, 5]);
 }
 
 #[tokio::test]

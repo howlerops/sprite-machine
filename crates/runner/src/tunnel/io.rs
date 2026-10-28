@@ -1,8 +1,9 @@
 //! The bridge-facing side of the tunnel client: [`TunnelSink`] (`EventSink`) and
 //! [`TunnelCommands`] (`CommandSource`), plus the state they share with the connection task.
 
+use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use protocol::tunnel::MAX_FRAME_BYTES;
 use serde_json::{Value, json};
@@ -15,9 +16,6 @@ use protocol::turn_event::Envelope;
 /// State shared by the sink and the connection task.
 pub(crate) struct Shared {
     pub store: Arc<Store>,
-    /// Serialises outbox writes with `restart_outbound_stream`, which reads the outbox and
-    /// rewrites it: an enqueue in between would be lost.
-    pub outbox_lock: Mutex<()>,
     /// Signalled when a frame was added to the outbox.
     pub wake: Notify,
     /// Highest outbox seq handed out; lets the connection skip a store read when nothing is new.
@@ -30,17 +28,10 @@ impl Shared {
     pub fn new(store: Arc<Store>) -> Self {
         Self {
             store,
-            outbox_lock: Mutex::new(()),
             wake: Notify::new(),
             last_seq: AtomicU64::new(0),
             closed: AtomicBool::new(false),
         }
-    }
-
-    pub fn lock_outbox(&self) -> MutexGuard<'_, ()> {
-        self.outbox_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Writes one up frame body to the durable outbox (before it can be sent) and wakes the
@@ -70,16 +61,13 @@ impl Shared {
             prepared.push((event_id, body));
         }
         let mut seqs = Vec::with_capacity(prepared.len());
-        {
-            let _guard = self.lock_outbox();
-            for (event_id, body) in &prepared {
-                let seq = self
-                    .store
-                    .enqueue_outbound(event_id, body)
-                    .map_err(|e| SinkError(format!("outbox write failed: {e}")))?;
-                self.last_seq.fetch_max(seq, Ordering::AcqRel);
-                seqs.push(seq);
-            }
+        for (event_id, body) in &prepared {
+            let seq = self
+                .store
+                .enqueue_outbound(event_id, body)
+                .map_err(|e| SinkError(format!("outbox write failed: {e}")))?;
+            self.last_seq.fetch_max(seq, Ordering::AcqRel);
+            seqs.push(seq);
         }
         self.wake.notify_one();
         Ok(seqs)
@@ -156,16 +144,30 @@ impl EventSink for TunnelSink {
 /// The bridge's `CommandSource` over the tunnel.
 pub struct TunnelCommands {
     pub(crate) rx: mpsc::UnboundedReceiver<IncomingCommand>,
-    pub(crate) processed: mpsc::UnboundedSender<u64>,
+    /// Idempotency keys of processed commands (the key, not the seq, so a late report for an
+    /// old stream's command cannot be mistaken for a new command with the same seq).
+    pub(crate) processed: mpsc::UnboundedSender<String>,
+    /// Commands handed to the bridge and not yet reported processed, as `(seq, key)`, oldest
+    /// first. The bridge reports in order, so the first entry with a seq is the one reported.
+    pub(crate) delivered: VecDeque<(u64, String)>,
 }
 
 impl CommandSource for TunnelCommands {
     async fn next(&mut self) -> Option<IncomingCommand> {
-        self.rx.recv().await
+        let command = self.rx.recv().await?;
+        self.delivered
+            .push_back((command.seq, command.idempotency_key.clone()));
+        Some(command)
     }
 
     async fn processed(&mut self, seq: u64) {
+        let Some(at) = self.delivered.iter().position(|(s, _)| *s == seq) else {
+            return;
+        };
+        let Some((_, key)) = self.delivered.remove(at) else {
+            return;
+        };
         // The client is gone when this fails; nothing is left to ack.
-        let _ = self.processed.send(seq);
+        let _ = self.processed.send(key);
     }
 }
