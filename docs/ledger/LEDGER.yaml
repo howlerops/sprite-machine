@@ -923,7 +923,8 @@ items:
     title: 'Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms)'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 78f3095; verify (forced recompile, merged tree): permission 10 (2 stable runs), workspace 399, wasm32, tracer PASS, clippy clean"
     assignee: "worker:sonnet"
     attempt: 1
     deps:
@@ -1403,7 +1404,8 @@ items:
     title: 'gpui spike: approval card + build release'
     milestone: M1b
     phase: P1
-    status: "assigned"
+    status: "review"
+    evidence: "merged 5999cf6 (approval card: 61 spike tests, headless click + 409, real HTTP sink vs agui-fixture); criterion 3 release build pending — leader runs it at the next idle cache window"
     assignee: "worker:haiku"
     attempt: 1
     lane: client
