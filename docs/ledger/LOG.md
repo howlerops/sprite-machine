@@ -188,3 +188,5 @@
 2026-10-28T12:25Z M2-003c → done (verify12: 774 passed; signin/devices/authz/thread_create/machine_do; tracer). M2B-007b and M1A-006g merged (router.rs auto-merged); verify running
 2026-10-28T12:26Z M2B-008 assigned (haiku), M2-008a assigned (haiku; paths += cli e2e for DEV_FIXTURES var). M2B-012 re-scoped to an end-to-end proof (pieces exist from M1A-014 + M2-009)
 2026-10-28T12:33Z WEB-001 back (sonnet; out-of-path web/.assetsignore accepted). Added M2B-002b (machines list shape per §5.1, live dev-fixtures 404)
+2026-10-28T12:44Z M2B-007b → done, M1A-006g → done (verify13 + leader fix ac9179c for a tunnel_client test race; authz flaked under load, passed alone)
+2026-10-28T12:44Z WEB-001 and M2B-008 merged; .gitignore for web test output. M2B-008 criterion 2 corrected by leader (remote terminal = phone raw shell, not the agent terminal tool). Added M2B-008c (P4 spec decision). Verify running

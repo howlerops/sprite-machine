@@ -2425,7 +2425,8 @@ items:
     title: 'Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording'
     milestone: M1a
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 6f33d59 (two leader-approved one-line origin fields); same verify13 run; bridge test: hub prompt with a local: key emits no UserMessage"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2693,7 +2694,8 @@ items:
     title: 'sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 19c43de; workspace 779 passed (after leader test-race fix ac9179c in tunnel_client: a parallel fake hub's bind-then-register window), server_mode 23, hub-test thread_do/attachments PASS, authz PASS on re-run (concurrent builds), tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     lane: rust
@@ -2827,6 +2829,22 @@ items:
       - 'bash scripts/hub-test.sh machine_do'
       - 'bash scripts/hub-test.sh smoke'
       - 'cd web && npx playwright test tests/pairing.spec.js'
+
+  - id: M2B-008c
+    title: 'Spec decision: runner audit events reach the hub (trust granted/declined, dispatch refused) — a tunnel up frame or a TurnEvent'
+    milestone: M2b
+    phase: P4
+    lane: docs
+    owner: leader
+    deps: [M2B-008]
+    paths:
+      - 'docs/specs/tunnel.md'
+    context:
+      - 'docs/ledger/reports/M2B-008.md (criterion 3, Discovered work)'
+    acceptance:
+      - 'tunnel.md defines how runner audit events reach the hub audit log; implementation item filed'
+    verify:
+      - 'grep -q audit docs/specs/tunnel.md'
 
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
@@ -3274,7 +3292,9 @@ items:
       - 'docs/PLAN-v2-ade.md §4.10 (Security)'
       - 'crates/runner/src/server (M2B-007)'
     acceptance:
-      - 'First use of a directory asks `Trust <dir>? [y/N]` and persists; home directory never persisted; remote terminal disabled unless enabled per machine; runner actions audited via hub'
+      - "First use of a directory asks `Trust <dir>? [y/N]` and persists (0600); home and / never persisted; hub dispatch into an untrusted dir fails with workspace_untrusted and no agent starts; canonical paths"
+      - "Leader correction: \"remote terminal\" (plan line 606) is the phone opening a raw shell on the machine, not the agent's ACP terminal tool. The opt-in setting (--allow-remote-terminal / state file) exists and is tested; any future remote-shell feature must check it"
+      - "Runner trust decisions are recorded in a local audit log (audit.jsonl); sending them to the hub needs a protocol frame (M2B-008c, P4 decision)"
     verify:
       - 'cargo test -p runner --test trust'
 
