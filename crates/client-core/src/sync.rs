@@ -19,6 +19,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, header::AUTHORIZATION};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+use crate::cache::{Cache, CacheError};
 use crate::connectivity::Connectivity;
 use crate::view::{ThreadView, ViewError};
 
@@ -230,6 +231,87 @@ impl ThreadSync {
     }
 }
 
+/// The text of the `envelope` member of an `event` frame, exactly as it appears in `frame`.
+/// `frame` must already be well-formed JSON (see [`parse_incoming`]). This walks the top-level
+/// members and never re-serialises, so the bytes are the hub's.
+fn envelope_text(frame: &str) -> Option<&str> {
+    let bytes = frame.as_bytes();
+    let mut at = skip_ws(bytes, 0);
+    if bytes.get(at) != Some(&b'{') {
+        return None;
+    }
+    at += 1;
+    loop {
+        at = skip_ws(bytes, at);
+        if bytes.get(at) != Some(&b'"') {
+            return None;
+        }
+        let key_end = string_end(bytes, at)?;
+        let is_envelope = &frame[at + 1..key_end - 1] == "envelope";
+        at = skip_ws(bytes, key_end);
+        if bytes.get(at) != Some(&b':') {
+            return None;
+        }
+        at = skip_ws(bytes, at + 1);
+        let value_end = value_end(bytes, at)?;
+        if is_envelope {
+            return Some(&frame[at..value_end]);
+        }
+        at = skip_ws(bytes, value_end);
+        if bytes.get(at) != Some(&b',') {
+            return None;
+        }
+        at += 1;
+    }
+}
+
+fn skip_ws(bytes: &[u8], mut at: usize) -> usize {
+    while matches!(bytes.get(at), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+        at += 1;
+    }
+    at
+}
+
+/// The index just past the string whose opening quote is at `start`.
+fn string_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut at = start + 1;
+    loop {
+        match bytes.get(at)? {
+            b'\\' => at += 2,
+            b'"' => return Some(at + 1),
+            _ => at += 1,
+        }
+    }
+}
+
+/// The index just past the JSON value that starts at `start`.
+fn value_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut at = start;
+    loop {
+        match *bytes.get(at)? {
+            b'"' => {
+                at = string_end(bytes, at)?;
+                if depth == 0 {
+                    return Some(at);
+                }
+                continue;
+            }
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' if depth == 0 => return Some(at),
+            b'}' | b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at + 1);
+                }
+            }
+            b',' | b' ' | b'\t' | b'\n' | b'\r' if depth == 0 => return Some(at),
+            _ => {}
+        }
+        at += 1;
+    }
+}
+
 /// The subscription URL for `after` (turn-event.md §6). `base_url` is the hub's HTTP base
 /// (which may include a path prefix); `http(s)` is mapped to `ws(s)`.
 pub fn subscribe_url(
@@ -268,6 +350,8 @@ pub enum SubscriptionError {
     Closed,
     #[error(transparent)]
     Sync(#[from] SyncError),
+    #[error(transparent)]
+    Cache(#[from] CacheError),
 }
 
 /// A live subscription to one thread.
@@ -332,6 +416,26 @@ impl Subscription {
     /// seq and returns [`Applied::Gap`]. On a closed socket it returns
     /// [`SubscriptionError::Closed`]; call [`Subscription::reconnect`] to continue.
     pub async fn next(&mut self) -> Result<Applied, SubscriptionError> {
+        Ok(self.next_frame().await?.0)
+    }
+
+    /// Like [`Subscription::next`], and also appends each new event to `cache` with
+    /// [`Cache::append_raw`], as the envelope text the hub sent. An event this build does not
+    /// know therefore survives a restart byte for byte.
+    pub async fn next_persisted(
+        &mut self,
+        cache: &mut Cache,
+    ) -> Result<Applied, SubscriptionError> {
+        let (applied, text) = self.next_frame().await?;
+        if let Some(text) = text {
+            cache.append_raw(self.sync.view().thread_id(), &[text.as_str()])?;
+        }
+        Ok(applied)
+    }
+
+    /// The read behind [`Subscription::next`] and [`Subscription::next_persisted`]. The text is
+    /// `Some` only for a new event: the envelope's own wire text.
+    async fn next_frame(&mut self) -> Result<(Applied, Option<String>), SubscriptionError> {
         let socket = self.socket.as_mut().ok_or(SubscriptionError::Closed)?;
         let message = match socket.next().await {
             None => return Err(self.closed()),
@@ -346,18 +450,28 @@ impl Subscription {
         match message {
             Message::Text(body) => {
                 let Some(incoming) = parse_incoming(body.as_str())? else {
-                    return Ok(Applied::Ignored);
+                    return Ok((Applied::Ignored, None));
                 };
                 let applied = self.sync.feed(incoming)?;
+                let text = match applied {
+                    Applied::Event(_) => Some(
+                        envelope_text(body.as_str())
+                            .ok_or_else(|| {
+                                SyncError::Malformed("event frame without an envelope".to_owned())
+                            })?
+                            .to_owned(),
+                    ),
+                    _ => None,
+                };
                 match applied {
                     Applied::Live => self.set_connectivity(Connectivity::Online),
                     Applied::Gap { .. } => self.reconnect().await?,
                     _ => {}
                 }
-                Ok(applied)
+                Ok((applied, text))
             }
             Message::Close(_) => Err(self.closed()),
-            _ => Ok(Applied::Ignored),
+            _ => Ok((Applied::Ignored, None)),
         }
     }
 

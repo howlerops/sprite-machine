@@ -10,6 +10,7 @@ use client_core::cache::Cache;
 use client_core::sync::{Incoming, parse_incoming};
 use client_core::view::Item;
 use client_core::{Applied, Subscription, ThreadSync};
+use futures_util::SinkExt;
 use protocol::tunnel::{Actor, ActorKind, ContentPart};
 use protocol::turn_event::{
     AssistantRole, Envelope, Event, RunFinished, RunOutcome, RunReason, RunStarted,
@@ -430,5 +431,68 @@ async fn cold_restart_resumes_from_the_cached_seq_not_from_zero() {
     assert_eq!(total.len() as u64, subscription.sync().last_seq());
     assert_contiguous(&total);
 
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The hub's wire text of an event this build does not know. The spacing, key order and the
+/// `}` and escaped quote inside a string are deliberate: only a verbatim copy reproduces them.
+const UNKNOWN_ENVELOPE: &str = r#"{ "v": 1,  "seq": 2, "thread_id": "th_1", "task_id": null, "run_id": null, "ts": "2026-10-27T22:00:04.000Z", "event": { "type": "SomethingFromTheFuture", "note": "a } and \"quote\"", "x": [1, 2.50, "y"] } }"#;
+
+#[tokio::test]
+async fn a_live_unknown_event_is_stored_as_its_envelope_text_and_survives_a_restart() {
+    let known = serde_json::to_string(&prompt(1)).expect("serializes");
+    let frames = vec![
+        r#"{"type":"hello","head_seq":2,"replay_from":1}"#.to_owned(),
+        format!(r#"{{"type":"event",   "envelope": {known}}}"#),
+        format!(r#"{{ "envelope" : {UNKNOWN_ENVELOPE}, "type": "event" }}"#),
+        r#"{"type":"live"}"#.to_owned(),
+    ];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
+    let base = format!("http://{}", listener.local_addr().expect("address"));
+    let hub = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accepts");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("handshake");
+        for frame in frames {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(frame.into()))
+                .await
+                .expect("sends");
+        }
+        std::future::pending::<()>().await;
+    });
+
+    let path = temp_db("live-unknown");
+    let mut cache = Cache::open(&path).expect("opens");
+    let mut subscription = Subscription::connect(&base, ThreadSync::new(THREAD), None)
+        .await
+        .expect("connects");
+    let mut events = 0;
+    loop {
+        match subscription
+            .next_persisted(&mut cache)
+            .await
+            .expect("subscription read")
+        {
+            Applied::Event(_) => events += 1,
+            Applied::Live => break,
+            _ => {}
+        }
+    }
+    hub.abort();
+    assert_eq!(events, 2);
+    drop(subscription);
+    drop(cache);
+
+    let restored = Cache::open(&path).expect("reopens");
+    assert_eq!(
+        restored.raw_events(THREAD).expect("raw events"),
+        vec![known, UNKNOWN_ENVELOPE.to_owned()],
+        "each stored text is the envelope exactly as the hub sent it"
+    );
+    assert_eq!(restored.last_seq(THREAD).expect("last seq"), 2);
     let _ = std::fs::remove_file(&path);
 }

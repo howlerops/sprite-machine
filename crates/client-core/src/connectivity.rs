@@ -13,6 +13,16 @@ pub enum Connectivity {
 }
 
 impl Connectivity {
+    /// One state for the banner from two links: the subscription and the outbox. Offline if
+    /// either is offline, else connecting if either is connecting, else online.
+    pub fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Offline, _) | (_, Self::Offline) => Self::Offline,
+            (Self::Connecting, _) | (_, Self::Connecting) => Self::Connecting,
+            (Self::Online, Self::Online) => Self::Online,
+        }
+    }
+
     /// The banner text for this state, or `None` when no banner is needed.
     pub fn banner(self) -> Option<&'static str> {
         match self {
