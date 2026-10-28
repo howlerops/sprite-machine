@@ -5406,7 +5406,8 @@ items:
     title: 'runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode)'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged attempt 2; runner+cli clippy clean, cargo test -p runner 177 passed; qr tests incl. trust answer through the key reader"
     review_notes:
       - "BLOCKER: key thread holds stdin.lock() for the whole run; trust::terminal_asker also locks stdin for its y/n answer -> deadlock (and raw mode hides the answer). One stdin owner; test that a trust answer gets through while the key reader runs"
     assignee: "sonnet"

@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 92/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012,M2B-009a · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 91/120
+done 93/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 92/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 92/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012,M
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 64 | 39 | 6 |
+| P2 | 64 | 40 | 5 |
 | P3 | 20 | 1 | 0 |
 | P4 | 44 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -84,7 +84,7 @@ done 92/254 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2B-012,M
 | WEB-003 | worker | rust | todo | web: composer with attachments + Allow/Deny + Stop |
 | WEB-004 | worker | rust | todo | web: PWA + Web Push |
 | M2B-005f | worker | rust | todo | hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect |
-| M2B-009a | worker | rust | assigned | runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode) |
+| M2B-009a | worker | rust | done | runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode) |
 
 ## Waiting on the human
 

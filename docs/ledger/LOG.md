@@ -212,3 +212,4 @@
 - merged M2B-005b and M2B-009 (main.rs usage/imports conflict resolved); runner: fmt, clippy clean, 169 tests passed on the merged tree
 - M2B-005b, M2B-009 done; assign M2B-009a (haiku)
 - M2B-009a attempt 1 (haiku) rejected: pump thread holds stdin lock forever, trust asker deadlocks on dispatch to an untrusted dir. Attempt 2 (sonnet) builds on it
+- M2B-009a attempt 2 (sonnet) back: Prompt routes stdin to the trust question; merged, runner 177 passed → done. M2B-009b not filed (autoConnect is on M2B-010)
