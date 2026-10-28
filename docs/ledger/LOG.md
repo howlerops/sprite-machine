@@ -215,3 +215,4 @@
 - M2B-009a attempt 2 (sonnet) back: Prompt routes stdin to the trust question; merged, runner 177 passed → done. M2B-009b not filed (autoConnect is on M2B-010)
 - verify17 green (workspace 836/0 incl. the sidecar kill test that timed out under load in verify16) → M2B-002b, M2B-012, M2-008h, M2-011a, M2B-005c done
 2026-10-28T15:07Z assign CI-002 (haiku), WEB-002 attempt 2 (sonnet; ticket now exists), M2B-005f (sonnet, security), M2-010a (sonnet, medium)
+2026-10-28T15:12Z disk hit 245 MB free (CI-002 worker-build failed ENOSPC; other workers at risk). Leader cleared stale test exes (debug/deps 23 GB) → 9.5 GB free; background janitor deletes stale test exes whenever free < 5 GB. CI-002 resumed on the same attempt with one wasm profile (its CI-002b proposal)
