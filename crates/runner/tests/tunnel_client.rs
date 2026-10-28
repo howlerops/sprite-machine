@@ -17,7 +17,9 @@ use runner::tunnel::{
     TunnelSink, WallClock, tunnel,
 };
 use serde_json::{Value, json};
-use sidecar::bridge::{CommandFailure, CommandSource, EventSink};
+use sidecar::bridge::{
+    Bridge, CommandFailure, CommandSource, Config, EventSink, SequentialGenerator,
+};
 use sidecar::store::Store;
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
@@ -683,11 +685,11 @@ async fn commands_reach_the_bridge_in_order_and_are_acked_after_processing() {
     // Not acked while the bridge has not finished.
     assert!(conn.recv_within(Duration::from_millis(200)).await.is_none());
 
-    rig.commands.processed(1).await;
+    rig.commands.processed(1, "idk_1").await;
     assert_eq!(conn.recv().await, json!({ "t": "ack", "seq": 1 }));
     let second = rig.commands.next().await.unwrap();
     assert_eq!(second.seq, 2);
-    rig.commands.processed(2).await;
+    rig.commands.processed(2, "idk_2").await;
     assert_eq!(conn.recv().await, json!({ "t": "ack", "seq": 2 }));
     assert_eq!(rig.store.last_down_seq().unwrap(), 2);
 }
@@ -698,7 +700,9 @@ async fn a_repeated_idempotency_key_is_acked_but_not_applied_twice() {
     let mut c1 = rig.connect(20_000).await;
     c1.command(1, "idk_1", cancel("tk_1")).await;
     let first = rig.commands.next().await.unwrap();
-    rig.commands.processed(first.seq).await;
+    rig.commands
+        .processed(first.seq, &first.idempotency_key)
+        .await;
     assert_eq!(c1.recv().await["seq"], 1);
     c1.drop_socket();
 
@@ -711,7 +715,7 @@ async fn a_repeated_idempotency_key_is_acked_but_not_applied_twice() {
     c2.command(2, "idk_2", cancel("tk_2")).await;
     let next = rig.commands.next().await.unwrap();
     assert_eq!((next.seq, next.idempotency_key.as_str()), (2, "idk_2"));
-    rig.commands.processed(2).await;
+    rig.commands.processed(2, "idk_2").await;
     loop {
         let frame = c2.recv().await;
         assert_eq!(frame["t"], "ack");
@@ -749,7 +753,7 @@ async fn a_command_received_but_not_processed_is_redelivered_after_a_crash() {
     conn.command(1, "idk_1", cancel("tk_1")).await;
     let again = rig.commands.next().await.unwrap();
     assert_eq!((again.seq, again.idempotency_key.as_str()), (1, "idk_1"));
-    rig.commands.processed(1).await;
+    rig.commands.processed(1, "idk_1").await;
     assert_eq!(conn.recv().await, json!({ "t": "ack", "seq": 1 }));
     assert_eq!(rig.store.last_down_seq().unwrap(), 1);
     // A hub replay of the same key (renumbered stream) is acked but applied no more.
@@ -781,7 +785,7 @@ async fn a_late_processed_from_before_a_fresh_stream_cannot_ack_a_new_command() 
     assert_eq!((new.seq, new.idempotency_key.as_str()), (1, "idk_new"));
 
     // The bridge finishes the OLD command now: seq 1 means the old numbering.
-    rig.commands.processed(1).await;
+    rig.commands.processed(1, "idk_old").await;
     assert!(
         c2.recv_within(Duration::from_millis(300)).await.is_none(),
         "a late processed acked the new command"
@@ -791,9 +795,36 @@ async fn a_late_processed_from_before_a_fresh_stream_cannot_ack_a_new_command() 
     // The old command's effect is still recorded, without touching the cursor.
     assert!(rig.store.seen_key("idk_old").unwrap());
 
-    rig.commands.processed(1).await;
+    rig.commands.processed(1, "idk_new").await;
     assert_eq!(c2.recv().await, json!({ "t": "ack", "seq": 1 }));
     assert_eq!(rig.store.last_down_seq().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn processed_reports_out_of_order_ack_and_commit_the_right_commands() {
+    let mut rig = Rig::new().await;
+    let mut conn = rig.connect(20_000).await;
+    for (seq, key) in [(1, "idk_1"), (2, "idk_2"), (3, "idk_3")] {
+        conn.command(seq, key, cancel("tk")).await;
+        let got = rig.commands.next().await.unwrap();
+        assert_eq!((got.seq, got.idempotency_key.as_str()), (seq, key));
+    }
+    // The bridge finishes 3, then 2: nothing may be committed or acked past the unprocessed 1.
+    rig.commands.processed(3, "idk_3").await;
+    rig.commands.processed(2, "idk_2").await;
+    assert!(conn.recv_within(Duration::from_millis(200)).await.is_none());
+    assert_eq!(rig.store.last_down_seq().unwrap(), 0);
+    rig.commands.processed(1, "idk_1").await;
+    let mut acked = 0;
+    while acked < 3 {
+        let frame = conn.recv().await;
+        assert_eq!(frame["t"], "ack");
+        acked = frame["seq"].as_u64().unwrap();
+    }
+    assert_eq!(rig.store.last_down_seq().unwrap(), 3);
+    for key in ["idk_1", "idk_2", "idk_3"] {
+        assert!(rig.store.seen_key(key).unwrap(), "{key}");
+    }
 }
 
 #[tokio::test]
@@ -1198,4 +1229,206 @@ async fn the_runner_opens_no_listening_sockets() {
     conn.drop_socket();
     rig.hub.next_conn().await;
     assert_only_hubs_listen(hub_port);
+}
+
+// ---- one store shared by the bridge and the tunnel client -----------------------------------
+
+/// An acp-mock behind a tee that records the methods the bridge sent. With `stall`, the agent
+/// never gets `session/new`, so the bridge stays inside applying its first command.
+struct TeedAgent {
+    methods: Arc<Mutex<Vec<String>>>,
+    stalled: mpsc::UnboundedReceiver<()>,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+impl TeedAgent {
+    fn start(
+        stall: bool,
+    ) -> (
+        Self,
+        impl tokio::io::AsyncRead + Send + Unpin + 'static,
+        impl tokio::io::AsyncWrite + Send + Unpin + 'static,
+    ) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let script =
+            acp_mock::Script::from_value(&json!({ "turns": [{ "steps": [{ "text": "hi" }] }] }))
+                .unwrap();
+        let (client_io, proxy_client) = tokio::io::duplex(1 << 16);
+        let (proxy_agent, agent_io) = tokio::io::duplex(1 << 16);
+        let (agent_r, agent_w) = tokio::io::split(agent_io);
+        let mock = tokio::spawn(async move {
+            let _ = acp_mock::run(script, agent_r, agent_w).await;
+        });
+        let (client_up, mut to_client) = tokio::io::split(proxy_client);
+        let (mut from_agent, mut to_agent) = tokio::io::split(proxy_agent);
+        let methods = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&methods);
+        let (stalled_tx, stalled) = mpsc::unbounded_channel();
+        let up = tokio::spawn(async move {
+            let mut lines = BufReader::new(client_up).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let method = serde_json::from_str::<Value>(&line)
+                    .ok()
+                    .and_then(|m| m["method"].as_str().map(str::to_owned));
+                if let Some(method) = &method {
+                    record.lock().unwrap().push(method.clone());
+                }
+                if stall && method.as_deref() == Some("session/new") {
+                    let _ = stalled_tx.send(());
+                    continue;
+                }
+                if to_agent
+                    .write_all(format!("{line}\n").as_bytes())
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let down = tokio::spawn(async move {
+            let _ = tokio::io::copy(&mut from_agent, &mut to_client).await;
+        });
+        let (client_r, client_w) = tokio::io::split(client_io);
+        (
+            Self {
+                methods,
+                stalled,
+                tasks: vec![mock, up, down],
+            },
+            client_r,
+            client_w,
+        )
+    }
+
+    fn prompts(&self) -> usize {
+        let methods = self.methods.lock().unwrap();
+        methods.iter().filter(|m| *m == "session/prompt").count()
+    }
+
+    /// The process dies: everything it ran stops.
+    fn kill(&self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}
+
+fn prompt_command() -> Value {
+    json!({
+        "kind": "prompt", "thread_id": "th_1", "task_id": "tk_1", "message_id": "msg_1",
+        "parts": [{ "type": "text", "text": "go" }],
+        "author": { "kind": "user", "id": "usr_1" },
+    })
+}
+
+/// Bridge, tunnel client and fake hub as the real runner wires them: one Store for both.
+fn start_bridge(
+    rig: &mut Rig,
+    workdir: &Path,
+    stall: bool,
+) -> (TeedAgent, JoinHandle<()>, mpsc::UnboundedReceiver<()>) {
+    let (mut agent, reader, writer) = TeedAgent::start(stall);
+    let bridge = Bridge::connect(
+        Config::new("mch_test", "agt_mock", workdir),
+        reader,
+        writer,
+        Arc::clone(&rig.store),
+        Arc::new(SequentialGenerator::new()),
+        rig.sink.clone(),
+        std::mem::replace(&mut rig.commands, dead_commands()),
+    );
+    let run = tokio::spawn(async move {
+        let _ = bridge.run().await;
+    });
+    let stalled = std::mem::replace(&mut agent.stalled, mpsc::unbounded_channel().1);
+    (agent, run, stalled)
+}
+
+/// A `TunnelCommands` nobody feeds, to leave behind in the rig.
+fn dead_commands() -> TunnelCommands {
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(Store::open(dir.path()).unwrap());
+    let config = TunnelConfig {
+        hub_ws_base: "ws://127.0.0.1:1".to_owned(),
+        machine_id: "mch_dead".to_owned(),
+        runner_version: "0".to_owned(),
+        capabilities: Capabilities {
+            host_mode: "local".to_owned(),
+            harnesses: Vec::new(),
+            max_sessions: 1,
+            spawn: Vec::new(),
+            features: Vec::new(),
+        },
+        timing: timing(5, 40),
+    };
+    let (_client, _sink, commands) = tunnel(
+        config,
+        store,
+        TestCredential {
+            wipes: Arc::new(AtomicUsize::new(0)),
+        },
+    );
+    commands
+}
+
+#[tokio::test]
+async fn a_command_received_but_not_applied_is_applied_exactly_once_after_a_crash() {
+    let state = TempDir::new().unwrap();
+    let work = TempDir::new().unwrap();
+    // First process: the bridge has the command and is inside applying it (the agent never
+    // answers `session/new`) when everything dies.
+    {
+        let hub = FakeHub::start().await;
+        let mut rig = Rig::build(hub, state.path(), timing(5, 40), 0.0);
+        let (agent, bridge, mut stalled) = start_bridge(&mut rig, work.path(), true);
+        let mut conn = rig.connect(20_000).await;
+        conn.command(1, "idk_1", prompt_command()).await;
+        tokio::time::timeout(WAIT, stalled.recv())
+            .await
+            .expect("the bridge never started applying the command");
+        assert_eq!(agent.prompts(), 0);
+        // Received and not applied: nothing may be committed or acked.
+        assert_eq!(rig.store.last_down_seq().unwrap(), 0);
+        assert!(!rig.store.seen_key("idk_1").unwrap());
+        bridge.abort();
+        agent.kill();
+        rig.run.take().unwrap().abort();
+        let _ = bridge.await;
+    }
+    // Second process, same store: hello.last_down_seq is still 0, so the hub redelivers.
+    let hub = FakeHub::start().await;
+    let mut rig = Rig::build(hub, state.path(), timing(5, 40), 0.0);
+    let (agent, bridge, _) = start_bridge(&mut rig, work.path(), false);
+    rig.start();
+    let mut conn = rig.hub.next_conn().await;
+    assert_eq!(conn.hello().await["last_down_seq"], 0);
+    conn.welcome(true, "rt_2", 0, 20_000).await;
+    conn.command(1, "idk_1", prompt_command()).await;
+    loop {
+        let frame = conn.recv().await;
+        if frame["t"] == "ack" {
+            assert_eq!(frame["seq"], 1);
+            break;
+        }
+    }
+    assert_eq!(rig.store.last_down_seq().unwrap(), 1);
+    assert!(rig.store.seen_key("idk_1").unwrap());
+    assert_eq!(agent.prompts(), 1, "the prompt reached the agent once");
+    // A hub replay of the same key is acked and not applied again.
+    conn.close(CloseCode::ServerRestart).await;
+    let mut c3 = rig.hub.next_conn().await;
+    assert_eq!(c3.hello().await["last_down_seq"], 1);
+    c3.welcome(false, "rt_3", 0, 20_000).await;
+    c3.command(1, "idk_1", prompt_command()).await;
+    loop {
+        let frame = c3.recv().await;
+        if frame["t"] == "ack" {
+            break;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(agent.prompts(), 1, "the prompt was applied twice");
+    bridge.abort();
+    agent.kill();
 }

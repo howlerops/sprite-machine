@@ -56,10 +56,11 @@ pub trait CommandSource: Send + 'static {
     /// The next command, or `None` when the tunnel client shut down. Must be cancel safe.
     fn next(&mut self) -> impl Future<Output = Option<IncomingCommand>> + Send;
 
-    /// The bridge has durably processed the frame (its key is recorded and its effect
-    /// applied or rejected). The tunnel client acks `seq` now and not earlier.
-    fn processed(&mut self, seq: u64) -> impl Future<Output = ()> + Send {
-        let _ = seq;
+    /// The bridge has processed the frame (its effect applied or rejected, or the key was a
+    /// duplicate). The source commits it now (`Store::commit_down_frame`: `last_down_seq` and
+    /// `key`) and acks `seq`, not earlier. The bridge never commits down frames itself.
+    fn processed(&mut self, seq: u64, idempotency_key: &str) -> impl Future<Output = ()> + Send {
+        let _ = (seq, idempotency_key);
         async {}
     }
 }
@@ -107,7 +108,7 @@ impl EventSink for MemorySink {
 /// processed.
 pub struct MemoryCommands {
     rx: mpsc::UnboundedReceiver<IncomingCommand>,
-    processed: Arc<Mutex<Vec<u64>>>,
+    processed: Arc<Mutex<Vec<(u64, String)>>>,
 }
 
 /// The sending side of a [`MemoryCommands`]. Dropping every clone ends the command stream.
@@ -115,7 +116,7 @@ pub struct MemoryCommands {
 pub struct CommandFeed {
     tx: mpsc::UnboundedSender<IncomingCommand>,
     next_seq: Arc<Mutex<u64>>,
-    processed: Arc<Mutex<Vec<u64>>>,
+    processed: Arc<Mutex<Vec<(u64, String)>>>,
 }
 
 impl MemoryCommands {
@@ -158,6 +159,11 @@ impl CommandFeed {
 
     /// Seqs the bridge has reported as processed, in order.
     pub fn processed(&self) -> Vec<u64> {
+        lock(&self.processed).iter().map(|(seq, _)| *seq).collect()
+    }
+
+    /// `(seq, idempotency key)` the bridge has reported as processed, in order.
+    pub fn processed_keys(&self) -> Vec<(u64, String)> {
         lock(&self.processed).clone()
     }
 
@@ -182,7 +188,7 @@ impl CommandSource for MemoryCommands {
         self.rx.recv().await
     }
 
-    async fn processed(&mut self, seq: u64) {
-        lock(&self.processed).push(seq);
+    async fn processed(&mut self, seq: u64, idempotency_key: &str) {
+        lock(&self.processed).push((seq, idempotency_key.to_owned()));
     }
 }

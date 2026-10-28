@@ -26,3 +26,4 @@ rand = "0.9"
 # Schema check of the Checkpoint event. Same pin as crates/protocol.
 jsonschema = { version = "=0.60.2", default-features = false }
 tempfile = "3"
+acp-mock = { path = "../acp-mock" }

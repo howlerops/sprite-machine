@@ -96,7 +96,9 @@ pub async fn run(
             if commands.send(incoming.command).await.is_err() {
                 return;
             }
-            source.processed(incoming.seq).await;
+            source
+                .processed(incoming.seq, &incoming.idempotency_key)
+                .await;
         }
     });
 

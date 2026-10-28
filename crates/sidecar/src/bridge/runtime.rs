@@ -6,7 +6,7 @@ use std::sync::{Arc, PoisonError};
 use protocol::mapping::acp_turn::{
     AcpTurnMapper, IdSource, SequentialIds, StartTask, runner_actor,
 };
-use protocol::tunnel::{Command, CommandErrorCode, Disposition};
+use protocol::tunnel::{Command, CommandErrorCode};
 use protocol::turn_event::{Envelope, Event, RunErrorReason, RunOutcome, UserMessage};
 use serde_json::Value;
 
@@ -73,15 +73,16 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             idempotency_key,
             command,
         } = incoming;
-        let disposition = self
-            .store
-            .commit_down_frame(seq, Some(idempotency_key.as_str()))?;
-        if disposition == Disposition::New {
-            self.apply(&idempotency_key, command).await?;
-        } else {
+        // The command source owns the down-stream commit (`last_down_seq` + key): it commits
+        // when told `processed` below. The bridge only reads, so a crash before then leaves the
+        // command uncommitted and the hub redelivers it. `applied` covers a repeat that arrives
+        // before the commit.
+        if self.store.seen_key(&idempotency_key)? || !self.applied.insert(idempotency_key.clone()) {
             tracing::debug!(%idempotency_key, "duplicate command ignored");
+        } else {
+            self.apply(&idempotency_key, command).await?;
         }
-        self.commands.processed(seq).await;
+        self.commands.processed(seq, &idempotency_key).await;
         Ok(())
     }
 

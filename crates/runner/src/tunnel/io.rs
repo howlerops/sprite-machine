@@ -1,7 +1,6 @@
 //! The bridge-facing side of the tunnel client: [`TunnelSink`] (`EventSink`) and
 //! [`TunnelCommands`] (`CommandSource`), plus the state they share with the connection task.
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -147,27 +146,15 @@ pub struct TunnelCommands {
     /// Idempotency keys of processed commands (the key, not the seq, so a late report for an
     /// old stream's command cannot be mistaken for a new command with the same seq).
     pub(crate) processed: mpsc::UnboundedSender<String>,
-    /// Commands handed to the bridge and not yet reported processed, as `(seq, key)`, oldest
-    /// first. The bridge reports in order, so the first entry with a seq is the one reported.
-    pub(crate) delivered: VecDeque<(u64, String)>,
 }
 
 impl CommandSource for TunnelCommands {
     async fn next(&mut self) -> Option<IncomingCommand> {
-        let command = self.rx.recv().await?;
-        self.delivered
-            .push_back((command.seq, command.idempotency_key.clone()));
-        Some(command)
+        self.rx.recv().await
     }
 
-    async fn processed(&mut self, seq: u64) {
-        let Some(at) = self.delivered.iter().position(|(s, _)| *s == seq) else {
-            return;
-        };
-        let Some((_, key)) = self.delivered.remove(at) else {
-            return;
-        };
+    async fn processed(&mut self, _seq: u64, idempotency_key: &str) {
         // The client is gone when this fails; nothing is left to ack.
-        let _ = self.processed.send(key);
+        let _ = self.processed.send(idempotency_key.to_owned());
     }
 }

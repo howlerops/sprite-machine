@@ -125,7 +125,6 @@ pub(crate) fn build<C: CredentialSource>(
         TunnelCommands {
             rx: command_rx,
             processed: processed_tx,
-            delivered: VecDeque::new(),
         },
     )
 }
