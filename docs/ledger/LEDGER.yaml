@@ -5514,3 +5514,43 @@ items:
       - 'A client-core type owns both links and exposes a watch/stream of the combined state; test drives subscription and outbox state changes and asserts the published banner sequence'
     verify:
       - 'cargo test -p client-core'
+
+  - id: M3-017a
+    title: 'client-core: public create-thread helper (POST /v1/threads with the first prompt and attachments); cli e2e app and attachments use it instead of raw reqwest'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-017]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/cli/src/e2e/app*'
+      - 'crates/cli/src/e2e/attachments.rs'
+    context:
+      - 'docs/ledger/reports/M3-017.md (Discovered work)'
+      - 'docs/specs/client-api.md (POST /v1/threads)'
+    acceptance:
+      - 'client-core exposes create_thread (typed request/response per client-api.md, idempotency key); a client-core test against a local fake hub; both e2e checks use it'
+    verify:
+      - 'cargo test -p client-core'
+      - 'cargo run -p cli -- e2e app'
+
+  - id: M3-017b
+    title: 'cli e2e: one shared runner-side stack (acp-mock, bridge, tunnel) for tracer, app and attachments'
+    milestone: M3
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-017]
+    paths:
+      - 'crates/cli/src/e2e/**'
+    context:
+      - 'docs/ledger/reports/M3-017.md (Discovered work)'
+    acceptance:
+      - 'No duplicated run_loop wiring; all three e2e checks pass unchanged'
+    verify:
+      - 'cargo run -p cli -- e2e tracer'
+      - 'cargo run -p cli -- e2e app'
