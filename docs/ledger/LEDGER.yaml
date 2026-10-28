@@ -1952,7 +1952,8 @@ items:
     title: 'hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 115136a + leader 609d261 (session route via thread policy); hub+acp-mock+sidecar 323 passed, clippy live+wasm clean, hub-test thread_session 4 / authz 10 / thread_do 7, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     priority: 2
