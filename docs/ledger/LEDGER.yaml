@@ -4107,7 +4107,8 @@ items:
     title: 'cli e2e app: drive a task from client-core against hub + fixture agent'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; on merged tree: cli clippy clean, cargo run -p cli -- e2e app PASS (124.6s)"
     assignee: "haiku"
     attempt: 1
     lane: client
