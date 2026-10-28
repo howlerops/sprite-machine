@@ -357,7 +357,7 @@ fn catch_up_replays_from_the_open_run_boundary() {
     core.take_appended();
 
     // after = 5 is inside run_1 (RunStarted at 3): replay from 3, snapshot as of 2.
-    let messages = core.catch_up(5).expect("catch up");
+    let messages = core.catch_up(5).expect("catch up").collect::<Vec<_>>();
     assert_eq!(
         messages[0],
         json!({"type": "hello", "head_seq": 6, "replay_from": 3})
@@ -373,7 +373,7 @@ fn catch_up_replays_from_the_open_run_boundary() {
     assert_eq!(messages.last(), Some(&json!({"type": "live"})));
 
     // after = 0 replays everything; the snapshot is empty.
-    let all = core.catch_up(0).expect("catch up");
+    let all = core.catch_up(0).expect("catch up").collect::<Vec<_>>();
     assert_eq!(all[0]["replay_from"], 1);
     assert_eq!(
         all[1],
@@ -383,16 +383,22 @@ fn catch_up_replays_from_the_open_run_boundary() {
 
     // The run ends at 7: a client that has seen 7 replays nothing but the snapshot at head.
     append(&mut core, success("tk_1", "run_1"));
-    let done = core.catch_up(7).expect("catch up");
+    let done = core.catch_up(7).expect("catch up").collect::<Vec<_>>();
     assert_eq!(done[0]["replay_from"], 8);
     assert_eq!(done[1]["at_seq"], 7);
     assert_eq!(done[1]["states"]["usage"]["context_used"], 20);
     assert_eq!(done.len(), 3);
 
     // after = 6 is still inside the (just ended) run: boundary again.
-    assert_eq!(core.catch_up(6).expect("catch up")[0]["replay_from"], 3);
+    assert_eq!(
+        core.catch_up(6).expect("catch up").collect::<Vec<_>>()[0]["replay_from"],
+        3
+    );
     // after beyond the head is treated as the head.
-    assert_eq!(core.catch_up(99).expect("catch up")[0]["replay_from"], 8);
+    assert_eq!(
+        core.catch_up(99).expect("catch up").collect::<Vec<_>>()[0]["replay_from"],
+        8
+    );
 }
 
 #[test]
@@ -402,7 +408,10 @@ fn catch_up_boundary_follows_the_resume_run_of_a_paused_task() {
     append(&mut core, interrupt("tk_1", "run_1", "int_1", NOW + 60_000)); // 3
     append(&mut core, pause("tk_1", "run_1", &["int_1"])); // 4
     // Between the runs no run is open: a client at 4 replays from 5.
-    assert_eq!(core.catch_up(4).expect("catch up")[0]["replay_from"], 5);
+    assert_eq!(
+        core.catch_up(4).expect("catch up").collect::<Vec<_>>()[0]["replay_from"],
+        5
+    );
     core.resolve_interrupt(
         "int_1",
         ResolvedOutcome::Selected {
@@ -414,7 +423,10 @@ fn catch_up_boundary_follows_the_resume_run_of_a_paused_task() {
     .expect("resolve"); // 5
     append(&mut core, resume("tk_1", "run_2", "run_1")); // 6
     append(&mut core, text_start("tk_1", "run_2")); // 7
-    assert_eq!(core.catch_up(7).expect("catch up")[0]["replay_from"], 6);
+    assert_eq!(
+        core.catch_up(7).expect("catch up").collect::<Vec<_>>()[0]["replay_from"],
+        6
+    );
 }
 
 // ---- interrupts (client-api.md §5.4) ----------------------------------------------------

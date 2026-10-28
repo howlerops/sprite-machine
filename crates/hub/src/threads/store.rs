@@ -140,11 +140,16 @@ pub trait ThreadStore {
     /// The smallest `start_seq` of a run that was open at `after` (`start_seq <= after` and not
     /// ended at or before `after`).
     fn run_boundary_at(&self, after: u64) -> StoreResult<Option<u64>>;
+    /// The `start_seq` of the run `back` places before the newest run (0 = the newest).
+    fn run_start_back(&self, back: u64) -> StoreResult<Option<u64>>;
 
     // ---- state per scope, as of each change ----
     fn put_state(&mut self, scope: StateScope, seq: u64, state: &Value) -> StoreResult<()>;
     /// The state of `scope` as of `seq` (the latest change at or before it).
     fn state_at(&self, scope: StateScope, seq: u64) -> StoreResult<Option<Value>>;
+    /// Compacts the history of `scope` before `floor` into a snapshot: the latest change at or
+    /// before `floor` stays (it is the state as of `floor`), the older changes are dropped.
+    fn compact_states(&mut self, scope: StateScope, floor: u64) -> StoreResult<()>;
 
     // ---- tasks (the pending queue is the `Pending` ones, oldest first) ----
     /// Inserts or replaces by `task_id`; a replaced task keeps its queue position.
@@ -255,6 +260,14 @@ impl ThreadStore for MemoryStore {
             .min())
     }
 
+    fn run_start_back(&self, back: u64) -> StoreResult<Option<u64>> {
+        let mut starts: Vec<u64> = self.runs.iter().map(|run| run.start_seq).collect();
+        starts.sort_unstable_by(|a, b| b.cmp(a));
+        Ok(usize::try_from(back)
+            .ok()
+            .and_then(|i| starts.get(i).copied()))
+    }
+
     fn put_state(&mut self, scope: StateScope, seq: u64, state: &Value) -> StoreResult<()> {
         self.states.push((scope, seq, state.clone()));
         Ok(())
@@ -267,6 +280,18 @@ impl ThreadStore for MemoryStore {
             .rev()
             .find(|(s, at, _)| *s == scope && *at <= seq)
             .map(|(_, _, state)| state.clone()))
+    }
+
+    fn compact_states(&mut self, scope: StateScope, floor: u64) -> StoreResult<()> {
+        let keep = self
+            .states
+            .iter()
+            .filter(|(s, at, _)| *s == scope && *at <= floor)
+            .map(|(_, at, _)| *at)
+            .max()
+            .unwrap_or(0);
+        self.states.retain(|(s, at, _)| *s != scope || *at >= keep);
+        Ok(())
     }
 
     fn put_task(&mut self, task: &TaskRecord) -> StoreResult<()> {

@@ -525,6 +525,8 @@ impl Wrangler {
             .arg(port.to_string())
             .arg("--persist-to")
             .arg(&persist)
+            // The dev-only routes and the placeholder `Bearer dev` token (DEV_FIXTURES=1).
+            .args(["--var", "DEV_FIXTURES:1"])
             .arg("--show-interactive-dev-session=false")
             .env_remove("RUSTFLAGS")
             .env_remove("RUSTC_WRAPPER")

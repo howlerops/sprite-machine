@@ -81,7 +81,7 @@ BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
 (cd "$HUB_DIR" && exec setsid wrangler dev --local --test-scheduled --ip 127.0.0.1 --port "$PORT" \
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
-  --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" \
+  --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" --var DEV_FIXTURES:1 \
   --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 
