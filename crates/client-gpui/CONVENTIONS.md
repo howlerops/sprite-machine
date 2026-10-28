@@ -155,6 +155,12 @@ fn clicking_the_button_updates_the_status(cx: &mut TestAppContext) {
   unique wrapper id (`("row", ix)`) plus an inner element with a shared id (`"transcript-row"`);
   `find_all("transcript-row")` then counts only the rows actually laid out (assert it is ≪ the
   item count), and `.visible()` drops rows drawn just outside the viewport.
+- **Diffs** (verified in `spikes/gpui/src/diff_pane.rs`): use `gpui_kit::component::diff` —
+  `DiffState::new(DiffFile::parse(patch_text)…, cx).with_mode(DiffMode::Unified)` and
+  `Diff::new(&state).syntax_highlight(true)` (needs the gpui-kit `syntect` feature). It is a
+  virtualized list; tests find visible lines by the `"source"` row ids.
+- In test modules, don't `use super::*;` when the parent imports gpui: gpui's `test` macro
+  shadows `#[test]` ("recursion limit reached"). Import items explicitly.
 - Drive views from `client-core` fixtures (TurnEvent examples in
   `crates/protocol/schemas/turn-event/examples/`), not from a live hub.
 - Tests run on the GPUI test platform (no display, no GPU). Pixel output is checked only by

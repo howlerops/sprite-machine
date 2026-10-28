@@ -58,3 +58,5 @@
 2026-10-28T02:03Z P1 batch 1: M1A-006a (sonnet), M3-001 (haiku), M0-008a (sonnet, ts lane) assigned
 2026-10-28T02:11Z M0-008a assigned→done merged 9e300d4 (sonnet; SDK 1.0.3 has no getSandbox/exposePort — uses ctx.container + DirectoryBackup; wrangler.dev.jsonc workaround until M0-008c image exists)
 2026-10-28T02:11Z M1B-004b todo→assigned attempt 1 (haiku, client lane)
+2026-10-28T02:29Z M1B-004b assigned→done merged e3fc24c (haiku); CONVENTIONS.md += Diff component + test-module gotcha
+2026-10-28T02:29Z M1B-004c todo→assigned attempt 1 (haiku, client lane)

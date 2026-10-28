@@ -1238,7 +1238,8 @@ items:
     title: 'gpui spike: diff pane (gpui-kit editor)'
     milestone: M1b
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged e3fc24c; verify: spike 22 tests (13 diff), headless: 26 of 5000 rows laid out, scroll; syntect highlighting; clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     lane: client
@@ -1259,6 +1260,9 @@ items:
     title: 'gpui spike: terminal pane (alacritty_terminal)'
     milestone: M1b
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     lane: client
     deps: [M1B-004a]
     paths:
