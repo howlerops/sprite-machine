@@ -22,6 +22,8 @@ path = "src/main.rs"
 protocol = { path = "../../crates/protocol" }
 agui-fixture = { path = "../../crates/agui-fixture" }
 serde_json = "1"
+# M1B-004c: the terminal pane's VT model (`Term` + the `vte` ANSI processor). Exact pin.
+alacritty_terminal = "=0.26.0"
 # Exactly the root [workspace.dependencies] specs (checked by tests/pins.rs).
 gpui = { package = "gpui-pre", version = "=0.3.10" }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "c8917c3661ed1090870f403c312b39e0d8a62e0b" }
