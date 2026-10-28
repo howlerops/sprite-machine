@@ -15,8 +15,8 @@ use client_core::ThreadView;
 use client_gpui::shell::i18n::{self, Catalog};
 use client_gpui::task::tools::{activity_rows, tool_rows};
 use client_gpui::task::transcript::{
-    MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, PANE_ID, ROW_HEIGHT, ROW_ID, WRAP_COLS,
-    sanitize, thread_rows, wrap_lines,
+    MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, MORE_ID, PANE_ID, ROW_HEIGHT, ROW_ID,
+    WRAP_COLS, sanitize, thread_rows, thread_rows_expanded, wrap_lines,
 };
 use client_gpui::task::{Row, RowKind, TranscriptPane};
 use gpui_kit::test::TestWindowExt as _;
@@ -270,28 +270,47 @@ const CASES: &[Case] = &[
         setup: no_setup,
         shows: &["Machine mch_laptop is asleep"],
     },
-];
-
-/// Examples that `client-core` view models do not keep (`Transcript::apply` ignores them, and
-/// `ThreadView` has no step or subagent state). They cannot be rendered from view models until
-/// client-core gains them; `known_gaps_are_still_gaps` fails once it does, so this list is
-/// removed rather than forgotten.
-const GAPS: &[&str] = &[
-    "StepStarted.json",
-    "StepFinished.json",
-    "SubagentStarted.json",
-    "SubagentFinished.json",
-    "SubagentError.json",
-    "Raw.json",
+    Case {
+        file: "StepStarted.json",
+        before: &[],
+        setup: no_setup,
+        shows: &["Step verify (round 2): running"],
+    },
+    Case {
+        file: "StepFinished.json",
+        before: &["StepStarted.json"],
+        setup: no_setup,
+        shows: &["Step verify (round 2): done"],
+    },
+    Case {
+        file: "SubagentStarted.json",
+        before: &[],
+        setup: no_setup,
+        shows: &["Subagent reviewer: running", "Runs as tk_child1"],
+    },
+    Case {
+        file: "SubagentFinished.json",
+        before: &["SubagentStarted.json"],
+        setup: no_setup,
+        shows: &["Subagent reviewer: done", "\"verdict\": \"approve\""],
+    },
+    Case {
+        file: "SubagentError.json",
+        before: &["SubagentStarted.json"],
+        setup: no_setup,
+        shows: &["Subagent reviewer: failed (cancelled): child cancelled"],
+    },
+    Case {
+        file: "Raw.json",
+        before: &[],
+        setup: no_setup,
+        shows: &["Child thread th_child1: TextMessageContent"],
+    },
 ];
 
 #[test]
 fn every_turn_event_example_has_an_expectation() {
-    let covered: BTreeSet<String> = CASES
-        .iter()
-        .map(|case| case.file.to_owned())
-        .chain(GAPS.iter().map(|file| (*file).to_owned()))
-        .collect();
+    let covered: BTreeSet<String> = CASES.iter().map(|case| case.file.to_owned()).collect();
     assert_eq!(
         example_files(),
         covered,
@@ -327,15 +346,60 @@ fn every_turn_event_example_renders_from_the_view_models() {
 }
 
 #[test]
-fn known_gaps_are_still_gaps() {
-    for file in GAPS {
-        let with = thread_rows(&thread_from(no_setup, &["UserMessage.json", file]));
-        let without = thread_rows(&thread_from(no_setup, &["UserMessage.json"]));
-        assert_eq!(
-            with, without,
-            "{file} now changes the view: render it and move it from GAPS to CASES"
-        );
+fn steps_subagents_and_raw_render_in_order() {
+    let rows = texts(&thread_rows(&thread_from(
+        no_setup,
+        &[
+            "StepStarted.json",
+            "SubagentStarted.json",
+            "Raw.json",
+            "SubagentError.json",
+            "StepFinished.json",
+        ],
+    )));
+    let at = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} in {rows:#?}"))
+    };
+    // One row per step (updated in place), subagent and raw event, in arrival order.
+    assert_eq!(rows.iter().filter(|r| r.starts_with("Step ")).count(), 1);
+    assert!(at("Step verify (round 2): done") < at("Subagent reviewer"));
+    assert!(at("Subagent reviewer: failed") < at("Child thread th_child1"));
+    assert!(!rows.iter().any(|r| r.contains("running")), "{rows:#?}");
+}
+
+#[test]
+fn step_and_subagent_names_are_text() {
+    let mut thread = ThreadView::new("th_1");
+    for (n, event) in [
+        json!({"type": "StepStarted", "step_id": "s", "step_name": "<b>x</b>\u{1b}[2J"}),
+        json!({"type": "SubagentStarted", "subagent_run_id": "r", "name": "**a**\u{7}"}),
+        json!({"type": "Raw", "source": "acp", "event": {"type": "evil\u{1b}[31m"}}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let envelope: Envelope = serde_json::from_value(json!({
+            "v": 1, "seq": n + 1, "thread_id": "th_1", "task_id": "tk_1", "run_id": "run_1",
+            "ts": "2026-10-27T22:00:00.000Z", "event": event
+        }))
+        .expect("envelope");
+        thread.apply(&envelope).expect("apply");
     }
+    let rows = texts(&thread_rows(&thread));
+    assert!(
+        rows.contains(&"Step <b>x</b>[2J: running".to_owned()),
+        "{rows:?}"
+    );
+    assert!(
+        rows.contains(&"Subagent **a**: running".to_owned()),
+        "{rows:?}"
+    );
+    assert!(
+        rows.contains(&"Agent event: evil[31m".to_owned()),
+        "{rows:?}"
+    );
 }
 
 // ---- row building ----------------------------------------------------------------------------
@@ -391,11 +455,11 @@ fn long_bodies_are_capped_with_a_more_row() {
     let mut diff = Vec::new();
     for item in items {
         match item {
-            client_core::view::Item::Tool(view) => tool_rows(view, &mut tool),
+            client_core::view::Item::Tool(view) => tool_rows(view, false, &mut tool),
             client_core::view::Item::Activity(view) if view.content.contains_key("output") => {
-                activity_rows(view, &mut terminal);
+                activity_rows(view, false, &mut terminal);
             }
-            client_core::view::Item::Activity(view) => activity_rows(view, &mut diff),
+            client_core::view::Item::Activity(view) => activity_rows(view, false, &mut diff),
             _ => {}
         }
     }
@@ -432,8 +496,13 @@ fn every_task_string_id_exists_in_the_catalog_and_is_used() {
                 && literal.chars().all(|c| c.is_ascii_lowercase() || c == '-')
                 && prefixes.iter().any(|p| literal.starts_with(p));
             // Element ids of the pane, not strings.
-            let is_element =
-                ["transcript-list", "transcript-scroll", "transcript-row"].contains(&literal);
+            let is_element = [
+                "transcript-list",
+                "transcript-scroll",
+                "transcript-row",
+                "transcript-more",
+            ]
+            .contains(&literal);
             if is_id && !is_element {
                 used.insert(literal.to_owned());
             }
@@ -650,4 +719,107 @@ fn the_pane_follows_a_growing_transcript(cx: &mut TestAppContext) {
         assert!(!visible.contains(&"message 0".to_owned()), "{visible:?}");
     })
     .expect("window is open");
+}
+
+// ---- expandable bodies -----------------------------------------------------------------------
+
+fn thread_with(events: Vec<serde_json::Value>) -> ThreadView {
+    let mut thread = ThreadView::new("th_1");
+    for (n, event) in events.into_iter().enumerate() {
+        let envelope: Envelope = serde_json::from_value(json!({
+            "v": 1, "seq": n + 1, "thread_id": "th_1", "task_id": "tk_1", "run_id": "run_1",
+            "ts": "2026-10-27T22:00:00.000Z", "event": event
+        }))
+        .expect("envelope");
+        thread.apply(&envelope).expect("apply");
+    }
+    thread
+}
+
+fn numbered_lines(count: usize) -> String {
+    (0..count)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn expanded_tool_terminal_and_diff_bodies_show_every_line() {
+    let long = numbered_lines(100);
+    let thread = thread_with(vec![
+        json!({"type": "ToolCallResult", "tool_call_id": "t", "content": [{"type": "text", "text": long}]}),
+        json!({"type": "Activity", "activity_id": "term", "activity_type": "terminal",
+               "mode": "snapshot", "content": {"terminal_id": "term", "output": long}}),
+        json!({"type": "Activity", "activity_id": "d", "activity_type": "diff", "mode": "snapshot",
+               "content": {"path": "a.rs", "old_text": null, "new_text": long}}),
+    ]);
+    let collapsed = thread_rows(&thread);
+    let keys: Vec<usize> = collapsed.iter().filter_map(|row| row.expand).collect();
+    // Each of the three items has a "more lines" row that names it.
+    assert_eq!(keys, [0, 1, 2], "{:#?}", texts(&collapsed));
+
+    let all: BTreeSet<usize> = keys.into_iter().collect();
+    let rows = thread_rows_expanded(&thread, &all);
+    let shown = texts(&rows);
+    assert!(!rows.iter().any(|r| r.text.contains("more lines")));
+    // Tool body, terminal output and diff each show the first and the last line.
+    assert_eq!(shown.iter().filter(|t| *t == "line 0").count(), 2);
+    assert_eq!(shown.iter().filter(|t| *t == "line 99").count(), 2);
+    assert_eq!(shown.iter().filter(|t| *t == "+ line 0").count(), 1);
+    assert_eq!(shown.iter().filter(|t| *t == "+ line 99").count(), 1);
+    // Collapsing again is a row away for each expanded item.
+    let less: Vec<_> = rows.iter().filter(|r| r.text == "Show less").collect();
+    assert_eq!(less.len(), 3);
+    // Expanding one item leaves the others capped.
+    let one = thread_rows_expanded(&thread, &BTreeSet::from([1]));
+    assert_eq!(one.iter().filter(|r| r.expand.is_some()).count(), 3);
+    assert!(texts(&one).contains(&"line 50".to_owned()));
+    assert!(!texts(&collapsed).contains(&"line 50".to_owned()));
+    assert!(
+        one.iter()
+            .any(|r| r.expand == Some(0) && r.text.contains("more lines"))
+    );
+}
+
+#[gpui_kit::test]
+fn clicking_more_lines_expands_the_body_and_show_less_collapses_it(cx: &mut TestAppContext) {
+    let thread = thread_with(vec![json!({"type": "ToolCallResult", "tool_call_id": "t",
+               "content": [{"type": "text", "text": numbered_lines(40)}]})]);
+    let (window, pane) = open_pane(cx, options(900., 1400.));
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+    let rows_text = |cx: &mut TestAppContext| cx.update(|cx| texts(pane.read(cx).rows()));
+    let collapsed = rows_text(cx);
+    assert!(!collapsed.contains(&"line 39".to_owned()));
+    assert!(collapsed.iter().any(|t| t.contains("more lines")));
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(MORE_ID, cx);
+        window.render_frame(cx);
+    })
+    .expect("window is open");
+    let expanded = rows_text(cx);
+    assert!(expanded.contains(&"line 39".to_owned()), "{expanded:?}");
+    assert!(!expanded.iter().any(|t| t.contains("more lines")));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let laid_out: Vec<String> = window
+            .find_all(ROW_ID)
+            .iter()
+            .map(|row| row.label().unwrap_or_default().to_owned())
+            .collect();
+        assert!(laid_out.contains(&"line 39".to_owned()), "{laid_out:?}");
+        window.click(MORE_ID, cx);
+        window.render_frame(cx);
+    })
+    .expect("window is open");
+    assert_eq!(rows_text(cx), collapsed);
+
+    // A new snapshot of the thread keeps what the viewer expanded.
+    cx.update_window(window, |_, window, cx| {
+        window.click(MORE_ID, cx);
+    })
+    .expect("window is open");
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+    assert!(rows_text(cx).contains(&"line 39".to_owned()));
 }
