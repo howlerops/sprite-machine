@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 83/241 (3 dropped) · in-flight M1A-006g,M2-003c,M2B-007b,WEB-001 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 80/120
+done 84/242 (3 dropped) · in-flight M1A-006g,M2B-007b,WEB-001 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 80/120
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 83/241 (3 dropped) · in-flight M1A-006g,M2-003c,M2B-007b,WEB-001 · blocke
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 59 | 30 | 4 |
+| P2 | 59 | 31 | 3 |
 | P3 | 20 | 1 | 0 |
-| P4 | 36 | 0 | 0 |
+| P4 | 37 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
@@ -52,7 +52,7 @@ done 83/241 (3 dropped) · in-flight M1A-006g,M2-003c,M2B-007b,WEB-001 · blocke
 | M2B-004f | worker | rust | todo | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
 | M2B-007a | worker | rust | done | sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout) |
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
-| M2-003c | worker | rust | assigned | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
+| M2-003c | worker | rust | done | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
 | M2B-007b | worker | rust | assigned | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
 | M2B-005c | worker | rust | todo | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
 | M2-011a | worker | rust | todo | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |

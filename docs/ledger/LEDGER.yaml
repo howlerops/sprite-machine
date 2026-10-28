@@ -2659,7 +2659,8 @@ items:
     title: 'hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 721d8e5; workspace 774 passed 0 failed, clippy native/live/wasm clean, no tokio runtime, hub-test signin 6 / devices / authz / thread_create / machine_do PASS, tracer PASS; leader checked role_cap min()"
     attempt: 1
     assignee: "worker:sonnet"
     priority: 1
