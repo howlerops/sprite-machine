@@ -70,3 +70,6 @@
 2026-10-28T02:55Z M2-016 assigned→done merged bfc51e3 (haiku); discovered: D1 runtime route + retention/audit-export jobs noted for later M2 items; agents↔machines FK → M2B-002
 2026-10-28T02:55Z M0-008b todo→assigned attempt 1 (haiku)
 2026-10-28T02:55Z leader: briefs now forbid claude-code-remote / session / messaging tools (workers called list_sessions/send_message)
+2026-10-28T03:07Z M0-008b assigned→done merged acea2f8 (haiku; one denied archive_session call, commit msg mixup self-fixed)
+2026-10-28T03:07Z leader: rust lane cap 2→3 (non-GPUI builds are light; disk watched)
+2026-10-28T03:07Z M1A-009 (sonnet) + M1A-004 (haiku) assigned attempt 1

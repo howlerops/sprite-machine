@@ -5,8 +5,8 @@ version: 1
 plan: docs/PLAN-v2-ade.md
 branch: v2
 models: { default: haiku, high_risk_or_retry: sonnet, never: opus } # user cost policy 2026-10-28
-max_parallel: 2 # Rust workers; the docs and client lanes add their own slots (see lanes)
-lanes: { rust: 2, docs: 1, client: 1, ts: 1 } # per-lane in-flight caps; client (GPUI) is serialized
+max_parallel: 3 # Rust workers; the docs and client lanes add their own slots (see lanes)
+lanes: { rust: 3, docs: 1, client: 1, ts: 1 } # per-lane in-flight caps; client (GPUI) is serialized
 budget: # sized for P0–P2; the leader re-raises max_total_attempts at each phase review
   max_total_attempts: 120
   max_worker_minutes: 45
@@ -427,7 +427,8 @@ items:
     title: 'hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests'
     milestone: M0
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged acea2f8; verify: workspace_do 16 passed, workspace-dev-test OK (both Workers, start/status/stop + 409/404), tracer PASS, native + wasm32 clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
@@ -777,6 +778,9 @@ items:
     title: 'sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal})'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     size: M
     deps: [M1A-003]
     paths:
@@ -947,6 +951,9 @@ items:
     title: 'Durable store (SQLite) + ACP session re-attach after restart'
     milestone: M1a
     phase: P1
+    status: "assigned"
+    assignee: "worker:sonnet"
+    attempt: 1
     size: M
     risk: high
     deps: [M1A-003]
