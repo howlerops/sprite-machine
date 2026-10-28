@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::cache::{Cache, CacheError};
+use crate::connectivity::Connectivity;
 
 // ---- injected time and randomness ----------------------------------------------------------
 
@@ -385,6 +386,7 @@ pub struct FlushReport {
 pub struct Outbox {
     entries: BTreeMap<i64, QueuedIntent>,
     policy: RetryPolicy,
+    connectivity: Connectivity,
 }
 
 /// A fresh idempotency key: `idk_` plus 32 random hex digits.
@@ -408,11 +410,22 @@ impl Outbox {
             entry.local_id = id;
             entries.insert(id, entry);
         }
-        Ok(Self { entries, policy })
+        Ok(Self {
+            entries,
+            policy,
+            connectivity: Connectivity::default(),
+        })
     }
 
     pub fn policy(&self) -> RetryPolicy {
         self.policy
+    }
+
+    /// The hub link as the outbox last saw it. A transport failure makes it `Offline`; any
+    /// answer from the hub (whatever the status) makes it `Online` again. `Connecting` until
+    /// the first POST gets a result.
+    pub fn connectivity(&self) -> Connectivity {
+        self.connectivity
     }
 
     /// Queues `intent` with a new idempotency key. Returns its local id.
@@ -520,6 +533,8 @@ impl Outbox {
         response: PostResponse,
         rng: &mut dyn Random,
     ) -> Result<IntentState, OutboxError> {
+        // Any answer proves the hub is reachable, so the link is up whatever the status.
+        self.connectivity = Connectivity::Online;
         let status = response.status;
         let state = match status {
             200..=299 => IntentState::Done {
@@ -565,6 +580,7 @@ impl Outbox {
         error: &TransportError,
         rng: &mut dyn Random,
     ) -> Result<IntentState, OutboxError> {
+        self.connectivity = Connectivity::Offline;
         self.schedule_retry(cache, local_id, now_ms, None, error.0.clone(), rng)
     }
 

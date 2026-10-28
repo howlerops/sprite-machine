@@ -66,14 +66,52 @@ impl Cache {
         Ok(u64::try_from(last).unwrap_or(0))
     }
 
-    /// Stores `envelopes` of `thread_id` in one transaction. Envelopes at or below the stored
-    /// seq are duplicates and are skipped; a seq that skips ahead is an error. Returns the new
-    /// last seq.
+    /// Stores the wire text of envelopes of `thread_id`, byte for byte (see
+    /// [`Cache::raw_events`]). Each text must parse as an envelope, or nothing is stored. An
+    /// event this build does not know keeps its original JSON, so a newer build can read it
+    /// after a restart. Duplicate and gap rules are those of [`Cache::append_events`].
+    pub fn append_raw(&mut self, thread_id: &str, texts: &[&str]) -> Result<u64, CacheError> {
+        let envelopes = texts
+            .iter()
+            .map(|text| serde_json::from_str::<Envelope>(text))
+            .collect::<Result<Vec<_>, _>>()?;
+        let items: Vec<(&Envelope, &str)> = envelopes.iter().zip(texts.iter().copied()).collect();
+        self.store(thread_id, &items)
+    }
+
+    /// Stores `envelopes` of `thread_id` in one transaction, re-serialised from the typed
+    /// form. Envelopes at or below the stored seq are duplicates and are skipped; a seq that
+    /// skips ahead is an error. Returns the new last seq.
+    ///
+    /// Lossy for `Event::Unknown` (it serialises as `{"type":"Unknown"}`): a caller holding
+    /// wire text should use [`Cache::append_raw`] instead.
     pub fn append_events(
         &mut self,
         thread_id: &str,
         envelopes: &[Envelope],
     ) -> Result<u64, CacheError> {
+        let texts = envelopes
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<Vec<String>, _>>()?;
+        let items: Vec<(&Envelope, &str)> = envelopes
+            .iter()
+            .zip(texts.iter().map(String::as_str))
+            .collect();
+        self.store(thread_id, &items)
+    }
+
+    /// The stored wire text of every envelope of `thread_id`, in `seq` order, exactly as it
+    /// was appended.
+    pub fn raw_events(&self, thread_id: &str) -> Result<Vec<String>, CacheError> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT envelope FROM events WHERE thread_id = ?1 ORDER BY seq")?;
+        let rows = statement.query_map(params![thread_id], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    fn store(&mut self, thread_id: &str, items: &[(&Envelope, &str)]) -> Result<u64, CacheError> {
         let tx = self.conn.transaction()?;
         let mut last = {
             let stored: i64 = tx.query_row(
@@ -83,7 +121,7 @@ impl Cache {
             )?;
             u64::try_from(stored).unwrap_or(0)
         };
-        for envelope in envelopes {
+        for (envelope, text) in items {
             if envelope.thread_id != thread_id {
                 return Err(CacheError::WrongThread {
                     thread_id: thread_id.to_owned(),
@@ -100,11 +138,10 @@ impl Cache {
                     got: envelope.seq,
                 });
             }
-            let json = serde_json::to_string(envelope)?;
             let seq = i64::try_from(envelope.seq).unwrap_or(i64::MAX);
             tx.execute(
                 "INSERT INTO events (thread_id, seq, envelope) VALUES (?1, ?2, ?3)",
-                params![thread_id, seq, json],
+                params![thread_id, seq, text],
             )?;
             last = envelope.seq;
         }
