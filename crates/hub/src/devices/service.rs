@@ -12,6 +12,7 @@ use super::codes::{
     display_user_code, hash_device_code, new_device_code, new_user_code, normalize_user_code,
 };
 use super::limits;
+use super::trust::{self, Verdict};
 use crate::audit::{self, Event};
 use crate::auth::Principal;
 use crate::auth::token::new_id;
@@ -327,9 +328,13 @@ impl Pairing {
 pub async fn poll(
     db: &impl Db,
     control: &impl MachineControl,
+    client_ip: Option<&str>,
     device_code: &str,
     now_ms: i64,
 ) -> Result<Value, PollError> {
+    if let Some(limited) = limits::check_token(db, client_ip, now_ms).await? {
+        return Err(limited.into_api().into());
+    }
     let rows = db
         .query(
             "SELECT id, status, expires_at_ms, interval_seconds, last_poll_at_ms, org_id, \
@@ -628,6 +633,8 @@ pub async fn revoke(
 /// `PUT /v1/devices/policy {require_trusted_devices: bool}`: admin. See `trust.rs`.
 pub async fn set_policy(
     db: &impl Db,
+    control: &impl MachineControl,
+    dev_fixtures: bool,
     caller: &Principal,
     body: &Value,
     request_id: &str,
@@ -657,5 +664,47 @@ pub async fn set_policy(
     )
     .await
     .map_err(db_failure)?;
+    if require {
+        close_untrusted_tunnels(db, control, &caller.org_id, dev_fixtures).await?;
+    }
     Ok(json!({ "require_trusted_devices": require }))
+}
+
+/// Turning the setting on closes the live tunnels of the org's machines that are no longer
+/// trusted (M2B-005c): the Machine DO closes the socket with `auth_revoked` (tunnel.md §3.8) and
+/// the machine must re-pair. The org's machines are its registry rows and the machines its
+/// threads are hosted on (`thread_hosts`), which also reaches machines without a row. Every
+/// machine is tried; the first failure is returned after the rest were. Returns how many were told.
+async fn close_untrusted_tunnels(
+    db: &impl Db,
+    control: &impl MachineControl,
+    org_id: &str,
+    dev_fixtures: bool,
+) -> Result<usize, ApiError> {
+    let rows = db
+        .query(
+            "SELECT id FROM machines WHERE org_id = ? AND revoked_at IS NULL \
+             UNION SELECT machine_id AS id FROM thread_hosts WHERE org_id = ?",
+            &[org_id.into(), org_id.into()],
+        )
+        .await
+        .map_err(db_failure)?;
+    let mut closed = 0;
+    let mut failure = None;
+    for row in &rows {
+        let machine_id = text(row, "id").map_err(db_failure)?;
+        let verdict = trust::tunnel_verdict(db, &machine_id, dev_fixtures)
+            .await
+            .map_err(db_failure)?;
+        if verdict != Verdict::Untrusted {
+            continue;
+        }
+        match control.revoke(&machine_id).await {
+            Ok(()) => closed += 1,
+            // A thread host whose Machine DO was never provisioned has no tunnel to close.
+            Err(error) if error.status == 404 => {}
+            Err(error) => failure = failure.or(Some(error)),
+        }
+    }
+    failure.map_or(Ok(closed), Err)
 }

@@ -619,12 +619,31 @@ fn the_tunnel_refuses_a_machine_that_is_not_vouched_for_when_the_org_requires_tr
         assert_eq!(reply.status, 200, "{}", reply.body);
     };
 
-    // Setting off: it connects.
-    policy(false);
-    drop(Ws::open_tunnel(&machine, &credential));
+    // The machine hosts a thread of the dev org, which is how the hub finds it on a policy flip.
+    let hosted = http(
+        "POST",
+        &format!("/v1/dev/threads/th_{machine}/host"),
+        Some("dev"),
+        Some(&json!({ "machine_id": machine })),
+    );
+    assert_eq!(hosted.status, 200, "{}", hosted.body);
 
-    // Setting on: refused before the upgrade, the status of a missing credential (tunnel.md §2).
+    // Setting off: it connects, and stays connected.
+    policy(false);
+    let mut live = Ws::open_tunnel(&machine, &credential);
+    live.send_text(&hello(&machine).to_string());
+    assert_eq!(live.json()["t"], "welcome");
+
+    // Setting on (M2B-005c): the open tunnel is closed with auth_revoked ...
     policy(true);
+    let close = live.json();
+    assert_eq!(
+        (close["t"].as_str(), close["code"].as_str()),
+        (Some("close"), Some("auth_revoked")),
+        "{close}"
+    );
+    // ... and a new one is refused before the upgrade, the status of a missing credential
+    // (tunnel.md §2).
     let refused = Ws::try_open_tunnel(&machine, &credential)
         .err()
         .expect("an unvouched machine must be refused");
@@ -655,8 +674,13 @@ fn the_tunnel_refuses_a_machine_that_is_not_vouched_for_when_the_org_requires_tr
     ws.send_text(&hello(&device_id).to_string());
     assert_eq!(ws.json()["t"], "welcome");
 
+    // The Machine DO revoked the unvouched machine when the setting turned on; an admin-issued
+    // or paired machine was left alone (above), and turning the setting off does not undo that.
     policy(false);
-    drop(Ws::open_tunnel(&machine, &credential));
+    let mut revoked = Ws::open_tunnel(&machine, &credential);
+    revoked.send_text(&hello(&machine).to_string());
+    let close = revoked.json();
+    assert_eq!(close["code"], "auth_revoked", "{close}");
 }
 
 #[test]

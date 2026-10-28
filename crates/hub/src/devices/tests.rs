@@ -187,7 +187,7 @@ fn approve(db: &Fake, who: &Principal, user_code: &str, now: i64) -> Result<Valu
 }
 
 fn poll(db: &Fake, control: &FakeControl, code: &str, now: i64) -> Result<Value, PollError> {
-    block_on(service::poll(db, control, code, now))
+    block_on(service::poll(db, control, None, code, now))
 }
 
 fn rfc(error: &PollError) -> &'static str {
@@ -445,10 +445,19 @@ fn list_revoke_and_policy_reuse_the_machines_registry() {
     assert!(!block_on(trust::machine_may_connect(&db, &machine_id)).expect("trust"));
 
     // The policy: admin only, stored on the org, shown by the list.
-    let bad = block_on(service::set_policy(&db, &owner, &json!({}), "r"));
+    let bad = block_on(service::set_policy(
+        &db,
+        &control,
+        false,
+        &owner,
+        &json!({}),
+        "r",
+    ));
     assert_eq!(bad.expect_err("shape").status, 400);
     let denied = block_on(service::set_policy(
         &db,
+        &control,
+        false,
         &member,
         &json!({ "require_trusted_devices": true }),
         "r",
@@ -456,6 +465,8 @@ fn list_revoke_and_policy_reuse_the_machines_registry() {
     assert_eq!(denied.expect_err("member").status, 403);
     block_on(service::set_policy(
         &db,
+        &control,
+        false,
         &owner,
         &json!({ "require_trusted_devices": true }),
         "r",
@@ -474,8 +485,14 @@ fn verdict(db: &Fake, machine_id: &str, dev: bool) -> trust::Verdict {
 }
 
 fn set_trusted(db: &Fake, owner: &Principal, on: bool) {
+    set_trusted_with(db, &FakeControl::default(), false, owner, on);
+}
+
+fn set_trusted_with(db: &Fake, control: &FakeControl, dev: bool, owner: &Principal, on: bool) {
     block_on(service::set_policy(
         db,
+        control,
+        dev,
         owner,
         &json!({ "require_trusted_devices": on }),
         "r",

@@ -321,6 +321,7 @@ impl DoControl<'_> {
         .await
         {
             Ok((200, _)) => Ok(()),
+            Ok((404, text)) => Err(ApiError::not_found(text)),
             Ok((409, text)) => Err(ApiError::new(409, "conflict", text)),
             Ok((status, text)) => Err(ApiError::internal(format!(
                 "machine DO {action}: HTTP {status} {text}"
