@@ -10,16 +10,23 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
+use futures_util::StreamExt;
 use runner::login::flow::normalize_hub;
 use runner::login::{
     Backend, Confirm, CredentialStore, Keychain, KeychainCredentials, Login, LoginError, Sleeper,
-    login,
+    login, logout, status,
 };
 use runner::tunnel::CredentialSource;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{
+    Callback, ErrorResponse, Request, Response,
+};
+use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
 
 const CREDENTIAL: &str = "smm_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const DEVICE_CODE: &str = "sdc_secretdevicecode";
@@ -717,4 +724,260 @@ async fn sm_login_without_yes_and_without_a_terminal_does_not_store() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Join org Acme Inc"), "{stdout}");
     assert!(!stdout.contains(CREDENTIAL));
+}
+
+// ---- sm logout and sm status ----------------------------------------------------------------
+
+/// The keychain's secret for [`sample_login`], as the store writes it.
+fn sample_login_json() -> String {
+    json!({
+        "hub": "https://hub.example",
+        "machine_id": "mch_abc",
+        "credential": CREDENTIAL,
+    })
+    .to_string()
+}
+
+#[test]
+fn logout_wipes_the_keychain_and_the_file() {
+    let dir = TempDir::new().expect("dir");
+    let keychain = Arc::new(MemoryKeychain::default());
+    let store = CredentialStore::with_keychain(
+        Box::new(Shared(Arc::clone(&keychain))),
+        dir.path().join("sm").join("credential.json"),
+    );
+    let path = store.file_path().to_path_buf();
+    // A file left behind by an earlier fallback, and a secret in the keychain.
+    file_store(&dir).save(&sample_login()).expect("save");
+    *keychain.secret.lock().expect("secret") = Some(sample_login_json());
+    assert!(path.exists());
+
+    let mut out = Vec::new();
+    logout(&store, &mut out).expect("logout");
+
+    assert!(keychain.secret.lock().expect("secret").is_none());
+    assert!(!path.exists(), "the file is removed");
+    assert_eq!(store.load().expect("load"), None);
+    let shown = String::from_utf8(out).expect("utf8");
+    assert!(shown.contains("mch_abc"), "{shown}");
+    assert!(!shown.contains(CREDENTIAL), "{shown}");
+}
+
+#[test]
+fn logout_when_not_logged_in_says_so() {
+    let dir = TempDir::new().expect("dir");
+    let mut out = Vec::new();
+    logout(&file_store(&dir), &mut out).expect("logout");
+    assert!(
+        String::from_utf8(out)
+            .expect("utf8")
+            .contains("not logged in")
+    );
+}
+
+#[test]
+fn status_shows_hub_machine_and_presence_but_never_the_credential() {
+    let dir = TempDir::new().expect("dir");
+    let store = file_store(&dir);
+
+    let mut out = Vec::new();
+    status(&store, &mut out).expect("status");
+    let shown = String::from_utf8(out).expect("utf8");
+    assert!(shown.contains("credential: none"), "{shown}");
+
+    store.save(&sample_login()).expect("save");
+    let mut out = Vec::new();
+    status(&store, &mut out).expect("status");
+    let shown = String::from_utf8(out).expect("utf8");
+    assert!(shown.contains("https://hub.example"), "{shown}");
+    assert!(shown.contains("mch_abc"), "{shown}");
+    assert!(shown.contains("credential: present"), "{shown}");
+    assert!(
+        !shown.contains(CREDENTIAL) && !shown.contains("smm_"),
+        "{shown}"
+    );
+}
+
+#[tokio::test]
+async fn sm_status_and_sm_logout_use_the_forced_credential_file() {
+    let dir = TempDir::new().expect("dir");
+    let file = dir.path().join("forced").join("cred.json");
+    CredentialStore::file_only(file.clone())
+        .save(&sample_login())
+        .expect("save");
+
+    let sm = |args: &[&str]| {
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_sm"));
+        command
+            .args(args)
+            .env("SM_CREDENTIAL_FILE", &file)
+            .env("HOME", dir.path())
+            .env_remove("XDG_CONFIG_HOME");
+        command.output()
+    };
+
+    let output = sm(&["status"]).await.expect("run sm status");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(output.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("mch_abc") && stdout.contains("https://hub.example"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("credential: present"), "{stdout}");
+    assert!(!stdout.contains(CREDENTIAL), "{stdout}");
+
+    let output = sm(&["logout"]).await.expect("run sm logout");
+    assert!(output.status.success());
+    assert!(!file.exists(), "sm logout removed the file");
+
+    let output = sm(&["status"]).await.expect("run sm status");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(stdout.contains("credential: none"), "{stdout}");
+
+    let output = sm(&["status", "extra"]).await.expect("run sm status");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("usage: sm status"));
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn on_linux_the_login_persists_in_the_0600_file_across_processes() {
+    // keyutils is kernel memory and is lost at reboot, so Linux keeps the credential in the 0600
+    // file: `sm login` writes it under $XDG_CONFIG_HOME, and a later `sm status` (a new process)
+    // still finds it.
+    let hub = FakeHub::start(vec![granted()]).await.with_interval(1);
+    let dir = TempDir::new().expect("dir");
+    let config = dir.path().join("config");
+    let file = config.join("sm").join("credential.json");
+
+    let login_output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sm"))
+        .args(["login", "--hub", &hub.url, "--yes"])
+        .env("HOME", dir.path())
+        .env("XDG_CONFIG_HOME", &config)
+        .env_remove("SM_CREDENTIAL_FILE")
+        .output()
+        .await
+        .expect("run sm login");
+    assert!(
+        login_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&login_output.stderr)
+    );
+    assert_eq!(mode(&file), 0o600);
+
+    let status_output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sm"))
+        .arg("status")
+        .env("HOME", dir.path())
+        .env("XDG_CONFIG_HOME", &config)
+        .env_remove("SM_CREDENTIAL_FILE")
+        .output()
+        .await
+        .expect("run sm status");
+    let stdout = String::from_utf8_lossy(&status_output.stdout).into_owned();
+    assert!(stdout.contains("credential: present"), "{stdout}");
+    assert!(stdout.contains("mch_abc"), "{stdout}");
+}
+
+// ---- the run path: the tunnel dials the stored hub as the stored machine --------------------
+
+/// What the fake hub saw of one upgrade request.
+struct Upgrade {
+    path: String,
+    authorization: String,
+}
+
+/// Records the upgrade request and echoes the subprotocol, as the hub does.
+struct Record(mpsc::UnboundedSender<Upgrade>);
+
+impl Callback for Record {
+    fn on_request(self, req: &Request, mut resp: Response) -> Result<Response, ErrorResponse> {
+        let authorization = req
+            .headers()
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let _ = self.0.send(Upgrade {
+            path: req.uri().path().to_owned(),
+            authorization,
+        });
+        if let Some(protocol) = req.headers().get(SEC_WEBSOCKET_PROTOCOL) {
+            resp.headers_mut()
+                .insert(SEC_WEBSOCKET_PROTOCOL, protocol.clone());
+        }
+        Ok(resp)
+    }
+}
+
+/// Accepts tunnel upgrades; for each, forwards the upgrade and the first frame (`hello`).
+async fn serve_tunnel(
+    listener: TcpListener,
+    upgrades: mpsc::UnboundedSender<Upgrade>,
+    hellos: mpsc::UnboundedSender<Value>,
+) {
+    while let Ok((stream, _)) = listener.accept().await {
+        let upgrades = upgrades.clone();
+        let hellos = hellos.clone();
+        tokio::spawn(async move {
+            let Ok(mut ws) = tokio_tungstenite::accept_hdr_async(stream, Record(upgrades)).await
+            else {
+                return;
+            };
+            if let Some(Ok(Message::Text(text))) = ws.next().await {
+                let _ = hellos.send(serde_json::from_str(&text).unwrap_or(Value::Null));
+            }
+            // Keep the socket open until the runner goes away.
+            while ws.next().await.is_some() {}
+        });
+    }
+}
+
+#[tokio::test]
+async fn sm_rc_dials_the_stored_hub_as_the_stored_machine_with_the_stored_credential() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let (upgrades_tx, mut upgrades) = mpsc::unbounded_channel();
+    let (hellos_tx, mut hellos) = mpsc::unbounded_channel();
+    let hub = tokio::spawn(serve_tunnel(listener, upgrades_tx, hellos_tx));
+
+    let dir = TempDir::new().expect("dir");
+    let file = dir.path().join("forced").join("cred.json");
+    CredentialStore::file_only(file.clone())
+        .save(&Login {
+            hub: format!("http://127.0.0.1:{port}"),
+            machine_id: "mch_run".to_owned(),
+            credential: CREDENTIAL.to_owned(),
+        })
+        .expect("save");
+
+    // No harness on PATH: the server runs with no agents, which is all the tunnel needs.
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_sm"))
+        .arg("rc")
+        .env("SM_CREDENTIAL_FILE", &file)
+        .env("SM_STATE_DIR", dir.path().join("state"))
+        .env("HOME", dir.path())
+        .env("PATH", dir.path())
+        .env_remove("XDG_CONFIG_HOME")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn sm rc");
+
+    let wait = Duration::from_secs(20);
+    let upgrade = tokio::time::timeout(wait, upgrades.recv())
+        .await
+        .expect("the runner dialled the hub")
+        .expect("upgrade");
+    assert_eq!(upgrade.path, "/v1/machines/mch_run/tunnel");
+    assert_eq!(upgrade.authorization, format!("Bearer {CREDENTIAL}"));
+    let hello = tokio::time::timeout(wait, hellos.recv())
+        .await
+        .expect("the hello frame")
+        .expect("hello");
+    assert_eq!(hello["t"], "hello");
+
+    let _ = child.kill().await;
+    hub.abort();
 }
