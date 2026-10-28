@@ -1,0 +1,71 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Summarize."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "First message, "
+          },
+          "messageId": "m-1"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "still the first."
+          },
+          "messageId": "m-1"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "A second message."
+          },
+          "messageId": "m-2"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_thought_chunk",
+          "content": {
+            "type": "text",
+            "text": "Reasoning without an id."
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

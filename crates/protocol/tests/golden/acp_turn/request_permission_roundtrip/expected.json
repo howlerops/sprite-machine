@@ -1,0 +1,452 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Edit the parser."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_2",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_2",
+      "delta": "I'll edit the parser."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "I'll edit the parser."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_2"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_e1",
+      "title": "Edit src/parser.rs",
+      "kind": "edit",
+      "status": "pending"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_e1",
+        "title": "Edit src/parser.rs",
+        "kind": "edit",
+        "status": "pending",
+        "content": [
+          {
+            "type": "diff",
+            "path": "src/parser.rs",
+            "newText": "fn parse() -> Tree {}\n",
+            "oldText": "fn parse() {}\n"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "call_e1:src/parser.rs",
+      "activity_type": "diff",
+      "mode": "snapshot",
+      "content": {
+        "tool_call_id": "call_e1",
+        "path": "src/parser.rs",
+        "old_text": "fn parse() {}\n",
+        "new_text": "fn parse() -> Tree {}\n"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_e1",
+        "title": "Edit src/parser.rs",
+        "kind": "edit",
+        "status": "pending",
+        "content": [
+          {
+            "type": "diff",
+            "path": "src/parser.rs",
+            "newText": "fn parse() -> Tree {}\n",
+            "oldText": "fn parse() {}\n"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "Interrupt",
+      "interrupt_id": "int_1",
+      "kind": "approval",
+      "title": "Edit src/parser.rs",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "tool_call_id": "call_e1",
+      "options": [
+        {
+          "option_id": "allow_once",
+          "name": "Allow once",
+          "kind": "allow_once"
+        },
+        {
+          "option_id": "allow_always",
+          "name": "Always allow",
+          "kind": "allow_always"
+        },
+        {
+          "option_id": "reject_once",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionId": "sess_7f3a",
+        "toolCall": {
+          "toolCallId": "call_e1",
+          "kind": "edit",
+          "status": "pending",
+          "title": "Edit src/parser.rs"
+        },
+        "options": [
+          {
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "allow_always",
+            "name": "Always allow",
+            "kind": "allow_always"
+          },
+          {
+            "optionId": "reject_once",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "interrupt",
+        "interrupt_ids": [
+          "int_1"
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 10,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:08.000Z",
+    "event": {
+      "type": "InterruptResolved",
+      "interrupt_id": "int_1",
+      "outcome": {
+        "type": "selected",
+        "option_id": "allow_once"
+      },
+      "resolved_by": {
+        "kind": "user",
+        "id": "usr_1",
+        "device_id": "dev_1"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 11,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:10.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "resume",
+      "parent_run_id": "run_1"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 12,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_3",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 13,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_3",
+      "delta": "Waiting for approval."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Waiting for approval."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 14,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_3"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 15,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_e1",
+      "status": "in_progress"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_e1",
+        "status": "in_progress"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 16,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:07.000Z",
+    "event": {
+      "type": "StateSnapshot",
+      "scope": "usage",
+      "snapshot": {
+        "context_used": 1200,
+        "context_size": 200000,
+        "cost": null
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "usage_update",
+        "used": 1200,
+        "size": 200000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 17,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:11.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_e1",
+      "status": "completed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_e1",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 18,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:12.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_4",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 19,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:12.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_4",
+      "delta": "Done."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Done."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 20,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:13.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_4"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 21,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:13.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

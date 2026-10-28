@@ -1,0 +1,134 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Replay."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "Raw",
+      "source": "acp",
+      "event": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "an earlier prompt, replayed"
+        }
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "an earlier prompt, replayed"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_2",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_2",
+      "delta": "Understood."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Understood."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_2"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

@@ -13,3 +13,8 @@ serde_json.workspace = true
 # resolves (=1.12.0), so the runner and protocol share one set of types. Depends on
 # the types-only schema crate, not the SDK, to keep uuid/getrandom out of wasm.
 agent-client-protocol-schema = { version = "=1.12.0", default-features = false }
+
+[dev-dependencies]
+# Golden tests validate every emitted envelope against crates/protocol/schemas/turn-event.
+# Same pin as crates/agui-fixture.
+jsonschema = { version = "=0.60.2", default-features = false }

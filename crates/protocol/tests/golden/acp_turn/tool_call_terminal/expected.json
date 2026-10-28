@@ -1,0 +1,380 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Run the tests."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_t1",
+      "title": "Run cargo test",
+      "kind": "execute",
+      "status": "in_progress"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_t1",
+        "title": "Run cargo test",
+        "kind": "execute",
+        "status": "in_progress",
+        "rawInput": {
+          "command": "cargo test -p parser"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "ToolCallArgs",
+      "tool_call_id": "call_t1",
+      "raw_input": {
+        "command": "cargo test -p parser"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_t1",
+        "title": "Run cargo test",
+        "kind": "execute",
+        "status": "in_progress",
+        "rawInput": {
+          "command": "cargo test -p parser"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_1",
+      "activity_type": "terminal",
+      "mode": "snapshot",
+      "content": {
+        "terminal_id": "term_1",
+        "command": "cargo test -p parser",
+        "cwd": "/workspace"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_1",
+      "activity_type": "terminal",
+      "mode": "snapshot",
+      "content": {
+        "terminal_id": "term_1",
+        "tool_call_id": "call_t1",
+        "command": "cargo test -p parser",
+        "cwd": "/workspace"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_t1",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "term_1"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_1",
+      "activity_type": "terminal",
+      "mode": "append",
+      "content": {
+        "terminal_id": "term_1",
+        "output": "running 3 tests\n"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_1",
+      "activity_type": "terminal",
+      "mode": "append",
+      "content": {
+        "terminal_id": "term_1",
+        "output": "test result: ok. 3 passed\n"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:07.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_1",
+      "activity_type": "terminal",
+      "mode": "snapshot",
+      "content": {
+        "terminal_id": "term_1",
+        "tool_call_id": "call_t1",
+        "command": "cargo test -p parser",
+        "cwd": "/workspace",
+        "output": "running 3 tests\ntest result: ok. 3 passed\n",
+        "exit": {
+          "exit_code": 0,
+          "signal": null
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 10,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:08.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_t1",
+      "status": "completed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_t1",
+        "status": "completed",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "term_1"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 11,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:09.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_t2",
+      "title": "Run a slow command",
+      "kind": "execute",
+      "status": "in_progress"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_t2",
+        "title": "Run a slow command",
+        "kind": "execute",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "term_2"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 12,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:09.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_2",
+      "activity_type": "terminal",
+      "mode": "snapshot",
+      "content": {
+        "terminal_id": "term_2",
+        "tool_call_id": "call_t2"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_t2",
+        "title": "Run a slow command",
+        "kind": "execute",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "term_2"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 13,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:10.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_2",
+      "activity_type": "terminal",
+      "mode": "append",
+      "content": {
+        "terminal_id": "term_2",
+        "output": "working..."
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 14,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:11.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "term_2",
+      "activity_type": "terminal",
+      "mode": "snapshot",
+      "content": {
+        "terminal_id": "term_2",
+        "tool_call_id": "call_t2",
+        "output": "working...",
+        "exit": {
+          "exit_code": null,
+          "signal": "SIGKILL"
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 15,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:12.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_t2",
+      "status": "failed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_t2",
+        "status": "failed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 16,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:13.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

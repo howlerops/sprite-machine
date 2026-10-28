@@ -1,0 +1,103 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 1000,
+          "size": 200000
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "nobody is listening"
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_x",
+          "title": "Ignored",
+          "kind": "other",
+          "status": "pending"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "plan",
+          "entries": [
+            {
+              "content": "ignored",
+              "priority": "low",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "notice",
+          "severity": "info",
+          "title": "ignored"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "session_info_update",
+          "title": "Warm-up"
+        }
+      }
+    },
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Now for real."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Hello."
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

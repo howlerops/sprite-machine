@@ -1,0 +1,100 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Open the report."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_r1",
+          "title": "Fetch report",
+          "kind": "fetch",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_r1",
+          "status": "completed",
+          "content": [
+            {
+              "type": "content",
+              "content": {
+                "type": "text",
+                "text": "plain text"
+              }
+            },
+            {
+              "type": "content",
+              "content": {
+                "type": "resource_link",
+                "name": "report.pdf",
+                "uri": "https://example.com/report.pdf",
+                "mimeType": "application/pdf",
+                "size": 1024
+              }
+            },
+            {
+              "type": "content",
+              "content": {
+                "type": "resource_link",
+                "name": "insecure",
+                "uri": "http://example.com/insecure"
+              }
+            },
+            {
+              "type": "content",
+              "content": {
+                "type": "image",
+                "data": "iVBORw0KGgo=",
+                "mimeType": "image/png"
+              }
+            },
+            {
+              "type": "content",
+              "content": {
+                "type": "resource",
+                "resource": {
+                  "uri": "file:///workspace/a.txt",
+                  "mimeType": "text/plain",
+                  "text": "embedded text"
+                }
+              }
+            },
+            {
+              "type": "content",
+              "content": {
+                "type": "resource",
+                "resource": {
+                  "uri": "file:///workspace/b.bin",
+                  "mimeType": "application/octet-stream",
+                  "blob": "AAEC"
+                }
+              }
+            }
+          ],
+          "rawOutput": {
+            "status": 200
+          }
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

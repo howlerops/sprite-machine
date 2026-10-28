@@ -1,0 +1,81 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Plan it."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "plan",
+          "entries": [
+            {
+              "content": "Read the failing test",
+              "priority": "high",
+              "status": "in_progress"
+            },
+            {
+              "content": "Fix the trailing newline handling",
+              "priority": "high",
+              "status": "pending"
+            },
+            {
+              "content": "Run the parser test suite",
+              "priority": "medium",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Working on step one."
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "plan",
+          "entries": [
+            {
+              "content": "Read the failing test",
+              "priority": "high",
+              "status": "completed"
+            },
+            {
+              "content": "Fix the trailing newline handling",
+              "priority": "high",
+              "status": "in_progress"
+            },
+            {
+              "content": "Run the parser test suite",
+              "priority": "low",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

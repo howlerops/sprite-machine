@@ -1,0 +1,86 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Configure."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "config_option_update",
+          "configOptions": [
+            {
+              "id": "model",
+              "name": "Model",
+              "category": "model",
+              "type": "select",
+              "currentValue": "fast",
+              "options": [
+                {
+                  "value": "fast",
+                  "name": "Fast"
+                },
+                {
+                  "value": "smart",
+                  "name": "Smart",
+                  "description": "Slower"
+                }
+              ]
+            },
+            {
+              "id": "thinking",
+              "name": "Extended thinking",
+              "type": "boolean",
+              "currentValue": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "config_option_update",
+          "configOptions": [
+            {
+              "id": "model",
+              "name": "Model",
+              "category": "model",
+              "type": "select",
+              "currentValue": "smart",
+              "options": [
+                {
+                  "value": "fast",
+                  "name": "Fast"
+                },
+                {
+                  "value": "smart",
+                  "name": "Smart",
+                  "description": "Slower"
+                }
+              ]
+            },
+            {
+              "id": "thinking",
+              "name": "Extended thinking",
+              "type": "boolean",
+              "currentValue": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

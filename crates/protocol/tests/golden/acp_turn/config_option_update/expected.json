@@ -1,0 +1,208 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Configure."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "StateSnapshot",
+      "scope": "session",
+      "snapshot": {
+        "available_commands": [],
+        "current_mode_id": null,
+        "modes": [],
+        "config_options": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "fast",
+            "options": [
+              {
+                "value": "fast",
+                "name": "Fast"
+              },
+              {
+                "value": "smart",
+                "name": "Smart",
+                "description": "Slower"
+              }
+            ]
+          },
+          {
+            "id": "thinking",
+            "name": "Extended thinking",
+            "type": "boolean",
+            "currentValue": false
+          }
+        ]
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "fast",
+            "options": [
+              {
+                "value": "fast",
+                "name": "Fast"
+              },
+              {
+                "value": "smart",
+                "name": "Smart",
+                "description": "Slower"
+              }
+            ]
+          },
+          {
+            "id": "thinking",
+            "name": "Extended thinking",
+            "type": "boolean",
+            "currentValue": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": null,
+    "run_id": null,
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "StateDelta",
+      "scope": "session",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/config_options",
+          "value": [
+            {
+              "id": "model",
+              "name": "Model",
+              "category": "model",
+              "type": "select",
+              "currentValue": "smart",
+              "options": [
+                {
+                  "value": "fast",
+                  "name": "Fast"
+                },
+                {
+                  "value": "smart",
+                  "name": "Smart",
+                  "description": "Slower"
+                }
+              ]
+            },
+            {
+              "id": "thinking",
+              "name": "Extended thinking",
+              "type": "boolean",
+              "currentValue": false
+            }
+          ]
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "smart",
+            "options": [
+              {
+                "value": "fast",
+                "name": "Fast"
+              },
+              {
+                "value": "smart",
+                "name": "Smart",
+                "description": "Slower"
+              }
+            ]
+          },
+          {
+            "id": "thinking",
+            "name": "Extended thinking",
+            "type": "boolean",
+            "currentValue": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

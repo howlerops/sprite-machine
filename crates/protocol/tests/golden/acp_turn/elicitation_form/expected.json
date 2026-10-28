@@ -1,0 +1,208 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Fix it."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_001",
+      "title": "Checkout branch",
+      "kind": "execute",
+      "status": "in_progress"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_001",
+        "title": "Checkout branch",
+        "kind": "execute",
+        "status": "in_progress"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "Interrupt",
+      "interrupt_id": "int_1",
+      "kind": "form",
+      "title": "Target branch",
+      "message": "Which branch should the fix target?",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "tool_call_id": "call_001",
+      "response_schema": {
+        "type": "object",
+        "title": "Target branch",
+        "properties": {
+          "branch": {
+            "type": "string",
+            "title": "Branch name"
+          }
+        },
+        "required": [
+          "branch"
+        ]
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "mode": "form",
+        "sessionId": "sess_7f3a",
+        "toolCallId": "call_001",
+        "requestedSchema": {
+          "type": "object",
+          "title": "Target branch",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "title": "Branch name"
+            }
+          },
+          "required": [
+            "branch"
+          ]
+        },
+        "message": "Which branch should the fix target?"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "interrupt",
+        "interrupt_ids": [
+          "int_1"
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "InterruptResolved",
+      "interrupt_id": "int_1",
+      "outcome": {
+        "type": "submitted",
+        "data": {
+          "branch": "main"
+        }
+      },
+      "resolved_by": {
+        "kind": "user",
+        "id": "usr_1",
+        "device_id": "dev_1"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "resume",
+      "parent_run_id": "run_1"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:07.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_001",
+      "status": "completed"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_001",
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:08.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

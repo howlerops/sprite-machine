@@ -1,0 +1,161 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Find the TODOs."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "Checking."
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "title": "Search for TODO",
+          "kind": "search",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "title": "Search for TODO",
+          "kind": "search",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "title": "Search for TODO in src"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "locations": [
+            {
+              "path": "/workspace/src/a.rs"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "rawInput": {
+            "query": "TODO"
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "rawInput": {
+            "query": "TODO"
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "rawOutput": {
+            "matches": 3
+          }
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "content": [
+            {
+              "type": "content",
+              "content": {
+                "type": "text",
+                "text": "3 matches"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call_u1",
+          "title": "Late update after the end"
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

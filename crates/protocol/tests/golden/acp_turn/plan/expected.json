@@ -1,0 +1,217 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Plan it."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "plan",
+      "activity_type": "plan",
+      "mode": "snapshot",
+      "content": {
+        "entries": [
+          {
+            "content": "Read the failing test",
+            "priority": "high",
+            "status": "in_progress"
+          },
+          {
+            "content": "Fix the trailing newline handling",
+            "priority": "high",
+            "status": "pending"
+          },
+          {
+            "content": "Run the parser test suite",
+            "priority": "medium",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "plan",
+        "entries": [
+          {
+            "content": "Read the failing test",
+            "priority": "high",
+            "status": "in_progress"
+          },
+          {
+            "content": "Fix the trailing newline handling",
+            "priority": "high",
+            "status": "pending"
+          },
+          {
+            "content": "Run the parser test suite",
+            "priority": "medium",
+            "status": "pending"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_2",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_2",
+      "delta": "Working on step one."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Working on step one."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_2"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "Activity",
+      "activity_id": "plan",
+      "activity_type": "plan",
+      "mode": "snapshot",
+      "content": {
+        "entries": [
+          {
+            "content": "Read the failing test",
+            "priority": "high",
+            "status": "completed"
+          },
+          {
+            "content": "Fix the trailing newline handling",
+            "priority": "high",
+            "status": "in_progress"
+          },
+          {
+            "content": "Run the parser test suite",
+            "priority": "low",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "plan",
+        "entries": [
+          {
+            "content": "Read the failing test",
+            "priority": "high",
+            "status": "completed"
+          },
+          {
+            "content": "Fix the trailing newline handling",
+            "priority": "high",
+            "status": "in_progress"
+          },
+          {
+            "content": "Run the parser test suite",
+            "priority": "low",
+            "status": "pending"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:05.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "success",
+        "stop_reason": "end_turn"
+      }
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "stopReason": "end_turn"
+      }
+    }
+  }
+]

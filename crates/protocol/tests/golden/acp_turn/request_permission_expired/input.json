@@ -1,0 +1,60 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Run it."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call_c1",
+          "title": "Run cargo build",
+          "kind": "execute",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
+      "op": "request_permission",
+      "interrupt_id": "int_1",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "request": {
+        "sessionId": "sess_7f3a",
+        "toolCall": {
+          "toolCallId": "call_c1",
+          "title": "Run cargo build",
+          "kind": "execute",
+          "status": "in_progress"
+        },
+        "options": [
+          {
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "allow_always",
+            "name": "Always allow",
+            "kind": "allow_always"
+          },
+          {
+            "optionId": "reject_once",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    },
+    {
+      "op": "expire",
+      "interrupt_id": "int_1"
+    }
+  ]
+}

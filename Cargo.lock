@@ -5760,6 +5760,7 @@ name = "protocol"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol-schema",
+ "jsonschema",
  "serde",
  "serde_json",
 ]

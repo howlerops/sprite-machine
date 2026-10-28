@@ -1,0 +1,88 @@
+{
+  "thread_id": "th_1",
+  "steps": [
+    {
+      "op": "session_new",
+      "response": {
+        "sessionId": "sess_7f3a",
+        "modes": {
+          "currentModeId": "code",
+          "availableModes": [
+            {
+              "id": "code",
+              "name": "Code"
+            },
+            {
+              "id": "plan",
+              "name": "Plan",
+              "description": "Plan only, no edits"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "fast",
+            "options": [
+              {
+                "value": "fast",
+                "name": "Fast"
+              },
+              {
+                "value": "smart",
+                "name": "Smart",
+                "description": "Slower"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "op": "start_task",
+      "task_id": "tk_1",
+      "user_message": {
+        "text": "Hi."
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "current_mode_update",
+          "currentModeId": "plan"
+        }
+      }
+    },
+    {
+      "op": "session_update",
+      "notification": {
+        "sessionId": "sess_7f3a",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "review",
+              "description": "Review the current diff"
+            },
+            {
+              "name": "compact",
+              "description": "Summarize the conversation",
+              "input": {
+                "hint": "optional focus area"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "prompt_response",
+      "stop_reason": "end_turn"
+    }
+  ]
+}

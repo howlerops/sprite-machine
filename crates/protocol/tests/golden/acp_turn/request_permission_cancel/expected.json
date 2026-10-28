@@ -1,0 +1,247 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "UserMessage",
+      "message_id": "msg_1",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Run it."
+        }
+      ],
+      "author": {
+        "kind": "user",
+        "id": "usr_local"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:01.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "prompt"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "TextMessageStart",
+      "message_id": "msg_2",
+      "role": "assistant"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:02.000Z",
+    "event": {
+      "type": "TextMessageContent",
+      "message_id": "msg_2",
+      "delta": "Running."
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Running."
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "TextMessageEnd",
+      "message_id": "msg_2"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:03.000Z",
+    "event": {
+      "type": "ToolCallStart",
+      "tool_call_id": "call_c1",
+      "title": "Run cargo build",
+      "kind": "execute",
+      "status": "in_progress"
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_c1",
+        "title": "Run cargo build",
+        "kind": "execute",
+        "status": "in_progress"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "Interrupt",
+      "interrupt_id": "int_1",
+      "kind": "approval",
+      "title": "Run cargo build",
+      "expires_at": "2026-10-27T22:10:00.000Z",
+      "tool_call_id": "call_c1",
+      "options": [
+        {
+          "option_id": "allow_once",
+          "name": "Allow once",
+          "kind": "allow_once"
+        },
+        {
+          "option_id": "allow_always",
+          "name": "Always allow",
+          "kind": "allow_always"
+        },
+        {
+          "option_id": "reject_once",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    "raw": {
+      "source": "acp",
+      "payload": {
+        "sessionId": "sess_7f3a",
+        "toolCall": {
+          "toolCallId": "call_c1",
+          "kind": "execute",
+          "status": "in_progress",
+          "title": "Run cargo build"
+        },
+        "options": [
+          {
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "allow_always",
+            "name": "Always allow",
+            "kind": "allow_always"
+          },
+          {
+            "optionId": "reject_once",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_1",
+    "ts": "2026-10-27T22:00:04.000Z",
+    "event": {
+      "type": "RunFinished",
+      "outcome": {
+        "type": "interrupt",
+        "interrupt_ids": [
+          "int_1"
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": null,
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "InterruptResolved",
+      "interrupt_id": "int_1",
+      "outcome": {
+        "type": "cancelled"
+      },
+      "resolved_by": {
+        "kind": "user",
+        "id": "usr_1",
+        "device_id": "dev_1"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 10,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "RunStarted",
+      "reason": "resume",
+      "parent_run_id": "run_1"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 11,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "ToolCallEnd",
+      "tool_call_id": "call_c1",
+      "status": "failed"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 12,
+    "thread_id": "th_1",
+    "task_id": "tk_1",
+    "run_id": "run_2",
+    "ts": "2026-10-27T22:00:06.000Z",
+    "event": {
+      "type": "RunError",
+      "reason": "cancelled",
+      "message": "cancelled"
+    }
+  }
+]
