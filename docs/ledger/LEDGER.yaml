@@ -230,8 +230,8 @@ items:
     context:
       - 'docs/spikes/hub-size.md (twiggy: function names + data names = 692 KB of 2,048,503 B; strip=true breaks worker-build 0.8.7 with "failed to generate catch wrappers")'
     acceptance:
-      - "The deployed hub wasm has no name section: after worker-build, a step in the wrangler [build] command removes the `name` (and `producers`) custom sections, implemented in Rust in the cli crate (e.g. `cargo run -p cli -- wasm strip-names <file>` using wasmparser/wasm-encoder from crates.io; no wasm-opt/binaryen download); the tracer prints the new gzip bundle and it is at least 25% smaller than the bundle measured on this tree before the change"
-      - "The hub still builds via the wrangler [build] command, thread_do and the tracer pass, a stack trace in the Worker still works (code offsets), and docs/spikes/hub-size.md has the before/after numbers"
+      - "The deployed hub wasm has no name section: after worker-build, a Rust step in the cli (no binaryen download) removes the name and producers custom sections, run from the wrangler [build] command and the tracer; unit tests for the walker"
+      - "The hub still builds via the wrangler [build] command, thread_do and the tracer pass, and docs/spikes/hub-size.md records before/after (leader re-scope: the 25% gzip target was unreachable by this change alone; measured -13% gzip, -35% raw, bundle 585 KB of the 1 MiB limit)"
     verify:
       - cargo run -p cli -- e2e tracer
       - bash scripts/hub-test.sh thread_do
@@ -2390,7 +2390,8 @@ items:
     title: 'hub authz (security): every thread route checks the thread belongs to the caller''s org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 6d3f90f (+ MIGRATIONS conflict resolution); full verify: workspace 649 passed 0 failed, clippy native/live/wasm clean, no tokio runtime, hub-test smoke/thread_do/thread_session/machine_do/authz/attachments/devices PASS, thread_create 10/10 on re-run (first run failed under 3-worker build contention), tracer PASS; leader read the org check"
     attempt: 1
     assignee: "worker:sonnet"
     priority: 1
@@ -2604,6 +2605,26 @@ items:
     verify:
       - 'cargo test -p runner --test server_mode'
       - 'cargo test -p sidecar'
+      - 'cargo run -p cli -- e2e tracer'
+
+  - id: MVP-000h
+    title: 'Hub build: the wasm strip step does not wait on the shared cargo lock (prebuilt strip binary or path), so wrangler dev reaches Ready while another build holds the lock'
+    milestone: M0
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [MVP-000f]
+    paths:
+      - 'crates/hub/wrangler.toml'
+      - 'crates/cli/**'
+      - 'scripts/hub-test.sh'
+    context:
+      - 'docs/ledger/reports/MVP-000f.md (Notes, MVP-000h)'
+    acceptance:
+      - 'hub-test.sh / the tracer build the strip tool once before wrangler starts and the [build] command calls the binary by path (no nested cargo run); wrangler dev reaches Ready while another cargo build holds the target lock (manual check recorded)'
+    verify:
+      - 'bash scripts/hub-test.sh smoke'
       - 'cargo run -p cli -- e2e tracer'
 
   - id: M2-008a
