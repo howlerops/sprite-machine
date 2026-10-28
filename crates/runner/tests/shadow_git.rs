@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 use jsonschema::{Retrieve, Uri};
 use protocol::turn_event::{Envelope, Event};
@@ -201,6 +203,115 @@ fn works_in_a_repository_without_commits() {
     checkpoint::restore(root, THREAD, 1).expect("restore in unborn repo");
     assert_eq!(read(root, "a.txt"), "first\n");
     assert_eq!(user_state(root).head, "", "HEAD was created");
+}
+
+#[test]
+fn thread_ids_encode_to_valid_reversible_ref_components() {
+    let tricky = [
+        "th_1", "a.b", "run-2", ".", "..", ".hidden", "a..b", "a.", "a.lock", "a.lock.b", "-x",
+        "a:b", ":", "::", "a:b.c", "th:1", "x.:.y", "1:2:3", "0", "_",
+    ];
+    for id in tricky {
+        let encoded = checkpoint::encode_thread(id);
+        let refname = format!("refs/sm/checkpoints/{encoded}/1");
+        git(&std::env::temp_dir(), &["check-ref-format", &refname]);
+        assert_eq!(
+            checkpoint::decode_thread(&encoded).expect("decode"),
+            id,
+            "round trip of {id:?} via {encoded:?}"
+        );
+    }
+    // Ids that are already valid components keep their name, so existing refs still resolve.
+    for id in ["th_1", "a.b", "run-2", "_", "0"] {
+        assert_eq!(checkpoint::encode_thread(id), id);
+    }
+}
+
+#[test]
+fn every_short_id_round_trips_and_encodings_do_not_collide() {
+    // Every id of 1 to 3 characters over an alphabet that covers all the special cases.
+    let alphabet = ['a', '.', ':', '-', '_', '0'];
+    let mut ids = std::collections::BTreeSet::new();
+    for a in alphabet {
+        ids.insert(a.to_string());
+        for b in alphabet {
+            ids.insert(format!("{a}{b}"));
+            for c in alphabet {
+                ids.insert(format!("{a}{b}{c}"));
+            }
+        }
+    }
+    assert_eq!(ids.len(), 6 + 36 + 216);
+    let mut encodings = std::collections::BTreeSet::new();
+    for id in &ids {
+        let encoded = checkpoint::encode_thread(id);
+        assert!(
+            encoded
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_-+%.".contains(c)),
+            "{encoded:?} has a character git may reject"
+        );
+        assert_eq!(checkpoint::decode_thread(&encoded).expect("decode"), *id);
+        assert!(
+            encodings.insert(encoded),
+            "two ids encode to the same ref name"
+        );
+    }
+}
+
+#[test]
+fn take_list_and_restore_accept_a_colon_in_the_thread_id() {
+    let dir = repo_with_commit();
+    let root = dir.path();
+    let thread = "th:1";
+    write(root, "a.txt", "two\n");
+    let snapshot = checkpoint::take(root, thread, None).expect("take");
+    assert_eq!(snapshot.git_ref, "refs/sm/checkpoints/th+1/1");
+    assert_eq!(
+        git(root, &["rev-parse", "refs/sm/checkpoints/th+1/1"]).trim(),
+        snapshot.commit
+    );
+    assert_eq!(checkpoint::list(root, thread).expect("list"), vec![1]);
+
+    write(root, "a.txt", "changed\n");
+    checkpoint::restore(root, thread, 1).expect("restore");
+    assert_eq!(read(root, "a.txt"), "two\n");
+    let diff = checkpoint::diff(root, thread, 1, Target::WorkingTree).expect("diff");
+    assert!(diff.files.is_empty(), "{:?}", diff.files);
+}
+
+#[test]
+fn concurrent_takes_on_one_thread_claim_distinct_numbers() {
+    let dir = repo_with_commit();
+    let root = dir.path().to_path_buf();
+    write(&root, "a.txt", "two\n");
+
+    const RACERS: usize = 4;
+    let barrier = Arc::new(Barrier::new(RACERS));
+    let handles: Vec<_> = (0..RACERS)
+        .map(|_| {
+            let root = root.clone();
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                checkpoint::take(&root, THREAD, None).map(|snapshot| snapshot.n)
+            })
+        })
+        .collect();
+    let mut numbers: Vec<u64> = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("join").expect("take"))
+        .collect();
+    numbers.sort_unstable();
+    assert_eq!(
+        numbers,
+        vec![1, 2, 3, 4],
+        "takes claimed overlapping numbers"
+    );
+
+    let mut listed = checkpoint::list(&root, THREAD).expect("list");
+    listed.sort_unstable();
+    assert_eq!(listed, numbers);
 }
 
 #[test]
