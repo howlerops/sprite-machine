@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 115/276 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 108/200
+done 115/277 (3 dropped) · in-flight M2B-019,M3-001h,M2-003e,WEB-006,M1B-008e · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 113/200
 
 ## Per phase
 
@@ -10,8 +10,8 @@ done 115/276 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, 
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 68 | 57 | 0 |
-| P3 | 26 | 6 | 0 |
+| P2 | 69 | 57 | 2 |
+| P3 | 26 | 6 | 3 |
 | P4 | 56 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
@@ -77,7 +77,7 @@ done 115/276 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, 
 | M2B-011a | worker | rust | done | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
 | M2B-012 | worker | rust | done | Attachments from phone → local files / image blocks |
 | M2B-014 | worker | rust | done | Presence + reconnect notifications on the phone |
-| M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
+| M2B-019 | worker | rust | assigned | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
 | WEB-001 | worker | rust | done | web: mobile web page — pairing (QR / device code) + session list with presence |
 | WEB-002 | worker | rust | done | web: transcript rendering for every TurnEvent variant |
@@ -89,6 +89,7 @@ done 115/276 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, 
 | M2B-014d | worker | rust | done | notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine |
 | M2B-010a | worker | rust | done | hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree |
 | M2B-010b | worker | rust | todo | cli e2e tui: sm TUI session with acp-mock against wrangler dev (/rc registers, a phone prompt shows in the TUI, tunnel drop and restore) |
+| M1B-008e | worker | docs | assigned | Bench prep for M1B-008c: run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its fixture output; terminal/approval repaints are logged |
 
 ## Waiting on the human
 

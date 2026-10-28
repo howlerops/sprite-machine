@@ -1652,7 +1652,11 @@ items:
     phase: P2
     lane: docs
     owner: leader
-    deps: [M1B-008a, M1B-008b, M1B-008d]
+    deps:
+      - "M1B-008a"
+      - "M1B-008b"
+      - "M1B-008d"
+      - "M1B-008e"
     paths:
       - "spikes/bench/results/gpui-kit/desktop_linux/**"
       - "spikes/bench/run-desktop.sh"
@@ -3609,6 +3613,9 @@ items:
     title: 'E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     risk: high
     deps: [M2B-010, M2B-011, M2B-012, M2B-014, WEB-003]
     paths:
@@ -5522,6 +5529,9 @@ items:
     title: 'client-core: one owner holds the Subscription and the Outbox and publishes the combined connectivity (Connectivity::combine) for the app banner'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
@@ -5889,6 +5899,9 @@ items:
     title: 'hub (security): GitHub sign-in hardening — per-IP limit on unauthenticated authorize starts; purge expired oauth_requests/oauth_codes/org_invites in the hourly cron; link a pre-created user by login only if created < 7 days ago and confirm on first sign-in (GitHub logins can be renamed and re-registered)'
     milestone: M2
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
@@ -5929,6 +5942,9 @@ items:
     title: 'web: GitHub sign-in (PKCE verifier in sessionStorage, /#/auth/github?code= handling) and a members/invites settings screen'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     size: M
     risk: medium
@@ -5948,3 +5964,25 @@ items:
       - 'Admins list members, invite by GitHub login, change roles, remove members; viewers see the list only'
     verify:
       - 'cd web && npx playwright test tests/signin_github.spec.js tests/members.spec.js'
+
+  - id: M1B-008e
+    title: 'Bench prep for M1B-008c: run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its fixture output; terminal/approval repaints are logged'
+    milestone: M1b
+    phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
+    lane: docs
+    size: S
+    risk: low
+    deps: [M1B-008b]
+    paths:
+      - 'spikes/bench/run-desktop.sh'
+      - 'spikes/gpui/src/**'
+      - 'spikes/gpui/tests/**'
+    context:
+      - 'docs/ledger/reports/M1B-008b.md (Discovered work)'
+    acceptance:
+      - 'run-desktop.sh launches the spike with GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its output until exit (test); terminal/approval repaints logged as frames'
+    verify:
+      - 'bash spikes/bench/run-desktop.sh --dry-run'
