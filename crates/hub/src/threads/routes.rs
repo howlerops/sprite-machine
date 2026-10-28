@@ -39,8 +39,10 @@ use super::auth::dev_fixtures_enabled;
 use super::error::ApiError;
 use super::valid_idempotency_key;
 use crate::audit::{self, Event};
-use crate::auth::{Principal, authenticate, routes::authorize_thread_request};
-use crate::db::{Role, d1::D1};
+use crate::auth::{
+    Principal, authenticate, policy::thread_policy, routes::authorize_thread_request,
+};
+use crate::db::{Db, d1::D1};
 use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::worker::AppState;
 
@@ -145,8 +147,11 @@ const MAX_CREATE_BYTES: usize = 64 * 1024;
 /// DO creates the thread, records the host machine (init hook), and with a prompt queues the
 /// `dispatch` command for the Machine DO.
 ///
-/// The route has no thread id in its path, so `auth::policy` cannot name its role; the same
-/// public primitives `authorize_thread_request` uses are called here instead.
+/// The role and audit action come from `auth::policy` (`thread_policy("POST", "/v1/threads")`).
+/// `authorize_thread` cannot run the gate because the route has no thread id in its path and the
+/// audit row names the derived one, so the route authenticates, checks the policy's role, then
+/// checks the machine (M2-008d), and only then audits and forwards. A machine that does not
+/// exist, is revoked, or belongs to another org is one `404 not_found` and writes nothing.
 #[worker::send]
 async fn create_thread(State(env): State<AppState>, req: Request) -> Response {
     match create_inner(&env, req).await {
@@ -191,22 +196,25 @@ async fn create_inner(env: &Env, req: Request) -> Result<Response, ApiError> {
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
     let principal: Principal = authenticate(&db, authorization, dev_fixtures(env)).await?;
-    principal.require(Role::Member)?;
+    let policy = thread_policy("POST", "/v1/threads")
+        .ok_or_else(|| ApiError::internal("no policy for POST /v1/threads"))?;
+    principal.require(policy.role)?;
 
     let thread_id = derived_thread_id(&principal.user_id, key);
     let request_id_header = headers
         .get(REQUEST_ID_HEADER)
         .and_then(|value| value.to_str().ok());
     let request_id = request_id(request_id_header, worker::Date::now().as_millis());
-    let machine_id = value
-        .get("machine_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let machine_id = value.get("machine_id").and_then(Value::as_str);
+    let machine_id = machine_id
+        .filter(|id| is_valid_id(id))
+        .ok_or_else(|| ApiError::invalid_request("machine_id is required"))?;
+    require_machine_of_org(&db, machine_id, &principal.org_id).await?;
     audit::record(
         &db,
         &Event::by(
             &principal,
-            "thread.create",
+            policy.action.unwrap_or("thread.create"),
             "thread",
             &thread_id,
             &request_id,
@@ -229,6 +237,26 @@ async fn create_inner(env: &Env, req: Request) -> Result<Response, ApiError> {
         .body(Body::from(bytes))
         .map_err(|error| ApiError::internal(error.to_string()))?;
     to_thread(env, &thread_id, forwarded).await
+}
+
+/// `404 not_found` unless `machine_id` is a machine of `org_id` that is not revoked. The same
+/// answer for an unknown machine, a revoked one and another org's, so nothing leaks across orgs.
+async fn require_machine_of_org(
+    db: &impl Db,
+    machine_id: &str,
+    org_id: &str,
+) -> Result<(), ApiError> {
+    let rows = db
+        .query(
+            "SELECT id FROM machines WHERE id = ? AND org_id = ? AND revoked_at IS NULL",
+            &[machine_id.into(), org_id.into()],
+        )
+        .await
+        .map_err(|error| ApiError::internal(format!("threads: {error}")))?;
+    if rows.is_empty() {
+        return Err(ApiError::not_found(format!("no machine {machine_id}")));
+    }
+    Ok(())
 }
 
 /// `th_` plus 32 hex digits of `SHA-256(user, key)`: stable for one user and key, distinct

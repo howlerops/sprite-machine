@@ -434,6 +434,25 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
 }
 
 #[test]
+fn post_threads_needs_a_member_and_names_thread_create() {
+    use super::policy::thread_policy;
+    let (db, owner, _) = bootstrapped();
+    let (viewer, _) = issue(&db, &owner, "viewer");
+    let (member, _) = issue(&db, &owner, "member");
+    let policy = thread_policy("POST", "/v1/threads").expect("POST /v1/threads has a policy");
+    assert_eq!(
+        (policy.role, policy.action),
+        (Role::Member, Some("thread.create"))
+    );
+    let denied = viewer.require(policy.role).expect_err("viewer");
+    assert_eq!((denied.status, denied.code), (403, "forbidden"));
+    member.require(policy.role).expect("member");
+    owner.require(policy.role).expect("owner");
+    // Only POST: other methods on the collection stay unknown routes.
+    assert!(thread_policy("GET", "/v1/threads").is_none());
+}
+
+#[test]
 fn audit_log_stays_append_only() {
     let (db, _, _) = bootstrapped();
     let conn = db.conn.borrow();

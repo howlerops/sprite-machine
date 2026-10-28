@@ -9,6 +9,7 @@ use crate::db::Role;
 /// What a route requires and records.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Policy {
+    /// The thread the route names; empty for `POST /v1/threads`, whose id is derived later.
     pub thread_id: String,
     pub role: Role,
     /// The audit action for a mutation; `None` for reads.
@@ -19,6 +20,14 @@ pub struct Policy {
 
 /// The policy of a thread route, or `None` if the method and path are not a known thread route.
 pub fn thread_policy(method: &str, path: &str) -> Option<Policy> {
+    if method == "POST" && path.trim_end_matches('/') == "/v1/threads" {
+        return Some(Policy {
+            thread_id: String::new(),
+            role: Role::Member,
+            action: Some("thread.create"),
+            extra: None,
+        });
+    }
     let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
     let (dev, rest) = match segments.as_slice() {
         ["v1", "threads", rest @ ..] => (false, rest),
@@ -73,6 +82,9 @@ mod tests {
         assert_eq!(p.action, Some("thread.approval.resolve"));
         let p = thread_policy("POST", "/v1/dev/threads/t1/events").expect("policy");
         assert_eq!(p.thread_id, "t1");
+        let p = thread_policy("POST", "/v1/threads").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Member, Some("thread.create")));
+        assert!(p.thread_id.is_empty());
     }
 
     #[test]
@@ -81,5 +93,6 @@ mod tests {
         assert!(thread_policy("GET", "/v1/dev/threads/t1/events").is_none());
         assert!(thread_policy("GET", "/v1/other").is_none());
         assert!(thread_policy("GET", "/v1/threads").is_none());
+        assert!(thread_policy("DELETE", "/v1/threads").is_none());
     }
 }

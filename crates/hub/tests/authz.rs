@@ -416,6 +416,19 @@ fn a_viewer_cannot_send_prompts_approve_cancel_or_delete() {
         ("approve", approve(&thread, &viewer, &request)),
         ("cancel", cancel(&thread, &viewer, &request)),
         ("delete", delete_pending(&thread, &viewer, &request)),
+        (
+            "create thread",
+            http(
+                "POST",
+                "/v1/threads",
+                Some(&viewer),
+                &[
+                    ("Idempotency-Key", &unique("idk")),
+                    ("x-request-id", &request),
+                ],
+                Some(&json!({ "machine_id": unique("mch"), "agent": "claude" })),
+            ),
+        ),
     ] {
         assert_eq!(reply.status, 403, "viewer {name}: {}", reply.body);
         assert_eq!(code(&reply), "forbidden", "viewer {name}");
