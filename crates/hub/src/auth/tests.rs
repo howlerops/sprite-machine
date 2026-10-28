@@ -377,7 +377,7 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
             .is_empty()
     );
 
-    // Member: may send, approve, cancel; may not delete.
+    // Member: may send, approve, cancel and remove a queued task (M2-008k).
     for (method, path, action) in [
         ("POST", "/v1/threads/t1/prompts", "thread.prompt"),
         ("POST", "/v1/threads/t1/cancel", "thread.cancel"),
@@ -385,6 +385,11 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
             "POST",
             "/v1/threads/t1/interrupts/i1",
             "thread.approval.resolve",
+        ),
+        (
+            "DELETE",
+            "/v1/threads/t1/pending/k1",
+            "thread.pending.delete",
         ),
     ] {
         let (principal, _) = go(&member_token, method, path).expect("member write");
@@ -397,21 +402,15 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
         assert_eq!(rows[0]["target_id"], "t1");
         assert_eq!(rows[0]["request_id"], "req_t");
     }
-    assert_eq!(
-        go(&member_token, "DELETE", "/v1/threads/t1/pending/k1")
-            .expect_err("member delete")
-            .status,
-        403
-    );
 
-    // Owner deletes; bad thread ids and unknown routes are refused before any audit row.
+    // Owner deletes too; bad thread ids and unknown routes are refused before any audit row.
     let owner_token = {
         let (_, token) = issue(&db, &owner, "admin");
         token
     };
     go(&owner_token, "DELETE", "/v1/threads/t1/pending/k1").expect("admin delete");
     let rows = db.rows("SELECT detail_json FROM audit_log WHERE action = 'thread.pending.delete'");
-    assert_eq!(rows.len(), 1);
+    assert_eq!(rows.len(), 2);
     assert!(
         rows[0]["detail_json"]
             .as_str()
