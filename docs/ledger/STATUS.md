@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 74/232 (3 dropped) · in-flight M2-008e · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 69/120
+done 74/232 (3 dropped) · in-flight M2-008e,M2B-006c,M2B-007 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 71/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 74/232 (3 dropped) · in-flight M2-008e · blocked 11 (human: M0-014, M0-02
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 52 | 21 | 1 |
+| P2 | 52 | 21 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -48,7 +48,7 @@ done 74/232 (3 dropped) · in-flight M2-008e · blocked 11 (human: M0-014, M0-02
 | M2B-005a | worker | rust | todo | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
 | M2B-005b | worker | rust | todo | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
 | M2B-006a | worker | rust | todo | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
-| M2B-006c | worker | rust | todo | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
+| M2B-006c | worker | rust | assigned | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
 | M2B-004f | worker | rust | todo | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
@@ -60,7 +60,7 @@ done 74/232 (3 dropped) · in-flight M2-008e · blocked 11 (human: M0-014, M0-02
 | M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | done | runner: local harness discovery + local logins/MCP passthrough |
-| M2B-007 | worker | rust | todo | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
+| M2B-007 | worker | rust | assigned | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
 | M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |
 | M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |
 | M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |
