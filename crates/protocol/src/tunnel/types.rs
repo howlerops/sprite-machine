@@ -14,6 +14,7 @@ pub enum ActorKind {
 
 /// An actor as carried in `author` and `resolved_by` (same shape as turn-event.md §4.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Actor {
     pub kind: ActorKind,
     pub id: String,
@@ -25,7 +26,7 @@ pub struct Actor {
 
 /// One message part: text, or a file the hub has made reachable by https URL.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ContentPart {
     Text {
         text: String,
@@ -44,7 +45,7 @@ pub enum ContentPart {
 /// The answer to an interrupt: an option the user picked, or cancelled (ACP
 /// `RequestPermissionOutcome`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Outcome {
     Selected { option_id: String },
     Cancelled,
@@ -52,6 +53,7 @@ pub enum Outcome {
 
 /// Workspace reference. `thread_open` carries `branch`; `dispatch` carries `spawn`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Workspace {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

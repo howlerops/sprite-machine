@@ -5,6 +5,8 @@
 //!
 //! - [`Frame`] and its parts: serde types for every tunnel frame (§3).
 //! - [`Command`]: the down-stream `command` payloads, tagged by `kind` (§3.5).
+//! - Strict parsing: every frame and command type rejects unknown fields, and
+//!   [`parse_command_frame`] reports an unknown `kind` so the runner can answer it (§3.5, §6).
 //! - [`Sender`] / [`Receiver`]: seq/ack bookkeeping for one stream (§4.2–§4.4).
 //! - [`DedupeWindow`]: `event_id` (24 h) and `idempotency_key` (7 days) dedupe (§4.2, §4.4).
 
@@ -16,9 +18,11 @@ mod types;
 
 use std::fmt;
 
-pub use command::Command;
+pub use command::{Command, KNOWN_COMMAND_KINDS, ParsedCommand, parse_command_frame};
 pub use dedupe::{DedupeWindow, Disposition, EVENT_ID_TTL_MS, IDEMPOTENCY_KEY_TTL_MS};
-pub use frame::{Capabilities, CloseCode, CommandErrorCode, Frame, NackCode, PresenceState};
+pub use frame::{
+    Capabilities, CloseCode, CommandErrorCode, Frame, NackCode, PresenceState, parse_frame,
+};
 pub use seq::{ACK_BATCH, Receiver, Sender, Verdict};
 pub use types::{Actor, ActorKind, ContentPart, Outcome, Workspace};
 

@@ -12,7 +12,7 @@ use super::types::Workspace;
 /// `ping` and `pong` serialize to exactly `{"t":"ping"}` and `{"t":"pong"}` (§3.7), so the
 /// hub can answer them with `setWebSocketAutoResponse` without waking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "t", rename_all = "snake_case")]
+#[serde(tag = "t", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Frame {
     /// Runner → hub, first frame after connect (§3.1).
     Hello {
@@ -88,8 +88,28 @@ pub enum Frame {
     Close { code: CloseCode, message: String },
 }
 
+/// Strict parse of one tunnel frame (§6 step 1): unknown `t`, unknown fields and extra fields on
+/// `ping` / `pong` are errors.
+///
+/// Use this on the wire. The derived `Deserialize` rejects unknown fields on every struct
+/// variant, but serde does not apply `deny_unknown_fields` to the unit variants `ping` and
+/// `pong` of an internally tagged enum, so `{"t":"ping","x":1}` would parse through serde alone.
+pub fn parse_frame(input: &str) -> Result<Frame, serde_json::Error> {
+    let value: Value = serde_json::from_str(input)?;
+    if let Some(obj) = value.as_object() {
+        let unit_tag = matches!(obj.get("t").and_then(Value::as_str), Some("ping" | "pong"));
+        if unit_tag && obj.len() != 1 {
+            return Err(<serde_json::Error as serde::de::Error>::custom(
+                "`ping` and `pong` take no fields besides `t`",
+            ));
+        }
+    }
+    serde_json::from_value(value)
+}
+
 /// Runner capabilities reported in `hello` (§3.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Capabilities {
     /// `local` or `sandbox`.
     pub host_mode: String,
