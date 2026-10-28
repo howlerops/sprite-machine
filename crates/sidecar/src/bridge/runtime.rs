@@ -1,34 +1,38 @@
 //! The bridge loop: commands in, ACP traffic in, TurnEvents out.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
-use protocol::acp::SessionNotification;
 use protocol::mapping::acp_turn::{
     AcpTurnMapper, IdSource, SequentialIds, StartTask, runner_actor,
 };
 use protocol::tunnel::{Command, CommandErrorCode, Disposition};
 use protocol::turn_event::{Envelope, Event, RunErrorReason, RunOutcome, UserMessage};
+use serde_json::Value;
 
 use super::files::{self, FilePolicy};
 use super::handler::{Internal, Resources};
 use super::ids::SharedIds;
 use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand};
 use super::{ActiveTask, Bridge, BridgeError, Start, ThreadState};
-use crate::acp::client::ClientError;
+use crate::acp::client::{AcpClient, ClientError};
 use crate::acp::fs::Workspace;
-use crate::acp::reattach::{ReattachError, expire_overdue_interrupts, rfc3339};
+use crate::acp::reattach::{
+    ReattachError, expire_overdue_interrupts, fail_stale_interrupts, rfc3339,
+};
 use crate::acp::sessions::PromptResult;
 use crate::acp::terminal::{ActivitySink, TerminalScope, Terminals};
+use crate::store::PendingInterrupt;
 
 impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     /// Runs until the command source ends. Fails when the store, the agent connection's
     /// `initialize` or the sink fails.
     pub async fn run(mut self) -> Result<(), BridgeError> {
         self.client.initialize().await?;
-        // The agent process is new: no session survives a restart of the bridge.
-        self.store.detach_all_sessions()?;
-        self.expire_stale().await?;
+        // The agent process is new: no session survives a restart of the bridge, and the
+        // interrupts an earlier process left open wait on requests that died with its agent.
+        self.reattacher.connection_lost()?;
+        self.fail_stale().await?;
 
         let period = self.config.expiry_check_interval;
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
@@ -44,6 +48,9 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                 Some(message) = self.internal.recv() => {
                     self.drain_updates().await?;
                     self.on_internal(message).await?;
+                }
+                () = self.client.closed(), if !self.harness_down => {
+                    self.on_harness_exit().await?;
                 }
                 _ = ticker.tick() => self.on_tick().await?,
             }
@@ -160,6 +167,10 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     }
 
     async fn start_task(&mut self, key: &str, start: Start) -> Result<(), BridgeError> {
+        // An agent that exited since the last look fails its tasks before this one is counted.
+        if self.client.is_closed() && !self.harness_down {
+            self.on_harness_exit().await?;
+        }
         let Start {
             thread_id,
             task_id,
@@ -254,16 +265,22 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         self.store.upsert_task(&task_id, &thread_id, "running")?;
         self.emit(&thread_id, events).await?;
 
-        let first_attach = self
-            .threads
-            .get(&thread_id)
-            .is_some_and(|thread| thread.session.is_none());
-        let session = match self
+        if let Some(error) = self.ensure_agent().await? {
+            return self
+                .fail_task(
+                    &thread_id,
+                    "harness_exited",
+                    &format!("could not start the agent: {error}"),
+                )
+                .await;
+        }
+        let mcp_servers = self.config.mcp_servers_for(&thread_id);
+        let attached = match self
             .reattacher
-            .ensure_session(&self.client, &thread_id, &harness, &cwd)
+            .attach(&self.client, &thread_id, &harness, &cwd, &mcp_servers)
             .await
         {
-            Ok((session, _how)) => session,
+            Ok(attached) => attached,
             Err(error) => {
                 let code = match &error {
                     ReattachError::Client(ClientError::Closed | ClientError::Io(_)) => {
@@ -276,15 +293,16 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                     .await;
             }
         };
+        let session = attached.session;
         let session_key = session.0.to_string();
         self.by_session
             .insert(session_key.clone(), thread_id.clone());
         if let Some(thread) = self.threads.get_mut(&thread_id) {
             thread.session = Some(session.clone());
         }
-        if first_attach {
+        if let Some(response) = attached.response {
             // The session's modes and config options, before any update of them (§4.6).
-            let snapshot = self.session_snapshot(&thread_id, &session);
+            let snapshot = self.session_snapshot(&thread_id, response);
             self.emit(&thread_id, snapshot).await?;
         }
         let scope = TerminalScope {
@@ -409,28 +427,26 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     // ---- traffic from the agent -------------------------------------------------------------
 
     async fn drain_updates(&mut self) -> Result<(), BridgeError> {
-        while let Ok(notification) = self.updates.try_recv() {
-            self.on_update(notification).await?;
+        while let Ok(params) = self.updates.try_recv() {
+            self.on_update(params).await?;
         }
         Ok(())
     }
 
-    async fn on_update(&mut self, notification: SessionNotification) -> Result<(), BridgeError> {
-        let session = notification.session_id.0.to_string();
-        let Some(thread_id) = self.by_session.get(&session).cloned() else {
+    /// One `session/update`, as the JSON the agent sent. The mapper keeps its `update` object as
+    /// the `raw.payload` and turns one it cannot parse into a `Raw` event.
+    async fn on_update(&mut self, params: Value) -> Result<(), BridgeError> {
+        let Some(session) = params.get("sessionId").and_then(Value::as_str) else {
+            tracing::warn!("session/update without a sessionId dropped");
+            return Ok(());
+        };
+        let Some(thread_id) = self.by_session.get(session).cloned() else {
             tracing::warn!(%session, "update for an unknown session dropped");
             return Ok(());
         };
-        let value = match serde_json::to_value(&notification) {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::warn!(%error, "update could not be re-encoded; dropped");
-                return Ok(());
-            }
-        };
         let ts = self.ts();
         let events = match self.threads.get_mut(&thread_id) {
-            Some(thread) => match thread.mapper.on_session_update_json(&value, &ts) {
+            Some(thread) => match thread.mapper.on_session_update_json(&params, &ts) {
                 Ok(events) => events,
                 Err(error) => {
                     tracing::warn!(%error, "update could not be mapped; dropped");
@@ -519,6 +535,61 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         self.emit(thread_id, events).await
     }
 
+    // ---- harness ----------------------------------------------------------------------------
+
+    /// The agent connection ended: running tasks fail with `harness_exited`, the stored sessions
+    /// are marked detached, and the next prompt starts the agent again.
+    async fn on_harness_exit(&mut self) -> Result<(), BridgeError> {
+        self.harness_down = true;
+        // Updates the agent sent before it died still belong to their tasks.
+        self.drain_updates().await?;
+        tracing::warn!("the agent exited");
+        let mut running: Vec<String> = self
+            .threads
+            .iter()
+            .filter(|(_, thread)| thread.task.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        running.sort();
+        for thread_id in running {
+            self.fail_task(&thread_id, "harness_exited", "the agent process exited")
+                .await?;
+        }
+        for thread in self.threads.values_mut() {
+            thread.session = None;
+        }
+        self.by_session.clear();
+        self.reattacher.connection_lost()?;
+        Ok(())
+    }
+
+    /// Starts the agent again when it has exited. `Some` is why it could not be started.
+    pub(super) async fn ensure_agent(&mut self) -> Result<Option<ClientError>, BridgeError> {
+        if self.client.is_closed() && !self.harness_down {
+            self.on_harness_exit().await?;
+        }
+        if !self.harness_down {
+            return Ok(None);
+        }
+        let Some(connector) = self.connector.as_ref() else {
+            return Ok(Some(ClientError::Closed));
+        };
+        let transport = (connector.lock().unwrap_or_else(PoisonError::into_inner))();
+        let client = match transport {
+            Ok(transport) => {
+                AcpClient::from_transport(transport, self.handler.clone(), self.updates_tx.clone())
+            }
+            Err(error) => return Ok(Some(error)),
+        };
+        if let Err(error) = client.initialize().await {
+            return Ok(Some(error));
+        }
+        // The old client is dropped here, which reaps its process.
+        self.client = client;
+        self.harness_down = false;
+        Ok(None)
+    }
+
     // ---- expiry -----------------------------------------------------------------------------
 
     async fn on_tick(&mut self) -> Result<(), BridgeError> {
@@ -567,15 +638,23 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     /// process).
     async fn expire_stale(&mut self) -> Result<(), BridgeError> {
         let now = self.now_ms();
-        let runs = match expire_overdue_interrupts(&self.store, |interrupt| {
-            // `expire_overdue_interrupts` wants the default id source. Skip ahead so the run id
-            // it makes is unlikely to repeat one the thread already used.
-            let mut ids = SequentialIds::default();
-            for _ in 0..1_000 + (now / 1_000) % 100_000 {
-                ids.next_id("run_");
-            }
-            AcpTurnMapper::new(interrupt.thread_id.clone(), ids)
-        }) {
+        let runs = expire_overdue_interrupts(&self.store, |interrupt| stale_mapper(interrupt, now));
+        self.end_stale(runs).await
+    }
+
+    /// At startup: ends the task of every stored interrupt, whatever its deadline. The ACP
+    /// request it waited on died with the previous agent process, so nobody can answer it.
+    async fn fail_stale(&mut self) -> Result<(), BridgeError> {
+        let now = self.now_ms();
+        let runs = fail_stale_interrupts(&self.store, |interrupt| stale_mapper(interrupt, now));
+        self.end_stale(runs).await
+    }
+
+    async fn end_stale(
+        &mut self,
+        runs: Result<Vec<crate::acp::reattach::ExpiredRun>, ReattachError>,
+    ) -> Result<(), BridgeError> {
+        let runs = match runs {
             Ok(runs) => runs,
             Err(ReattachError::Store(error)) => return Err(error.into()),
             Err(error) => {
@@ -655,6 +734,17 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         }
         Ok(())
     }
+}
+
+/// The mapper that rebuilds a stored interrupt's paused state. The expiry functions want the
+/// default id source, so skip ahead to make a run id unlikely to repeat one the thread already
+/// used.
+fn stale_mapper(interrupt: &PendingInterrupt, now: u64) -> AcpTurnMapper {
+    let mut ids = SequentialIds::default();
+    for _ in 0..1_000 + (now / 1_000) % 100_000 {
+        ids.next_id("run_");
+    }
+    AcpTurnMapper::new(interrupt.thread_id.clone(), ids)
 }
 
 /// The stored task state an event implies, if it changes it.
