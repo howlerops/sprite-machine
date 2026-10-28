@@ -9,6 +9,7 @@ description = "Runner core library: ACP client, bridge, durable store, host mode
 [dependencies]
 protocol = { path = "../protocol" }
 anyhow.workspace = true
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
