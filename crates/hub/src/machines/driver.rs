@@ -41,10 +41,13 @@ pub enum HostError {
 /// The objects a machine talks to: the thread hosts and the D1 mirror of its presence.
 pub trait ThreadHost {
     /// Appends one envelope (`seq: 0`) to a thread (Thread DO `POST /internal/threads/{id}/events`).
+    /// `event_id` is the runner frame's id when there is one: the Thread DO dedupes it for 24 h
+    /// (tunnel.md §4.2), so a retransmit after a lost Machine DO record is not appended twice.
     fn append(
         &self,
         host: HostKind,
         thread_id: &str,
+        event_id: Option<&str>,
         envelope: &Value,
     ) -> impl Future<Output = Result<(), HostError>>;
 
@@ -301,7 +304,7 @@ where
         match validate_envelope(core, envelope)? {
             Err((code, message)) => refusal = Some(nack(seq, code, message)),
             Ok((host_kind, thread_id)) => {
-                match host.append(host_kind, &thread_id, envelope).await {
+                match host.append(host_kind, &thread_id, Some(event_id), envelope).await {
                     Ok(()) => {}
                     Err(HostError::Rejected { code, message }) => {
                         refusal = Some(nack(seq, code, message));
@@ -541,7 +544,7 @@ where
     );
     for envelope in [started, errored] {
         let value = serde_json::to_value(&envelope).unwrap_or(Value::Null);
-        match host.append(record.host, &record.thread_id, &value).await {
+        match host.append(record.host, &record.thread_id, None, &value).await {
             Ok(()) => {}
             // The thread cannot take it (task already ended, no such run state): nothing to do.
             Err(HostError::Rejected { .. }) => return Ok(()),
@@ -647,7 +650,7 @@ where
         );
         if let Ok(value) = serde_json::to_value(&envelope) {
             // Best effort: one unreachable thread must not hold up the others.
-            let _ = host.append(kind, &thread_id, &value).await;
+            let _ = host.append(kind, &thread_id, None, &value).await;
         }
     }
     Ok(())

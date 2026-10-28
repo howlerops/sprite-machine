@@ -135,20 +135,22 @@ impl ThreadHost for WorkerHost<'_> {
         &self,
         host: HostKind,
         thread_id: &str,
+        event_id: Option<&str>,
         envelope: &Value,
     ) -> Result<(), HostError> {
         let (binding, name) = Self::target(host, thread_id);
         let path = format!("/internal/threads/{thread_id}/events");
-        let (status, body) = call(
-            self.env,
-            binding,
-            &name,
-            Method::Post,
-            &path,
-            Some(envelope),
-        )
-        .await
-        .map_err(unavailable)?;
+        // The Thread DO takes `{event_id, envelope}` and dedupes the id (tunnel.md §4.2); the
+        // tracer's stub host only knows the bare envelope.
+        let body = match (host, event_id) {
+            (HostKind::Thread, Some(event_id)) => {
+                serde_json::json!({ "event_id": event_id, "envelope": envelope })
+            }
+            _ => envelope.clone(),
+        };
+        let (status, body) = call(self.env, binding, &name, Method::Post, &path, Some(&body))
+            .await
+            .map_err(unavailable)?;
         if status == 200 {
             Ok(())
         } else {

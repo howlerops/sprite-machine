@@ -46,6 +46,8 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
 #[derive(Default)]
 struct FakeHost {
     appended: RefCell<Vec<(HostKind, String, Value)>>,
+    /// The `event_id` passed with each append (`None` for hub-made envelopes).
+    appended_ids: RefCell<Vec<Option<String>>>,
     fail_next: RefCell<VecDeque<HostError>>,
     owners: RefCell<HashMap<String, String>>,
     inits: RefCell<Vec<(String, Value)>>,
@@ -94,12 +96,16 @@ impl ThreadHost for FakeHost {
         &self,
         host: HostKind,
         thread_id: &str,
+        event_id: Option<&str>,
         envelope: &Value,
     ) -> impl Future<Output = Result<(), HostError>> {
         let failure = self.fail_next.borrow_mut().pop_front();
         ready(match failure {
             Some(error) => Err(error),
             None => {
+                self.appended_ids
+                    .borrow_mut()
+                    .push(event_id.map(str::to_owned));
                 self.appended
                     .borrow_mut()
                     .push((host, thread_id.to_owned(), envelope.clone()));
@@ -716,6 +722,32 @@ fn a_superseded_socket_is_ignored_and_does_not_change_presence() {
 }
 
 // ---- up stream -----------------------------------------------------------------------------
+
+#[test]
+fn runner_events_carry_their_event_id_to_the_thread_host() {
+    let world = new_world();
+    let mut runner = Runner::new();
+    let conn = world.connect(&mut runner, NOW);
+    for text in ["a", "b"] {
+        runner.event(THREAD, text);
+    }
+    world.pump_up(conn, &mut runner, NOW);
+    let ids: Vec<Option<String>> = world
+        .host
+        .appended
+        .borrow()
+        .iter()
+        .zip(world.host.appended_ids.borrow().iter())
+        .filter(|((_, _, e), _)| e["event"]["type"] != "Presence")
+        .map(|(_, id)| id.clone())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(
+        ids.iter()
+            .all(|id| id.as_deref().is_some_and(|id| id.starts_with("evt"))),
+        "every runner event is appended with its frame event_id: {ids:?}"
+    );
+}
 
 #[test]
 fn events_are_appended_in_order_acked_and_retransmits_are_not_appended_again() {
