@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 123/282 (4 dropped) · in-flight M2B-004f,M3-002,M3-001k,M2B-019a · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 117/200
+done 125/282 (4 dropped) · in-flight M3-002,M2-003f,M2B-019a · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 118/200
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 123/282 (4 dropped) · in-flight M2B-004f,M3-002,M3-001k,M2B-019a · blocke
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 61 | 2 |
-| P3 | 27 | 9 | 2 |
-| P4 | 58 | 0 | 0 |
+| P2 | 69 | 62 | 1 |
+| P3 | 28 | 10 | 2 |
+| P4 | 57 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 17 | 0 | 0 |
@@ -49,7 +49,7 @@ done 123/282 (4 dropped) · in-flight M2B-004f,M3-002,M3-001k,M2B-019a · blocke
 | M2B-005b | worker | rust | done | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
 | M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
 | M2B-006c | worker | rust | done | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
-| M2B-004f | worker | rust | assigned | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
+| M2B-004f | worker | rust | done | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
 | M2B-007a | worker | rust | done | sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout) |
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
 | M2-003c | worker | rust | done | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
