@@ -349,6 +349,7 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
     let (db, owner, _) = bootstrapped();
     let (_, member_token) = issue(&db, &owner, "member");
     let (_, viewer_token) = issue(&db, &owner, "viewer");
+    host_thread(&db, "t1", &owner.org_id);
     let go = |token: &str, method: &str, path: &str| {
         block_on(authorize_thread(
             &db,
@@ -431,6 +432,121 @@ fn thread_routes_enforce_roles_and_audit_mutations() {
         404
     );
     assert_eq!(db.rows("SELECT id FROM audit_log").len(), before);
+}
+
+/// Records `thread` as hosted for `org_id` (what thread creation, `thread_open` and the dev
+/// init route do).
+fn host_thread(db: &Fake, thread: &str, org_id: &str) {
+    assert!(
+        block_on(crate::db::queries::claim_thread_host(
+            db, thread, org_id, "mach_1"
+        ))
+        .expect("claim")
+    );
+}
+
+/// A second org, and an owner-role principal of it (to issue its members' sessions).
+fn second_org(db: &Fake, owner_a: &Principal) -> Principal {
+    db.exec("INSERT INTO orgs (id, slug, name) VALUES ('org_b', 'other', 'Other')");
+    Principal {
+        org_id: "org_b".to_owned(),
+        ..owner_a.clone()
+    }
+}
+
+#[test]
+fn thread_routes_are_scoped_to_the_callers_org() {
+    let (db, owner, owner_token) = bootstrapped();
+    let (_, member_token) = issue(&db, &owner, "member");
+    let other_owner = second_org(&db, &owner);
+    let issue_b = |role: &str| {
+        let out = block_on(issue_session(
+            &db,
+            &other_owner,
+            &json!({ "role": role }),
+            "req_b",
+        ))
+        .expect("issue in org b");
+        out["session"]["token"].as_str().expect("token").to_owned()
+    };
+    let (other_viewer, other_member, other_admin) =
+        (issue_b("viewer"), issue_b("member"), issue_b("admin"));
+    host_thread(&db, "th_a", &owner.org_id);
+    let go = |token: &str, method: &str, path: &str| {
+        block_on(authorize_thread(
+            &db,
+            Some(&bearer(token)),
+            false,
+            method,
+            path,
+            "req_t",
+        ))
+    };
+    let routes = [
+        ("GET", "/v1/threads/th_a"),
+        ("GET", "/v1/threads/th_a/subscribe"),
+        ("GET", "/v1/threads/th_a/pending"),
+        ("POST", "/v1/threads/th_a/prompts"),
+        ("POST", "/v1/threads/th_a/cancel"),
+        ("POST", "/v1/threads/th_a/interrupts/i1"),
+        ("POST", "/v1/threads/th_a/session"),
+        ("DELETE", "/v1/threads/th_a/pending/k1"),
+    ];
+    // Org A: every route works for its own members.
+    for (method, path) in routes {
+        let token = if method == "DELETE" {
+            &owner_token
+        } else {
+            &member_token
+        };
+        go(token, method, path).unwrap_or_else(|e| panic!("{method} {path}: {e:?}"));
+    }
+    let audited = db
+        .rows("SELECT id FROM audit_log WHERE action LIKE 'thread.%'")
+        .len();
+    // Org B (a viewer for reads, a member for writes): 404 everywhere, and nothing audited.
+    for (method, path) in routes {
+        let token = match method {
+            "GET" => &other_viewer,
+            "DELETE" => &other_admin,
+            _ => &other_member,
+        };
+        let error = go(token, method, path).expect_err(path);
+        assert_eq!(
+            (error.status, error.code),
+            (404, "not_found"),
+            "{method} {path}"
+        );
+    }
+    // An unknown thread is the same 404.
+    let error = go(&member_token, "POST", "/v1/threads/th_nope/prompts").expect_err("unknown");
+    assert_eq!((error.status, error.code), (404, "not_found"));
+    assert_eq!(
+        db.rows("SELECT id FROM audit_log WHERE action LIKE 'thread.%'")
+            .len(),
+        audited,
+        "a refused request writes no audit row"
+    );
+}
+
+#[test]
+fn a_thread_host_is_claimed_once_and_idempotently() {
+    use crate::db::queries::{claim_thread_host, thread_org};
+    let (db, owner, _) = bootstrapped();
+    assert_eq!(block_on(thread_org(&db, "th_1")).expect("read"), None);
+    assert!(block_on(claim_thread_host(&db, "th_1", &owner.org_id, "m1")).expect("claim"));
+    // Same org again: fine, and the first machine stays.
+    assert!(block_on(claim_thread_host(&db, "th_1", &owner.org_id, "m2")).expect("again"));
+    // Another org: refused, mapping unchanged.
+    assert!(!block_on(claim_thread_host(&db, "th_1", "org_other", "m3")).expect("foreign"));
+    assert_eq!(
+        block_on(thread_org(&db, "th_1")).expect("read").as_deref(),
+        Some(owner.org_id.as_str())
+    );
+    assert_eq!(
+        db.rows("SELECT machine_id FROM thread_hosts WHERE thread_id = 'th_1'")[0]["machine_id"],
+        "m1"
+    );
 }
 
 #[test]

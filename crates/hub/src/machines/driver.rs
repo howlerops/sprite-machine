@@ -396,6 +396,7 @@ where
                     Ok(_) => {
                         if let Some(map) = info.as_object_mut() {
                             map.insert("machine_id".to_owned(), json!(machine_id));
+                            map.insert("org_id".to_owned(), json!(core.borrow().state().org_id));
                         }
                         match host.init_thread(thread_id, &info).await {
                             Ok(()) => {

@@ -896,6 +896,10 @@ fn thread_open_registers_a_thread_unless_another_machine_hosts_it() {
     assert_eq!(inits.len(), 1);
     assert_eq!(inits[0].0, "th_new");
     assert_eq!(inits[0].1["machine_id"], MACHINE);
+    assert_eq!(
+        inits[0].1["org_id"], "org_1",
+        "the machine's org travels with the init"
+    );
     assert_eq!(inits[0].1["title"], "fix flaky test");
     drop(inits);
     assert_eq!(world.host.deltas(), ["hi"]);

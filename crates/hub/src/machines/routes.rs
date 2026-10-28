@@ -9,12 +9,13 @@
 //! | `POST /v1/dev/machines/{id}/credential`          | `Bearer dev` + `DEV_FIXTURES=1`, no D1       |
 //! | `POST /v1/dev/machines/{id}/commands`            | same: push commands as a Thread DO would     |
 //! | `GET /v1/dev/machines/{id}/state`                | same: the Machine DO's state                 |
-//! | `POST /v1/dev/threads/{id}/init`                 | same: the Thread DO init hook                |
+//! | `POST /v1/dev/threads/{id}/init`                 | same: the Thread DO init hook; also maps the thread to the dev org (D1 `thread_hosts`) |
+//! | `POST /v1/dev/threads/{id}/host`                 | same: only the `thread_hosts` mapping (fixtures that write events without an init) |
 //!
 //! The tunnel route forwards the upgrade to the Machine DO named by the machine id, and the DO
 //! authenticates the credential itself (tunnel.md §2). Session-token routes use the auth of
 //! M2-003a (`authenticate`, `Principal::require`, `audit::record` inside `admin`). The dev
-//! routes never touch D1.
+//! routes touch D1 only for the thread-host mapping (M2-008e).
 
 use std::collections::HashMap;
 
@@ -36,6 +37,7 @@ use crate::auth::routes::error_response;
 use crate::auth::service::parse_body;
 use crate::auth::{authenticate, bearer_token, dev_fixtures_enabled};
 use crate::db::d1::D1;
+use crate::db::queries;
 use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::threads::ApiError;
 use crate::worker::AppState;
@@ -58,6 +60,7 @@ pub fn machine_routes() -> Router<AppState> {
         .route("/v1/dev/machines/{machine_id}/commands", post(dev_commands))
         .route("/v1/dev/machines/{machine_id}/state", get(dev_state))
         .route("/v1/dev/threads/{thread_id}/init", post(dev_thread_init))
+        .route("/v1/dev/threads/{thread_id}/host", post(dev_thread_host))
 }
 
 fn dev_fixtures(env: &Env) -> bool {
@@ -319,6 +322,9 @@ async fn dev_thread_init(
     match checked {
         Err(error) => error_response(&error),
         Ok((thread_id, body)) => {
+            if let Err(error) = claim_dev_thread(&env, &thread_id, &body).await {
+                return error_response(&error);
+            }
             let path = format!("/internal/threads/{thread_id}/init");
             forward_json(
                 &env,
@@ -331,4 +337,50 @@ async fn dev_thread_init(
             .await
         }
     }
+}
+
+/// Maps the thread to the dev org (M2-008e) before the init reaches the Thread DO. A thread
+/// already mapped to another org is `404`, as on the client routes.
+async fn claim_dev_thread(env: &Env, thread_id: &str, body: &Value) -> Result<(), ApiError> {
+    let machine_id = body
+        .get("machine_id")
+        .and_then(Value::as_str)
+        .filter(|id| is_valid_id(id))
+        .ok_or_else(|| ApiError::invalid_request("machine_id is required"))?;
+    let database = database(env)?;
+    let db = D1::new(&database);
+    // Creates the dev org on first use; the claim then names it.
+    let dev = authenticate(&db, Some("Bearer dev"), true).await?;
+    let mapped = queries::claim_thread_host(&db, thread_id, &dev.org_id, machine_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("machines: {error}")))?;
+    if mapped {
+        Ok(())
+    } else {
+        Err(ApiError::not_found(format!("no thread {thread_id}")))
+    }
+}
+
+/// `POST /v1/dev/threads/{id}/host` `{machine_id}`: maps the thread to the dev org without
+/// touching the Thread DO, for fixtures that append events directly (an init would add a
+/// `thread` state snapshot to the log).
+#[worker::send]
+async fn dev_thread_host(
+    State(env): State<AppState>,
+    Path(params): Path<HashMap<String, String>>,
+    req: Request,
+) -> Response {
+    let result = async {
+        require_dev(&env, req.headers())?;
+        let thread_id = params
+            .get("thread_id")
+            .filter(|id| is_valid_id(id))
+            .cloned()
+            .ok_or_else(|| ApiError::invalid_request("thread_id must be 1-128 characters"))?;
+        let (_, body) = read_body(req).await?;
+        claim_dev_thread(&env, &thread_id, &body).await?;
+        Ok(json!({ "thread_id": thread_id, "org_id": DEV_ORG_ID }))
+    }
+    .await;
+    respond(result, StatusCode::OK)
 }

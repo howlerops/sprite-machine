@@ -11,7 +11,7 @@ use super::policy::{Policy, thread_policy};
 use super::token::{self, new_id, new_token, secrets_match};
 use super::{Principal, authenticate, bearer_token, store};
 use crate::audit::{self, Event};
-use crate::db::{Db, DbError, Role};
+use crate::db::{Db, DbError, Role, queries};
 use crate::threads::ApiError;
 
 /// Default and maximum session lifetime for [`issue_session`], in seconds.
@@ -380,7 +380,7 @@ async fn revoke(
 }
 
 /// The per-request gate of a thread route: authenticate, find the route's policy, check the
-/// role (`403 forbidden`), and write the audit row for a mutation before it is forwarded (if
+/// role (`403 forbidden`), check the thread belongs to the caller's org (`404`), and write the audit row for a mutation before it is forwarded (if
 /// the audit write fails the request fails and nothing mutates).
 pub async fn authorize_thread(
     db: &impl Db,
@@ -398,6 +398,17 @@ pub async fn authorize_thread(
         return Err(ApiError::invalid_request(
             "thread_id must be 1-128 characters of [A-Za-z0-9_:.-]",
         ));
+    }
+    // A thread is visible to the members of the org that owns its machine: no host row, or
+    // another org's, is one `404` (before any audit row or Thread DO call).
+    let owner = queries::thread_org(db, &policy.thread_id)
+        .await
+        .map_err(db_failure)?;
+    if owner.as_deref() != Some(principal.org_id.as_str()) {
+        return Err(ApiError::not_found(format!(
+            "no thread {}",
+            policy.thread_id
+        )));
     }
     if let Some(action) = policy.action {
         let mut detail = json!({ "thread_id": policy.thread_id });

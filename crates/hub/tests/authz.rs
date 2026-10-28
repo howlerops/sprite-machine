@@ -165,6 +165,27 @@ fn issue(role: &str, ttl_seconds: Option<i64>) -> (String, String, String) {
     )
 }
 
+/// A thread of the dev org, recorded through the init hook as thread creation does (thread
+/// routes answer 404 for a thread without a host row).
+fn hosted_thread() -> String {
+    let thread = unique("thr");
+    let reply = http(
+        "POST",
+        &format!("/v1/dev/threads/{thread}/init"),
+        Some("dev"),
+        &[],
+        Some(&json!({
+            "machine_id": unique("mch"),
+            "agent": "claude",
+            "title": "authz",
+            "workspace": { "path": "/tmp/work" },
+            "permission_mode": "default",
+        })),
+    );
+    assert_eq!(reply.status, 200, "thread init: {}", reply.body);
+    thread
+}
+
 fn prompt(thread: &str, token: &str, request_id: &str) -> Reply {
     http(
         "POST",
@@ -311,8 +332,8 @@ fn wrong_or_missing_bootstrap_token_is_401() {
 #[test]
 fn session_issue_use_and_revoke() {
     let (token, session_id, _) = issue("member", None);
-    let thread = unique("thr");
-    // Use: a member reads a thread (404, the thread does not exist: authenticated, not 401/403).
+    let thread = hosted_thread();
+    // Use: a member reads a thread of its org.
     let read = http(
         "GET",
         &format!("/v1/threads/{thread}"),
@@ -320,7 +341,7 @@ fn session_issue_use_and_revoke() {
         &[],
         None,
     );
-    assert_eq!(read.status, 404, "read: {}", read.body);
+    assert_eq!(read.status, 200, "read: {}", read.body);
 
     let revoke = http(
         "DELETE",
@@ -357,10 +378,10 @@ fn session_issue_use_and_revoke() {
 #[test]
 fn an_expired_session_is_401() {
     let (token, _, _) = issue("member", Some(1));
-    let thread = unique("thr");
+    let thread = hosted_thread();
     let path = format!("/v1/threads/{thread}");
     let before = http("GET", &path, Some(&token), &[], None);
-    assert_eq!(before.status, 404, "fresh session works: {}", before.body);
+    assert_eq!(before.status, 200, "fresh session works: {}", before.body);
     std::thread::sleep(Duration::from_millis(2500));
     let after = http("GET", &path, Some(&token), &[], None);
     assert_eq!(after.status, 401, "expired session: {}", after.body);
@@ -375,7 +396,7 @@ fn an_admin_revokes_another_users_session_and_a_member_cannot() {
     assert_eq!(denied.status, 403, "member revoke: {}", denied.body);
     let ok = http("DELETE", &path, Some("dev"), &[], None);
     assert_eq!(ok.status, 200, "admin revoke: {}", ok.body);
-    let thread = unique("thr");
+    let thread = hosted_thread();
     let after = http(
         "GET",
         &format!("/v1/threads/{thread}"),
@@ -396,7 +417,7 @@ fn an_admin_revokes_another_users_session_and_a_member_cannot() {
 
 #[test]
 fn unknown_and_malformed_tokens_are_401() {
-    let thread = unique("thr");
+    let thread = hosted_thread();
     let path = format!("/v1/threads/{thread}");
     let forged = format!("smt_{}", "0".repeat(64));
     for token in [None, Some("garbage"), Some(forged.as_str()), Some("smt_")] {
@@ -409,7 +430,7 @@ fn unknown_and_malformed_tokens_are_401() {
 #[test]
 fn a_viewer_cannot_send_prompts_approve_cancel_or_delete() {
     let (viewer, _, _) = issue("viewer", None);
-    let thread = unique("thr");
+    let thread = hosted_thread();
     let request = unique("authz-viewer");
     for (name, reply) in [
         ("prompt", prompt(&thread, &viewer, &request)),
@@ -456,7 +477,7 @@ fn a_viewer_cannot_send_prompts_approve_cancel_or_delete() {
 #[test]
 fn a_member_can_send_approve_and_cancel_but_not_delete() {
     let (member, _, user_id) = issue("member", None);
-    let thread = unique("thr");
+    let thread = hosted_thread();
     let sent = prompt(&thread, &member, "authz-member");
     assert!(
         sent.status < 300,
@@ -488,7 +509,7 @@ fn a_member_can_send_approve_and_cancel_but_not_delete() {
 fn an_admin_may_delete_pending_and_every_mutation_is_audited() {
     let (admin, _, admin_user) = issue("admin", None);
     let (member, member_session, member_user) = issue("member", None);
-    let thread = unique("thr");
+    let thread = hosted_thread();
     let request = unique("authz-audit");
 
     prompt(&thread, &member, &request);

@@ -43,7 +43,7 @@ use crate::audit::{self, Event};
 use crate::auth::{
     Principal, authenticate, policy::thread_policy, routes::authorize_thread_request,
 };
-use crate::db::{Db, d1::D1};
+use crate::db::{Db, d1::D1, queries};
 use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::worker::AppState;
 
@@ -212,6 +212,13 @@ async fn create_inner(env: &Env, req: Request) -> Result<Response, ApiError> {
         .filter(|id| is_valid_id(id))
         .ok_or_else(|| ApiError::invalid_request("machine_id is required"))?;
     require_machine_of_org(&db, machine_id, &principal.org_id).await?;
+    // Map the thread to the caller's org before anything is audited or created (M2-008e).
+    let mapped = queries::claim_thread_host(&db, &thread_id, &principal.org_id, machine_id)
+        .await
+        .map_err(|error| ApiError::internal(format!("threads: {error}")))?;
+    if !mapped {
+        return Err(ApiError::not_found(format!("no thread {thread_id}")));
+    }
     audit::record(
         &db,
         &Event::by(

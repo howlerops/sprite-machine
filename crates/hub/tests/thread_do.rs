@@ -292,7 +292,19 @@ fn unique_thread(name: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or_default();
-    format!("th_{name}_{}_{nanos:x}", std::process::id())
+    let thread = format!("th_{name}_{}_{nanos:x}", std::process::id());
+    // Every thread route answers 404 for a thread without a host row (M2-008e): map it to the
+    // dev org, as thread creation would. Only the mapping: an init would add a `thread`
+    // snapshot to the log, and these tests count seqs.
+    let hosted = http(
+        "POST",
+        &format!("/v1/dev/threads/{thread}/host"),
+        true,
+        None,
+        Some(&json!({ "machine_id": "mch_thread_do" })),
+    );
+    assert_eq!(hosted.status, 200, "host thread: {}", hosted.body);
+    thread
 }
 
 fn now_ms() -> u64 {

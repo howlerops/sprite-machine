@@ -404,6 +404,36 @@ fn audit_from_row(row: &Row) -> Result<AuditEntry, DbError> {
     })
 }
 
+// ---- thread hosts --------------------------------------------------------------------------
+
+/// Maps `thread_id` to `org_id` (and its host machine), once. Idempotent for the same org;
+/// returns `false` (and changes nothing) when the thread is already mapped to another org.
+pub async fn claim_thread_host(
+    db: &impl Db,
+    thread_id: &str,
+    org_id: &str,
+    machine_id: &str,
+) -> Result<bool, DbError> {
+    db.execute(
+        "INSERT INTO thread_hosts (thread_id, org_id, machine_id) VALUES (?, ?, ?) \
+         ON CONFLICT(thread_id) DO NOTHING",
+        &[thread_id.into(), org_id.into(), machine_id.into()],
+    )
+    .await?;
+    Ok(thread_org(db, thread_id).await?.as_deref() == Some(org_id))
+}
+
+/// The org that owns the thread, if it has a host row.
+pub async fn thread_org(db: &impl Db, thread_id: &str) -> Result<Option<String>, DbError> {
+    let rows = db
+        .query(
+            "SELECT org_id FROM thread_hosts WHERE thread_id = ?",
+            &[thread_id.into()],
+        )
+        .await?;
+    rows.first().map(|row| text(row, "org_id")).transpose()
+}
+
 #[cfg(test)]
 mod tests {
     use super::fts_match_expression;
