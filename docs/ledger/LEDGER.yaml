@@ -1454,6 +1454,9 @@ items:
     title: 'hub: D1 schema + migrations (org-wide metadata)'
     milestone: M2
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 1
     deps: [M2-001]
     paths:
