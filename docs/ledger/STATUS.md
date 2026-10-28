@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d,M2B-005 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 64/120
+done 67/226 (3 dropped) · in-flight M2-008b,MVP-000d,M2B-005 · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 64/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d,M2B-005 · blocked 11 (hum
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 45 | 14 | 3 |
+| P2 | 46 | 14 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 34 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -43,6 +43,7 @@ done 67/225 (3 dropped) · in-flight M2-008b,MVP-000d,M2B-005 · blocked 11 (hum
 | CI-002 | worker | docs | todo | scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree's hub.wasm stand in) |
 | M1A-006f | worker | rust | todo | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
 | M2B-004e | worker | rust | todo | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
+| M2-008e | worker | rust | todo | hub authz (security): every thread route checks the thread belongs to the caller's org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404 |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | todo | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |

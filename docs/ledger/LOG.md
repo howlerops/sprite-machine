@@ -146,3 +146,5 @@
 2026-10-28T08:47Z M2-008d → done (live: foreign/unknown/revoked machine all 404 with nothing written). Tracer exited 1 once with no output under load; PASS on re-run
 2026-10-28T08:47Z M2B-004d assigned→done merged 17a420c (haiku); added M2B-004e (startup wiring, logind inhibitor, macOS watcher)
 2026-10-28T08:48Z M2B-005 assigned (sonnet; size L)
+2026-10-28T08:51Z M2-008b merged 115136a (haiku). Leader review: its session handler gated only on the caller's own role. Fixed 609d261: policy rule (member, thread.session) + route through forward/authorize_thread
+2026-10-28T08:51Z SECURITY (leader review): authorize_thread never checks that a thread belongs to the caller's org; with a valid session, any member can subscribe/prompt/answer/cancel on another org's thread if they know its id. Not deployed, so no exposure. Added M2-008e (priority 1, high, after MVP-000d)
