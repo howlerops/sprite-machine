@@ -5,14 +5,20 @@
 //! - [`enqueue`]: one message per [`NotifyJob`] (ids only). A failed send is logged and dropped:
 //!   a missed push must never fail the append that caused it.
 //! - [`consume`]: per message, parse the job, run `process_job` (prefs, send, delete gone
-//!   subscriptions) and `retry()` the message when a push service answered 5xx or 429 or a
-//!   database call failed; everything else is acknowledged. Within a batch only the last job per
-//!   task is sent (`collapse_batch`); across batches the `Topic` header does the same at the push
-//!   service. Logs carry counts only, never endpoints, keys or payloads.
+//!   subscriptions). A push service that answered 5xx or 429 (or a network error) leaves that
+//!   subscription pending: the job is re-queued with only those subscriptions
+//!   (`NotifyJob::follow_up`), so a delivered subscription never gets the notification twice. A
+//!   database failure before any send `retry()`s the message; everything else is acknowledged.
+//!   Within a batch only the last job per task is sent (`collapse_batch`); across batches the
+//!   `Topic` header does the same at the push service. Logs carry counts only, never endpoints,
+//!   keys or payloads.
 
 use worker::js_sys::Uint8Array;
 use worker::wasm_bindgen::JsValue;
-use worker::{Env, Fetch, Headers, MessageBatch, MessageExt, Method, Request, RequestInit, Result};
+use worker::{
+    Env, Fetch, Headers, MessageBatch, MessageBuilder, MessageExt, Method, Request, RequestInit,
+    Result,
+};
 
 use crate::db::d1::D1;
 use crate::notify::env::load_vapid;
@@ -22,6 +28,10 @@ use crate::notify::service::{collapse_batch, process_job};
 
 /// The Queue producer binding (wrangler.toml `[[queues.producers]]`).
 const NOTIFY_BINDING: &str = "NOTIFY";
+
+/// Seconds before a follow-up job (the failed subscriptions of an earlier send) is delivered, so a
+/// push service that answered 5xx gets a moment to recover.
+const FOLLOW_UP_DELAY_SECS: u32 = 5;
 
 /// Sends `jobs` to the NOTIFY queue. Never fails the caller.
 pub async fn enqueue(env: &Env, jobs: &[NotifyJob]) {
@@ -77,6 +87,7 @@ pub async fn consume(batch: MessageBatch<serde_json::Value>, env: &Env) -> Resul
     let valid: Vec<NotifyJob> = jobs.iter().flatten().cloned().collect();
     let mut keep = collapse_batch(&valid).into_iter();
 
+    let queue = env.queue(NOTIFY_BINDING)?;
     let database = env.d1("DB")?;
     let db = D1::new(&database);
     let providers = Providers {
@@ -89,7 +100,8 @@ pub async fn consume(batch: MessageBatch<serde_json::Value>, env: &Env) -> Resul
     };
     let now_ms = worker::Date::now().as_millis();
 
-    let (mut delivered, mut skipped, mut removed, mut failed, mut retried) = (0, 0, 0, 0, 0);
+    let (mut delivered, mut skipped, mut removed, mut failed, mut retried, mut requeued) =
+        (0, 0, 0, 0, 0, 0);
     for (message, job) in messages.iter().zip(&jobs) {
         let Some(job) = job else {
             worker::console_log!("notify: dropping a malformed job");
@@ -106,11 +118,32 @@ pub async fn consume(batch: MessageBatch<serde_json::Value>, env: &Env) -> Resul
                 skipped += report.skipped;
                 removed += report.removed;
                 failed += report.failed;
-                if report.retry {
-                    retried += 1;
-                    message.retry();
-                } else {
-                    message.ack();
+                let pending = report.pending.len();
+                match job.follow_up(report.pending) {
+                    Some(follow_up) => {
+                        let sent = MessageBuilder::new(&follow_up)
+                            .delay_seconds(FOLLOW_UP_DELAY_SECS)
+                            .build();
+                        match queue.send(sent).await {
+                            Ok(()) => {
+                                requeued += 1;
+                                message.ack();
+                            }
+                            // Nothing was re-queued: retry this message (it may re-send to the
+                            // subscriptions that were delivered; only a failed enqueue does this).
+                            Err(error) => {
+                                worker::console_log!("notify: requeue failed: {error}");
+                                retried += 1;
+                                message.retry();
+                            }
+                        }
+                    }
+                    None => {
+                        if pending > 0 {
+                            worker::console_log!("notify: gave up on {pending} subscriptions");
+                        }
+                        message.ack();
+                    }
                 }
             }
             Err(error) => {
@@ -121,7 +154,7 @@ pub async fn consume(batch: MessageBatch<serde_json::Value>, env: &Env) -> Resul
         }
     }
     worker::console_log!(
-        "{{\"queue\":\"{}\",\"messages\":{},\"delivered\":{delivered},\"skipped\":{skipped},\"removed\":{removed},\"failed\":{failed},\"retried\":{retried}}}",
+        "{{\"queue\":\"{}\",\"messages\":{},\"delivered\":{delivered},\"skipped\":{skipped},\"removed\":{removed},\"failed\":{failed},\"requeued\":{requeued},\"retried\":{retried}}}",
         batch.queue(),
         messages.len()
     );

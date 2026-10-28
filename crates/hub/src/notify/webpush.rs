@@ -261,22 +261,6 @@ impl Vapid {
         })
     }
 
-    /// A deterministic key for local development, derived from `seed` (a per-run secret such as
-    /// `ATTACHMENT_SIGNING_KEY`). Only used when `DEV_FIXTURES=1` and no `VAPID_PRIVATE_KEY` is
-    /// set; production never falls back to it.
-    pub fn dev_derived(seed: &str, subject: &str) -> Result<Self, WebPushError> {
-        let hkdf = Hkdf::<Sha256>::new(Some(b"sm-hub dev vapid"), seed.as_bytes());
-        for counter in 0_u8..8 {
-            let mut scalar = [0_u8; 32];
-            hkdf.expand(&[b'v', counter], &mut scalar)
-                .map_err(|_| WebPushError::BadVapidKey)?;
-            if let Ok(vapid) = Self::from_scalar(&scalar, subject) {
-                return Ok(vapid);
-            }
-        }
-        Err(WebPushError::BadVapidKey)
-    }
-
     /// The public key, base64url of the uncompressed point: the `k=` parameter and the
     /// `applicationServerKey` the phone subscribes with.
     pub fn public_key(&self) -> &str {

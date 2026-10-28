@@ -15,7 +15,7 @@ use rusqlite::params_from_iter;
 use rusqlite::types::Value as SqlValue;
 use serde_json::{Value, json};
 
-use super::job::{Kind, Notification, NotifyJob, jobs_for};
+use super::job::{Kind, MAX_ATTEMPTS, Notification, NotifyJob, jobs_for};
 use super::provider::{
     Apns, Delivery, Fcm, HttpSender, ProviderKind, Providers, PushProvider, PushRequest,
     Subscription, WebPush,
@@ -464,6 +464,8 @@ fn payload_is_ids_a_generic_title_and_approval_actions() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        subscriptions: None,
+        attempt: 0,
     };
     assert_eq!(
         Notification::new(done).payload(),
@@ -480,6 +482,8 @@ fn topic_is_the_task_id_or_a_32_character_hash() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        subscriptions: None,
+        attempt: 0,
     };
     assert_eq!(
         Notification::new(job(Some("tk_01JBX5"))).topic(),
@@ -507,6 +511,8 @@ fn a_batch_sends_only_the_last_job_per_task() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        subscriptions: None,
+        attempt: 0,
     };
     let jobs = [
         job("tk_1", Kind::ApprovalNeeded),
@@ -554,6 +560,8 @@ fn job_for(thread: &str, kind: Kind) -> NotifyJob {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        subscriptions: None,
+        attempt: 0,
     }
 }
 
@@ -670,14 +678,14 @@ fn gone_subscriptions_are_deleted_and_temporary_failures_ask_for_a_retry() {
     let db = subscribed_world();
     let web = Recording::new(Delivery::Gone);
     let report = run(&db, &web, &job_for("th_1", Kind::TaskDone), NOON);
-    assert_eq!((report.removed, report.retry), (3, false));
+    assert_eq!((report.removed, report.pending.len()), (3, 0));
     // Org A's three subscriptions are gone, Eve's stays.
     assert_eq!(db.count("push_subscriptions"), 1);
 
     let db = subscribed_world();
     let web = Recording::new(Delivery::Retry("push service answered 503".into()));
     let report = run(&db, &web, &job_for("th_1", Kind::TaskDone), NOON);
-    assert!(report.retry);
+    assert_eq!(report.pending.len(), 3, "each 5xx subscription is pending");
     assert_eq!(
         db.count("push_subscriptions"),
         4,
@@ -686,7 +694,68 @@ fn gone_subscriptions_are_deleted_and_temporary_failures_ask_for_a_retry() {
 
     let web = Recording::new(Delivery::Failed("push service answered 400".into()));
     let report = run(&db, &web, &job_for("th_1", Kind::TaskDone), NOON);
-    assert_eq!((report.failed, report.retry), (3, false));
+    assert_eq!((report.failed, report.pending.len()), (3, 0));
+}
+
+/// Sends to the subscriptions of `failing` with a 5xx and to the others with a 201.
+struct FailFor {
+    failing: &'static str,
+    sent: RefCell<Vec<String>>,
+}
+
+impl PushProvider for FailFor {
+    async fn send(&self, sub: &Subscription, _: &Notification, _: u64) -> Delivery {
+        self.sent.borrow_mut().push(sub.user_id.clone());
+        if sub.user_id == self.failing {
+            Delivery::Retry("push service answered 503".into())
+        } else {
+            Delivery::Delivered
+        }
+    }
+}
+
+#[test]
+fn a_partly_failed_job_is_followed_up_for_its_failed_subscriptions_only() {
+    let db = subscribed_world();
+    let job = job_for("th_1", Kind::TaskDone);
+
+    // First send: ada and vic get it, bob's 503 stays pending.
+    let providers = Providers {
+        web: FailFor {
+            failing: "u_bob",
+            sent: RefCell::new(Vec::new()),
+        },
+        apns: Apns,
+        fcm: Fcm,
+    };
+    let report = block_on(process_job(&db, &providers, &job, NOON)).expect("process");
+    assert_eq!((report.delivered, report.pending.len()), (2, 1));
+    let mut sent = providers.web.sent.borrow().clone();
+    sent.sort();
+    assert_eq!(sent, ["u_ada", "u_bob", "u_vic"]);
+
+    // The follow-up carries only the pending subscription: nobody else is sent to again.
+    let follow_up = job.follow_up(report.pending).expect("a follow-up job");
+    assert_eq!(follow_up.attempt, 1);
+    let providers = Providers {
+        web: FailFor {
+            failing: "none",
+            sent: RefCell::new(Vec::new()),
+        },
+        apns: Apns,
+        fcm: Fcm,
+    };
+    let report = block_on(process_job(&db, &providers, &follow_up, NOON)).expect("process");
+    assert_eq!(providers.web.sent.borrow().as_slice(), ["u_bob"]);
+    assert_eq!((report.delivered, report.pending.len()), (1, 0));
+    assert!(follow_up.follow_up(Vec::new()).is_none());
+
+    // The chain ends after MAX_ATTEMPTS sends: the last job has attempt MAX_ATTEMPTS - 1.
+    let mut job = follow_up;
+    while let Some(next) = job.follow_up(vec!["sub".into()]) {
+        job = next;
+    }
+    assert_eq!(job.attempt, MAX_ATTEMPTS - 1);
 }
 
 #[test]

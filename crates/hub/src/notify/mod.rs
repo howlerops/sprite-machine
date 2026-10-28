@@ -11,7 +11,9 @@
 //!        per subscription: role (approvals need member), prefs (class off, thread muted,
 //!        quiet hours -> skip), then the provider of the subscription's kind
 //!   -> WebPush: RFC 8291 aes128gcm body + RFC 8292 VAPID header, POST to the push service
-//!        2xx delivered | 404, 410 delete the subscription | 5xx, 429 queue retry | other 4xx dropped
+//!        2xx delivered | 404, 410 delete the subscription | 5xx, 429 pending | other 4xx dropped
+//!   -> pending subscriptions only    the job is re-queued with `subscriptions` = the pending ids
+//!        (`NotifyJob::follow_up`, at most `MAX_ATTEMPTS` sends); delivered ones are not sent to again
 //! ```
 //!
 //! - [`webpush`]: the crypto (`encrypt`, checked against the RFC 8291 Appendix A vector) and
