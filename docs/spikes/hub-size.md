@@ -181,3 +181,29 @@ numbers. Re-measure after the discovered work lands.
   `strip = true` (for example a wasm-opt pass in worker-build config, or a worker-build version
   that fixes the externref catch-wrapper error). Expected gain: about 690 KB raw, about 1/3 of the
   binary. This is the largest single lever found.
+
+## After MVP-000f (2026-10-28)
+
+The `name` and `producers` custom sections are dropped after `worker-build` by
+`cli wasm strip-names` (crates/cli/src/wasm.rs). The step is the second command of the
+`[build]` command in `crates/hub/wrangler.toml`; the tracer runs the same function after
+`worker-build`. Every other section is copied byte for byte, so code offsets do not change.
+`strip = true` is still not used.
+
+Measured with `cargo run -p cli -- e2e tracer`, on this tree, in the same run conditions as the
+"Before" section (the tree is the commit before this change, `ccb4417`, for "before"):
+
+| Item | Before raw / gzip -9 | After raw / gzip -9 |
+| --- | ---: | ---: |
+| `build/index_bg.wasm` | 2,357,973 / 663,536 | 1,543,450 / 576,194 |
+| `build/index.js` | 38,098 / 8,948 | 38,098 / 8,948 |
+| **Bundle (tracer's gzip sum)** | | **672,484 before, 585,142 after** |
+
+- Wasm raw size: -814,523 bytes (-34.5%). The name section is about a third of the raw binary,
+  as twiggy showed.
+- Bundle gzip: -87,342 bytes (-13.0%). The name section compresses well (about 7.6:1 with gzip
+  -9), so it is only about 87 KB of the gzip bundle.
+- **Target not met:** the item asked for at least 25% smaller gzip bundle (at most 504,363 bytes).
+  Dropping the name section alone cannot reach it; the rest of the gzip bundle is hub, protocol,
+  serde, axum and workers-rs code, which this item may not change. See the MVP-000f report for
+  the blocked_on note.

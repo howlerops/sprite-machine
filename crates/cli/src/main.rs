@@ -5,13 +5,14 @@
 //! ```
 
 mod e2e;
+mod wasm;
 
 use anyhow::{Result, bail};
 
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str = "usage: cli e2e tracer";
+const USAGE: &str = "usage: cli e2e tracer | cli wasm strip-names <file.wasm>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,6 +25,7 @@ async fn main() -> Result<()> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["e2e", rest @ ..] => e2e::run(rest).await,
+        ["wasm", rest @ ..] => wasm::run(rest),
         ["--version"] => {
             println!("{CRATE} {}", env!("CARGO_PKG_VERSION"));
             Ok(())
