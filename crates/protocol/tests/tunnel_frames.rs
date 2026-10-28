@@ -660,3 +660,38 @@ fn interrupt_answer_result_example_roundtrips() {
         r#"{"t":"interrupt_answer_result","answer_id":"a","status":"rejected","message":"no interrupt int_9"}"#,
     );
 }
+
+#[test]
+fn prompt_submit_example_roundtrips() {
+    let frame = roundtrip_frame(
+        r#"{
+  "t": "prompt_submit",
+  "seq": 123,
+  "event_id": "evt_01JBW5F7K2",
+  "thread_id": "th_1",
+  "task_id": "tk_loc3",
+  "message_id": "msg_loc3",
+  "parts": [{ "type": "text", "text": "and run the tests" }]
+}"#,
+    );
+    match frame {
+        Frame::PromptSubmit {
+            seq,
+            task_id,
+            message_id,
+            parts,
+            ..
+        } => {
+            assert_eq!(seq, 123);
+            assert_eq!(task_id, "tk_loc3");
+            assert_eq!(message_id, "msg_loc3");
+            assert_eq!(
+                parts,
+                [ContentPart::Text {
+                    text: "and run the tests".to_owned()
+                }]
+            );
+        }
+        other => panic!("expected prompt_submit, got {other:?}"),
+    }
+}

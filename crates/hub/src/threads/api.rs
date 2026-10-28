@@ -30,12 +30,13 @@
 //! | `GET  /internal/threads/{id}/commands?limit=N`    | `{commands: [...]}` not yet acked  |
 //! | `POST /internal/threads/{id}/commands/ack`        | `{ids: [..]}`                      |
 //! | `POST /internal/threads/{id}/init`                | `{machine_id, agent, workspace, permission_mode, title}` |
+//! | `POST /internal/threads/{id}/local-prompts`      | `{task_id, message_id, parts, actor}` from a terminal prompt; queued like `POST /prompts` |
 //! | `POST /internal/threads/{id}/interrupt-answers`   | `{answer_id, interrupt_id, outcome, actor}` from a terminal answer; `{status, resolved_by?, message}` |
 //!
 //! The subscription WebSocket (`GET /v1/threads/{id}/subscribe`) needs the runtime and lives in
 //! `do/thread.rs`; its messages come from [`ThreadCore::catch_up`].
 
-use protocol::tunnel::Actor;
+use protocol::tunnel::{Actor, ContentPart};
 use protocol::turn_event::{Envelope, ResolvedOutcome};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -223,6 +224,27 @@ fn route<S: ThreadStore>(
                 &body.answer_id,
                 &body.interrupt_id,
                 body.outcome,
+                now_ms,
+            )
+        }
+        // A prompt typed on the machine's terminal, forwarded by the Machine DO (tunnel.md
+        // §3.6b): queued like the phone's `POST /prompts`, the actor is the local user.
+        ("POST", ["internal", "threads", _, "local-prompts"]) => {
+            #[derive(Deserialize)]
+            struct MachinePrompt {
+                task_id: String,
+                message_id: String,
+                parts: Vec<ContentPart>,
+                actor: Actor,
+            }
+            let body: MachinePrompt = parse_body(&request.body)?;
+            core.prompt_from_machine(
+                &body.actor,
+                PromptBody {
+                    task_id: Some(body.task_id),
+                    message_id: Some(body.message_id),
+                    parts: body.parts,
+                },
                 now_ms,
             )
         }

@@ -8,7 +8,6 @@
 //! add a typed message to the transcript itself.
 
 use std::collections::VecDeque;
-use std::time::Duration;
 
 use client_core::sync::Incoming;
 use client_core::view::{InterruptView, LocalAnswer, TaskView};
@@ -17,15 +16,6 @@ use protocol::tunnel::{Actor, ActorKind, Outcome};
 use protocol::turn_event::InterruptKind;
 
 use crate::settings::Settings;
-
-/// How long a shared session waits after a task ended before it sends the next line typed here.
-///
-/// The hub owns the queue of phone prompts and sends the next one as soon as it has seen the
-/// running task end (tunnel.md §3.5); the runner cannot see that queue, and the bridge runs one
-/// task per thread. So when a task ends in a shared session the TUI holds its own next line for
-/// this window: a hub `prompt` that arrives in it runs first (the hub's order), and the local
-/// line goes after that task. Only a quiet window releases the local line.
-pub const SETTLE: Duration = Duration::from_millis(1500);
 
 /// Lines moved by one PageUp / PageDown.
 const PAGE: usize = 5;
@@ -144,12 +134,6 @@ pub struct App {
     queue: VecDeque<Queued>,
     /// The prompt sent last, while its task has not appeared in the thread yet.
     sent: Option<Queued>,
-    /// A task was running when the queue was last looked at.
-    was_busy: bool,
-    /// A task just ended in a shared session and a local line waits for the hub to speak first
-    /// (see [`SETTLE`]); the driver calls [`App::settled`] after [`App::settle_window`].
-    settling: bool,
-    settle: Duration,
 }
 
 impl App {
@@ -171,31 +155,7 @@ impl App {
             quit: false,
             queue: VecDeque::new(),
             sent: None,
-            was_busy: false,
-            settling: false,
-            settle: SETTLE,
         }
-    }
-
-    /// Changes the settle window (tests use a short one).
-    pub fn set_settle_window(&mut self, window: Duration) {
-        self.settle = window;
-    }
-
-    pub fn settle_window(&self) -> Duration {
-        self.settle
-    }
-
-    /// Whether a queued line is held back for the settle window; the driver then calls
-    /// [`App::settled`] once the window passes with nothing from the hub.
-    pub fn settling(&self) -> bool {
-        self.settling
-    }
-
-    /// The settle window passed without a hub prompt starting a task: sends the next line.
-    pub fn settled(&mut self) -> Vec<Action> {
-        self.settling = false;
-        self.dispatch()
     }
 
     /// Called once when the session starts. With `autoConnect` the session registers now;
@@ -306,21 +266,23 @@ impl App {
         }
     }
 
-    /// Sends the oldest queued prompt when nothing runs and the last one sent has shown up.
+    /// Sends what is queued. In a shared session every line goes up at once, in the order typed:
+    /// the hub queues it with the phones' prompts and is the only source of order (tunnel.md
+    /// §3.6b), so there is nothing to hold back. A session that is not shared runs one line at a
+    /// time: the oldest queued prompt goes to the bridge when nothing runs and the last one sent
+    /// has shown up.
     fn dispatch(&mut self) -> Vec<Action> {
-        // A task that ends in a shared session may be followed at once by a prompt the hub had
-        // queued; hold the local line for the settle window so the hub's order comes first.
-        if self.busy() {
-            self.was_busy = true;
-            self.settling = false;
-        } else if std::mem::take(&mut self.was_busy)
-            && matches!(self.remote, Remote::On { .. })
-            && !self.queue.is_empty()
-        {
-            self.settling = true;
-        }
-        if self.settling {
-            return Vec::new();
+        if matches!(self.remote, Remote::On { .. }) {
+            self.sent = None;
+            return self
+                .queue
+                .drain(..)
+                .map(|next| Action::Prompt {
+                    task_id: next.task_id,
+                    message_id: next.message_id,
+                    text: next.text,
+                })
+                .collect();
         }
         if let Some(sent) = &self.sent {
             if self.sync.view().task(&sent.task_id).is_none() {

@@ -12,7 +12,9 @@ use worker::{Env, Headers, Method, Request, RequestInit};
 
 use super::admin::{self, MachineControl};
 use super::core::{PresenceChange, PushCommand};
-use super::driver::{AnswerVerdict, HostError, MachineAnswer, ThreadHost, push_command_from_json};
+use super::driver::{
+    AnswerVerdict, HostError, MachineAnswer, MachinePrompt, ThreadHost, push_command_from_json,
+};
 use super::store::HostKind;
 use crate::db::d1::D1;
 use crate::db::queries;
@@ -193,6 +195,35 @@ impl ThreadHost for WorkerHost<'_> {
                 })
             })
             .ok_or_else(|| HostError::Unavailable(format!("interrupt answer reply: {text}")))
+    }
+
+    async fn submit_prompt(
+        &self,
+        thread_id: &str,
+        prompt: &MachinePrompt<'_>,
+    ) -> Result<(), HostError> {
+        let path = format!("/internal/threads/{thread_id}/local-prompts");
+        let body = json!({
+            "task_id": prompt.task_id,
+            "message_id": prompt.message_id,
+            "parts": prompt.parts,
+            "actor": prompt.actor,
+        });
+        let (status, text) = call(
+            self.env,
+            THREAD_BINDING,
+            thread_id,
+            Method::Post,
+            &path,
+            Some(&body),
+        )
+        .await
+        .map_err(unavailable)?;
+        if (200..300).contains(&status) {
+            Ok(())
+        } else {
+            Err(host_error(status, &text))
+        }
     }
 
     async fn thread_machine(&self, thread_id: &str) -> Result<Option<String>, HostError> {

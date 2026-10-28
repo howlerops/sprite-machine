@@ -15,8 +15,8 @@ use std::cell::RefCell;
 use std::future::Future;
 
 use protocol::tunnel::{
-    Actor, ActorKind, AnswerStatus, CloseCode, Command, Frame, MAX_FRAME_BYTES, NackCode, Outcome,
-    PresenceState, parse_frame,
+    Actor, ActorKind, AnswerStatus, CloseCode, Command, ContentPart, Frame, MAX_FRAME_BYTES,
+    NackCode, Outcome, PresenceState, parse_frame,
 };
 use protocol::turn_event::{
     Envelope, MAX_ENVELOPE_BYTES, Presence, RunError, RunErrorReason, RunReason, RunStarted,
@@ -80,6 +80,16 @@ pub trait ThreadHost {
         answer: &MachineAnswer<'_>,
     ) -> impl Future<Output = Result<AnswerVerdict, HostError>>;
 
+    /// Queues a prompt typed on the machine's terminal, exactly as the phone's
+    /// `POST /v1/threads/{id}/prompts` would (Thread DO
+    /// `POST /internal/threads/{id}/local-prompts`). The Thread DO starts it or queues it behind
+    /// the pending tasks, and sends it back as a `prompt` command in queue order.
+    fn submit_prompt(
+        &self,
+        thread_id: &str,
+        prompt: &MachinePrompt<'_>,
+    ) -> impl Future<Output = Result<(), HostError>>;
+
     /// The machine a Thread DO records as the thread's host, if the thread exists.
     fn thread_machine(
         &self,
@@ -131,6 +141,15 @@ pub struct MachineAnswer<'a> {
     pub interrupt_id: &'a str,
     pub answer_id: &'a str,
     pub outcome: &'a Outcome,
+    pub actor: &'a Actor,
+}
+
+/// One `prompt_submit` as it goes to the Thread DO.
+#[derive(Debug, Clone, Copy)]
+pub struct MachinePrompt<'a> {
+    pub task_id: &'a str,
+    pub message_id: &'a str,
+    pub parts: &'a [ContentPart],
     pub actor: &'a Actor,
 }
 
@@ -281,6 +300,24 @@ where
                 outcome: &outcome,
             };
             interrupt_answer(core, host, &answer, now_ms, emit).await?;
+        }
+        Frame::PromptSubmit {
+            seq,
+            event_id,
+            thread_id,
+            task_id,
+            message_id,
+            parts,
+        } => {
+            let prompt = UpPrompt {
+                seq,
+                event_id: &event_id,
+                thread_id: &thread_id,
+                task_id: &task_id,
+                message_id: &message_id,
+                parts: &parts,
+            };
+            prompt_submit(core, host, &prompt, now_ms, emit).await?;
         }
         Frame::CommandResult {
             seq,
@@ -474,6 +511,74 @@ where
     }
     core.borrow_mut()
         .complete_up(epoch, answer.seq, Some(answer.event_id), now_ms)?;
+    if let Some(reply) = reply {
+        emit(reply);
+    }
+    Ok(())
+}
+
+/// The fields of a `prompt_submit` frame.
+#[derive(Clone, Copy)]
+struct UpPrompt<'a> {
+    seq: u64,
+    event_id: &'a str,
+    thread_id: &'a str,
+    task_id: &'a str,
+    message_id: &'a str,
+    parts: &'a [ContentPart],
+}
+
+/// `prompt_submit` (tunnel.md §3.6b): the thread must be hosted by this machine; the Thread DO
+/// queues the prompt like a phone's, and the `prompt` command comes back in queue order. There
+/// is no reply frame: a refusal is a `nack`. A frame whose `event_id` was recorded already (a
+/// retransmit on a fresh stream) is acked without a second queueing.
+async fn prompt_submit<S, H>(
+    core: &Core<S>,
+    host: &H,
+    prompt: &UpPrompt<'_>,
+    now_ms: u64,
+    emit: &mut impl FnMut(Out),
+) -> StoreResult<()>
+where
+    S: MachineStore,
+    H: ThreadHost,
+{
+    let Some(epoch) = up_preface(core, prompt.seq, emit) else {
+        return Ok(());
+    };
+    let mut reply: Option<Out> = None;
+    if !core.borrow().event_seen(prompt.event_id, now_ms)? {
+        if core.borrow().hosted(prompt.thread_id)?.is_none() {
+            reply = Some(nack(
+                prompt.seq,
+                NackCode::Forbidden,
+                format!("thread {} is not hosted by this machine", prompt.thread_id),
+            ));
+        } else {
+            let actor = local_user(core.borrow().machine_id());
+            let request = MachinePrompt {
+                task_id: prompt.task_id,
+                message_id: prompt.message_id,
+                parts: prompt.parts,
+                actor: &actor,
+            };
+            match host.submit_prompt(prompt.thread_id, &request).await {
+                Ok(()) => {}
+                Err(HostError::Rejected { code, message }) => {
+                    reply = Some(nack(prompt.seq, code, message));
+                }
+                Err(HostError::Unavailable(message)) => {
+                    emit(Out::close(
+                        CloseCode::ServerRestart,
+                        format!("thread host unavailable: {message}"),
+                    ));
+                    return Ok(());
+                }
+            }
+        }
+    }
+    core.borrow_mut()
+        .complete_up(epoch, prompt.seq, Some(prompt.event_id), now_ms)?;
     if let Some(reply) = reply {
         emit(reply);
     }

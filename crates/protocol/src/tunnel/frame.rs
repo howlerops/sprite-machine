@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::command::Command;
-use super::types::{Actor, Outcome, Workspace};
+use super::types::{Actor, ContentPart, Outcome, Workspace};
 
-/// Every tunnel frame. Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer` up;
+/// Every tunnel frame. Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer`, `prompt_submit` up;
 /// `command` down) carry `seq`; the rest do not.
 ///
 /// `ping` and `pong` serialize to exactly `{"t":"ping"}` and `{"t":"pong"}` (§3.7), so the
@@ -78,6 +78,17 @@ pub enum Frame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resolved_by: Option<Actor>,
         message: String,
+    },
+    /// Runner → hub: a prompt typed on the runner in a shared session; the Thread DO queues it
+    /// like a phone's and sends it back as a `prompt` command (§3.6b).
+    PromptSubmit {
+        seq: u64,
+        event_id: String,
+        thread_id: String,
+        /// Chosen by the runner, unique in the thread; also the hub's idempotency key.
+        task_id: String,
+        message_id: String,
+        parts: Vec<ContentPart>,
     },
     /// Hub → runner: one command (§3.5).
     Command {

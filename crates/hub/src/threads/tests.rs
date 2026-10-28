@@ -987,6 +987,106 @@ fn interrupt_route_replays_the_winner_and_409s_other_keys() {
     assert_eq!(loser.body["resolved_by"]["id"], "usr_1");
 }
 
+fn machine_prompt(core: &mut ThreadCore<MemoryStore>, task: &str, text: &str) -> api::ApiResponse {
+    let request = request(
+        "POST",
+        "/internal/threads/th_1/local-prompts",
+        "ignored",
+        None,
+        json!({
+            "task_id": task,
+            "message_id": format!("msg_{task}"),
+            "parts": [{"type": "text", "text": text}],
+            "actor": actor("local:mch_1"),
+        }),
+    );
+    api::handle(core, &request, NOW)
+}
+
+fn prompt_tasks(core: &ThreadCore<MemoryStore>) -> Vec<String> {
+    commands(core)
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Prompt { task_id, .. } => Some(task_id),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_terminal_prompt_is_queued_like_a_phone_prompt_and_comes_back_in_queue_order() {
+    let mut core = core();
+    let me = actor("usr_1");
+    // Idle: the terminal's prompt starts at once, authored by the local user.
+    let first = machine_prompt(&mut core, "tk_loc1", "typed here");
+    assert_eq!(first.status, 202);
+    assert_eq!(first.body["status"], "started");
+    assert_eq!(prompt_tasks(&core), ["tk_loc1"]);
+    let message = core.take_appended();
+    assert_eq!(message[0].event.type_name(), "UserMessage");
+    assert_eq!(message[0].task_id.as_deref(), Some("tk_loc1"));
+    append(&mut core, started("tk_loc1", "run_1"));
+
+    // Running: a phone prompt, a terminal prompt and another phone prompt queue in the order
+    // they reached the hub, whoever sent them.
+    core.submit_prompt(&me, "idk_p1", prompt("tk_ph1", "phone one"), NOW)
+        .expect("phone");
+    let local = machine_prompt(&mut core, "tk_loc2", "typed here too");
+    assert_eq!(
+        local.body,
+        json!({"task_id": "tk_loc2", "status": "pending", "position": 2})
+    );
+    core.submit_prompt(&me, "idk_p2", prompt("tk_ph2", "phone two"), NOW)
+        .expect("phone");
+    let pending = core.list_pending().expect("list").body;
+    let ids: Vec<&str> = pending["pending"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|p| p["task_id"].as_str())
+        .collect();
+    assert_eq!(ids, ["tk_ph1", "tk_loc2", "tk_ph2"]);
+    assert_eq!(pending["pending"][1]["author"]["id"], "local:mch_1");
+
+    // Each task starts only when the one before ended; the commands go down in that order.
+    append(&mut core, success("tk_loc1", "run_1"));
+    append(&mut core, started("tk_ph1", "run_2"));
+    append(&mut core, success("tk_ph1", "run_2"));
+    append(&mut core, started("tk_loc2", "run_3"));
+    append(&mut core, success("tk_loc2", "run_3"));
+    assert_eq!(
+        prompt_tasks(&core),
+        ["tk_loc1", "tk_ph1", "tk_loc2", "tk_ph2"]
+    );
+}
+
+#[test]
+fn a_repeated_terminal_prompt_queues_one_task_and_a_bad_one_is_refused() {
+    let mut core = core();
+    start_task(&mut core, "tk_1", "run_1");
+    let first = machine_prompt(&mut core, "tk_loc", "once");
+    assert_eq!(first.body["status"], "pending");
+    // A retransmit replays the stored answer: no second task, no second pending entry.
+    let again = machine_prompt(&mut core, "tk_loc", "once");
+    assert_eq!((again.status, again.body), (first.status, first.body));
+    assert_eq!(
+        core.list_pending().expect("list").body["pending"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    // The same task id with another text is refused, an empty prompt too.
+    assert_eq!(machine_prompt(&mut core, "tk_loc", "other").status, 422);
+    let request = request(
+        "POST",
+        "/internal/threads/th_1/local-prompts",
+        "ignored",
+        None,
+        json!({"task_id": "tk_e", "message_id": "msg_e", "parts": [], "actor": actor("local:mch_1")}),
+    );
+    assert_eq!(api::handle(&mut core, &request, NOW).status, 400);
+}
+
 fn approvals(core: &ThreadCore<MemoryStore>) -> Vec<Command> {
     commands(core)
         .into_iter()

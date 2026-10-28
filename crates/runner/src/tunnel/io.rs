@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use std::time::Duration;
 
-use protocol::tunnel::{Actor, AnswerStatus, MAX_FRAME_BYTES, Outcome, Workspace};
+use protocol::tunnel::{Actor, AnswerStatus, ContentPart, MAX_FRAME_BYTES, Outcome, Workspace};
 use serde_json::{Value, json};
 use sidecar::bridge::{CommandFailure, CommandSource, EventSink, IncomingCommand, SinkError};
 use sidecar::store::Store;
@@ -225,6 +225,28 @@ impl TunnelSink {
         }
     }
 
+    /// Sends a prompt typed on this runner up (`prompt_submit`, tunnel.md §3.6b). The frame is in
+    /// the durable outbox first, so it survives a dead socket and goes out once, in order with
+    /// the events and answers before it. The hub queues it like a phone's prompt and sends it
+    /// back as a `prompt` command; nothing is applied here. Returns the outbox seq.
+    pub fn prompt_submit(
+        &self,
+        thread_id: &str,
+        task_id: &str,
+        message_id: &str,
+        parts: &[ContentPart],
+    ) -> Result<u64, SinkError> {
+        let parts = serde_json::to_value(parts)
+            .map_err(|e| SinkError(format!("unserialisable parts: {e}")))?;
+        self.shared.enqueue(json!({
+            "t": "prompt_submit",
+            "thread_id": thread_id,
+            "task_id": task_id,
+            "message_id": message_id,
+            "parts": parts,
+        }))
+    }
+
     /// Queues event bodies, refusing the whole batch if an envelope belongs to a local thread
     /// that was never opened.
     fn send_events(&self, envelopes: &[Envelope]) -> Result<(), SinkError> {
@@ -353,6 +375,30 @@ mod tests {
         let reply = waiting.await.expect("task").expect("a verdict");
         assert_eq!(reply.status, AnswerStatus::AlreadyResolved);
         assert_eq!(reply.resolved_by, Some(winner));
+    }
+
+    /// A prompt typed here is a durable `prompt_submit` up frame, in order, and nothing else.
+    #[tokio::test]
+    async fn a_prompt_submit_is_queued_up_in_order_after_what_came_before() {
+        let (sink, _dir) = sink();
+        let text = |text: &str| {
+            vec![ContentPart::Text {
+                text: text.to_owned(),
+            }]
+        };
+        sink.prompt_submit("th_1", "tk_1", "msg_1", &text("first"))
+            .expect("first");
+        sink.prompt_submit("th_1", "tk_2", "msg_2", &text("second"))
+            .expect("second");
+        let rows = sink.shared.store.outbound_since(0).expect("outbox");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].body["t"], "prompt_submit");
+        assert_eq!(rows[0].body["thread_id"], "th_1");
+        assert_eq!(rows[0].body["task_id"], "tk_1");
+        assert_eq!(rows[0].body["message_id"], "msg_1");
+        assert_eq!(rows[0].body["parts"][0]["text"], "first");
+        assert_eq!(rows[1].body["task_id"], "tk_2");
+        assert!(rows[0].seq < rows[1].seq);
     }
 
     /// No verdict in time is an error, never an acceptance, and the waiter is cleaned up.

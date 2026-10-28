@@ -45,7 +45,7 @@ runner                                   Machine DO (hub)                       
 ## 3. Frames
 
 Every frame is an object with a `t` (type) field. Field names are `snake_case`.
-Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer` up; `command` down) carry
+Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer`, `prompt_submit` up; `command` down) carry
 `seq`; the rest do not.
 
 | Frame            | Direction | Sequenced | Purpose                                                     |
@@ -57,6 +57,7 @@ Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer` u
 | `command_result` | up        | yes       | Outcome of a command that the runner could not apply.       |
 | `interrupt_answer` | up      | yes       | An interrupt answer typed on the runner (TUI); the hub arbitrates it. |
 | `interrupt_answer_result` | down | no     | The hub's verdict on one `interrupt_answer`.                |
+| `prompt_submit`  | up        | yes       | A prompt typed on the runner (TUI) in a shared session; the hub queues it. |
 | `command`        | down      | yes       | prompt, approval, dispatch, cancel.                         |
 | `ack`            | both      | no        | Cumulative ack of the peer's stream.                        |
 | `nack`           | down      | no        | The hub rejected one up frame (it still counts as acked).   |
@@ -346,6 +347,48 @@ waits for the hub, so a phone and the terminal race under one rule.
   was turned off) keeps the local rule: the first answer to reach the runner's own log wins,
   and nothing is sent up. This is the only case in which the runner decides an answer itself.
 
+### 3.6b `prompt_submit` (up)
+
+A prompt typed on the runner itself (the `sm` TUI) in a **shared** session is not sent to the
+agent by the runner. It goes up, the Thread DO queues it exactly like a phone's prompt, and it
+comes back down as a `prompt` command (§3.5) when its turn in the queue comes. The hub alone
+orders local and phone prompts; the runner needs no timing window and never races a phone
+prompt for the bridge.
+
+```json
+{
+  "t": "prompt_submit",
+  "seq": 123,
+  "event_id": "evt_01JBW5F7K2",
+  "thread_id": "th_1",
+  "task_id": "tk_loc3",
+  "message_id": "msg_loc3",
+  "parts": [{ "type": "text", "text": "and run the tests" }]
+}
+```
+
+- `task_id` and `message_id` are chosen by the runner (unique in the thread), so the `prompt`
+  command that comes back can be matched to the line typed. `parts` is the `prompt` command's
+  union (§3.5) and must not be empty.
+- The Machine DO checks the thread is hosted by this machine (else `nack{forbidden}`) and
+  passes it to the Thread DO, which handles it **exactly as it handles
+  `POST /v1/threads/{id}/prompts`**: if no task runs it starts the task (appends `UserMessage`,
+  queues the `prompt` command), otherwise it adds the task to the pending queue
+  (`/pending_tasks`) behind the prompts queued before it. The author is the machine's local
+  user (`{kind: "user", id: "local:<machine_id>", name: "terminal", device_id: <machine_id>}`,
+  as in §3.6a). The idempotency key is the `task_id`, so a retransmit (same `event_id`, or a
+  fresh stream that sends it again) queues one task, never two.
+- A prompt the Thread DO refuses (empty `parts`, a `task_id` already used) is `nack{invalid_envelope}`;
+  it counts as an ack (§3.7) and the line is not queued.
+- The runner does **not** write the line's `UserMessage` to its own log or hand it to the bridge.
+  Until the hub's `prompt` command arrives (in queue order) the line is not part of the
+  transcript; the `prompt` command is the only way it reaches the agent while the session is
+  shared. Frames are sequenced on the same up stream as events and answers, so lines typed in
+  order are queued in order.
+- **Offline TUI.** A session that is not registered with a hub keeps sending its lines straight
+  to the bridge, one at a time, as before. This is the only case in which the runner decides
+  when its own prompt runs.
+
 ### 3.7 `ack`, `nack`, `presence`, `ping` / `pong`
 
 ```json
@@ -433,7 +476,7 @@ connection has stayed up for 60 s.
 
 ### 4.1 Streams
 
-- **Up stream**: frames `event`, `thread_open`, `command_result`, `interrupt_answer`, numbered by the runner from
+- **Up stream**: frames `event`, `thread_open`, `command_result`, `interrupt_answer`, `prompt_submit`, numbered by the runner from
   1, gap-free.
 - **Down stream**: `command` frames, numbered by the Machine DO from 1, gap-free.
 - A stream lives as long as its **resume-token chain** (§4.3). A fresh stream (§4.4)
@@ -508,7 +551,7 @@ On `resumed: false` both sides restart numbering at 1:
 For every up frame, the Machine DO checks, in order:
 
 1. The frame parses and matches this spec; else `close{protocol_error}`.
-2. `event.envelope.thread_id` (or `thread_open.thread_id`, `interrupt_answer.thread_id`) is a thread hosted by this
+2. `event.envelope.thread_id` (or `thread_open.thread_id`, `interrupt_answer.thread_id`, `prompt_submit.thread_id`) is a thread hosted by this
    machine (registered by `thread_open` or created by a `dispatch` to it); else `nack{forbidden}`.
 3. The envelope validates against `crates/protocol/schemas/turn-event/envelope.schema.json`
    and its size ≤ 256 KiB; else `nack{invalid_envelope}` / `nack{too_large}`.
