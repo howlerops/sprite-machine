@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 111/276 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 108/200
+done 115/276 (3 dropped) · in-flight — · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d) · attempts 108/200
 
 ## Per phase
 
@@ -10,8 +10,8 @@ done 111/276 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · block
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 68 | 55 | 2 |
-| P3 | 26 | 4 | 2 |
+| P2 | 68 | 57 | 0 |
+| P3 | 26 | 6 | 0 |
 | P4 | 56 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
@@ -86,8 +86,8 @@ done 111/276 (3 dropped) · in-flight M2-003b,M3-017a,M2B-014d,M2B-010a · block
 | M2B-005f | worker | rust | done | hub: Machine DO disconnect action (close the tunnel with auth_revoked without marking the DO revoked); the trust-policy flip uses it, so turning the setting off lets the machine reconnect |
 | M2B-009a | worker | rust | done | runner: sm rc prints the session URL for each session it starts and the spacebar toggles its QR (wire runner::qr into server mode) |
 | M2-008k | worker | rust | done | hub: DELETE /v1/threads/{id}/pending/{task_id} is member-level (client-api §5.3/§5.5) instead of admin; the web composer uses it instead of the cancel workaround |
-| M2B-014d | worker | rust | assigned | notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine |
-| M2B-010a | worker | rust | assigned | hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree |
+| M2B-014d | worker | rust | done | notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine |
+| M2B-010a | worker | rust | done | hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree |
 | M2B-010b | worker | rust | todo | cli e2e tui: sm TUI session with acp-mock against wrangler dev (/rc registers, a phone prompt shows in the TUI, tunnel drop and restore) |
 
 ## Waiting on the human

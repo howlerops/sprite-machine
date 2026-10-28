@@ -1830,7 +1830,8 @@ items:
     title: 'hub: GitHub OAuth + PKCE for the desktop app and web page; members + invites'
     milestone: M2
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "verify20 on the merged tree after a clean rebuild: fmt, clippy (workspace, live, wasm), workspace 939/0, every live hub suite PASS (attachments re-run after a cold-start timeout), smoke with dev fixtures off, all playwright, e2e tracer/app/attachments PASS"
     assignee: "sonnet"
     attempt: 1
     deps: [M2-003a]
@@ -5539,7 +5540,8 @@ items:
     title: 'client-core: public create-thread helper (POST /v1/threads with the first prompt and attachments); cli e2e app and attachments use it instead of raw reqwest'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "verify20 on the merged tree after a clean rebuild: fmt, clippy (workspace, live, wasm), workspace 939/0, every live hub suite PASS (attachments re-run after a cold-start timeout), smoke with dev fixtures off, all playwright, e2e tracer/app/attachments PASS"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -5635,7 +5637,8 @@ items:
     title: 'notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "verify20 on the merged tree after a clean rebuild: fmt, clippy (workspace, live, wasm), workspace 939/0, every live hub suite PASS (attachments re-run after a cold-start timeout), smoke with dev fixtures off, all playwright, e2e tracer/app/attachments PASS"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -5738,7 +5741,8 @@ items:
     title: 'hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "verify20 on the merged tree after a clean rebuild: fmt, clippy (workspace, live, wasm), workspace 939/0, every live hub suite PASS (attachments re-run after a cold-start timeout), smoke with dev fixtures off, all playwright, e2e tracer/app/attachments PASS"
     assignee: "sonnet"
     attempt: 1
     lane: rust
