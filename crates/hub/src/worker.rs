@@ -44,6 +44,7 @@ pub fn router(env: Env) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .merge(tracer_routes())
+        .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)
         .layer(middleware::from_fn(observe))
         .with_state(SendWrapper::new(env))
