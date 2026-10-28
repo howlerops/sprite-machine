@@ -417,7 +417,7 @@ fn pending_then_approved_gives_one_credential_and_the_registry_reuses_machines()
         .as_array()
         .expect("machines")
         .iter()
-        .any(|m| m["id"] == machine_id.as_str() && m["name"] == name.as_str());
+        .any(|m| m["machine_id"] == machine_id.as_str() && m["name"] == name.as_str());
     assert!(in_registry, "{machines}");
     let listed = http("GET", "/v1/devices", Some(owner()), None);
     assert_eq!(listed.status, 200, "{}", listed.body);
