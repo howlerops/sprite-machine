@@ -54,6 +54,8 @@ struct FakeHost {
     listed: RefCell<HashMap<String, Vec<PushCommand>>>,
     acked: RefCell<Vec<(String, Vec<String>)>>,
     presence: RefCell<Vec<String>>,
+    /// The capabilities mirrored at each accepted hello.
+    capabilities: RefCell<Vec<Value>>,
 }
 
 impl FakeHost {
@@ -169,6 +171,15 @@ impl ThreadHost for FakeHost {
                 |_| String::new(),
                 |v| v.as_str().unwrap_or_default().to_owned(),
             ));
+        ready(())
+    }
+
+    fn record_capabilities(
+        &self,
+        _machine_id: &str,
+        capabilities: &Value,
+    ) -> impl Future<Output = ()> {
+        self.capabilities.borrow_mut().push(capabilities.clone());
         ready(())
     }
 }
@@ -490,6 +501,19 @@ fn credential_identifies_the_machine_and_revocation_ends_it() {
         empty.authenticate(Some(&bearer(&world.credential))),
         Auth::Invalid
     );
+}
+
+#[test]
+fn hello_mirrors_the_runners_capabilities_into_d1() {
+    let world = new_world();
+    let mut runner = Runner::new();
+    world.connect(&mut runner, NOW);
+    let recorded = world.host.capabilities.borrow().clone();
+    assert_eq!(recorded.len(), 1, "one accepted hello, one mirror");
+    assert_eq!(recorded[0]["host_mode"], "local");
+    assert_eq!(recorded[0]["harnesses"], json!(["claude"]));
+    assert_eq!(recorded[0]["max_sessions"], 4);
+    assert_eq!(recorded[0]["spawn"], json!(["same_dir"]));
 }
 
 #[test]
@@ -1408,7 +1432,7 @@ fn the_admin_api_issues_a_credential_once_and_stores_only_its_hash() {
 
     // The credential cannot be read again.
     let listed = block_on(admin::list_machines(&db, &admin)).expect("list");
-    assert_eq!(listed["machines"][0]["id"], id);
+    assert_eq!(listed["machines"][0]["machine_id"], id);
     assert!(!listed.to_string().contains(&credential));
 }
 
@@ -1537,12 +1561,106 @@ fn presence_is_mirrored_into_d1() {
     ))
     .expect("presence");
     let listed = block_on(admin::list_machines(&db, &admin)).expect("list");
-    assert_eq!(listed["machines"][0]["presence"], "online");
+    assert_eq!(listed["machines"][0]["presence"]["state"], "online");
     assert_eq!(
-        listed["machines"][0]["presence_since"],
+        listed["machines"][0]["presence"]["since"],
         "2026-10-28T00:00:00.000Z"
     );
-    assert!(listed["machines"][0]["last_seen_at"].is_string());
+}
+
+#[test]
+fn the_list_is_the_client_api_shape_scoped_to_the_org_and_leaves_out_revoked() {
+    let db = Fake::new();
+    let control = FakeControl::default();
+    let admin = dev_admin(&db);
+    block_on(db.execute(
+        "INSERT INTO orgs (id, slug, name) VALUES ('org_other', 'other', 'Other')",
+        &[],
+    ))
+    .expect("second org");
+    let mut other = admin.clone();
+    other.org_id = "org_other".to_owned();
+    let mut viewer = admin.clone();
+    viewer.role = Role::Viewer;
+
+    let create = |principal: &Principal, name: &str| {
+        let created = block_on(admin::create_machine(
+            &db,
+            &control,
+            principal,
+            &json!({"name": name, "kind": "sandbox"}),
+            "r",
+        ))
+        .expect("create");
+        created["machine"]["id"].as_str().expect("id").to_owned()
+    };
+    let mine = create(&admin, "mine");
+    let theirs = create(&other, "theirs");
+    let gone = create(&admin, "gone");
+    block_on(admin::revoke_machine(&db, &control, &admin, &gone, "r")).expect("revoke");
+
+    // A viewer of the org gets its live machines only, in §5.1 shape, capabilities not yet known.
+    let listed = block_on(admin::list_machines(&db, &viewer)).expect("list");
+    let rows = listed["machines"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1, "{listed}");
+    let row = &rows[0];
+    assert_eq!(row["machine_id"], mine.as_str());
+    assert_eq!(row["name"], "mine");
+    assert_eq!(row["kind"], "sandbox");
+    assert_eq!(row["presence"]["state"], "offline");
+    assert!(row["presence"]["since"].is_string(), "{row}");
+    assert_eq!(row["capabilities"], Value::Null);
+    let mut keys: Vec<&str> = row
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["capabilities", "kind", "machine_id", "name", "presence"]
+    );
+    assert!(!listed.to_string().contains(&theirs));
+    assert!(!listed.to_string().contains(&gone));
+
+    // Once the runner has said hello, its capabilities come as the three §5.1 fields.
+    block_on(admin::record_capabilities(
+        &db,
+        &mine,
+        &json!({
+            "host_mode": "sandbox",
+            "harnesses": ["claude", "opencode"],
+            "max_sessions": 32,
+            "spawn": ["same_dir", "worktree"],
+            "features": ["x"],
+        }),
+    ))
+    .expect("capabilities");
+    block_on(admin::record_presence(
+        &db,
+        &mine,
+        "online",
+        "2026-10-28T00:00:00.000Z",
+    ))
+    .expect("presence");
+    let listed = block_on(admin::list_machines(&db, &viewer)).expect("list");
+    let row = &listed["machines"][0];
+    assert_eq!(row["presence"]["state"], "online");
+    assert_eq!(row["presence"]["since"], "2026-10-28T00:00:00.000Z");
+    assert_eq!(
+        row["capabilities"],
+        json!({
+            "harnesses": ["claude", "opencode"],
+            "spawn": ["same_dir", "worktree"],
+            "max_sessions": 32,
+        })
+    );
+
+    // The other org sees only its own machine.
+    let listed = block_on(admin::list_machines(&db, &other)).expect("list");
+    assert_eq!(listed["machines"].as_array().map(Vec::len), Some(1));
+    assert_eq!(listed["machines"][0]["machine_id"], theirs.as_str());
 }
 
 #[test]

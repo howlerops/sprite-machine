@@ -86,6 +86,14 @@ pub trait ThreadHost {
         change: &PresenceChange,
         now_ms: u64,
     ) -> impl Future<Output = ()>;
+
+    /// Mirrors the runner's capabilities from its `hello` into D1 (`machines.capabilities`, best
+    /// effort). Called for every accepted hello, whether or not presence changed.
+    fn record_capabilities(
+        &self,
+        machine_id: &str,
+        capabilities: &Value,
+    ) -> impl Future<Output = ()>;
 }
 
 /// The core behind a `RefCell`, shared by every entry point of the DO.
@@ -168,9 +176,15 @@ where
                 last_down_seq,
                 capabilities: serde_json::to_value(&capabilities).unwrap_or(Value::Null),
             };
+            let accepted = !core.borrow().hello_done();
+            let capabilities = info.capabilities.clone();
             let fx = core.borrow_mut().on_hello(info, now_ms)?;
             apply(core, host, fx, now_ms, emit).await?;
             if core.borrow().hello_done() {
+                if accepted {
+                    let machine_id = core.borrow().machine_id().to_owned();
+                    host.record_capabilities(&machine_id, &capabilities).await;
+                }
                 reconcile_all(core, host, now_ms, emit).await?;
             }
         }

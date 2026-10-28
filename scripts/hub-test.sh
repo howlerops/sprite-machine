@@ -6,6 +6,9 @@
 #
 # Local only. Never runs `wrangler deploy`, `wrangler login` or anything `--remote`.
 #   bash scripts/hub-test.sh smoke
+# HUB_DEV_FIXTURES=0 starts the hub without DEV_FIXTURES at all (the var is not passed, and the
+# top-level [vars] of wrangler.toml does not define it), for the tests that check the 404s:
+#   HUB_DEV_FIXTURES=0 bash scripts/hub-test.sh smoke
 set -euo pipefail
 
 name=${1:?usage: scripts/hub-test.sh <test-name>, e.g. smoke}
@@ -21,6 +24,14 @@ unset RUSTFLAGS RUSTC_WRAPPER
 export CARGO_PROFILE_RELEASE_STRIP=false
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 export WRANGLER_SEND_METRICS=false
+# 1 (default): the hub has DEV_FIXTURES=1. 0: it has no DEV_FIXTURES at all.
+HUB_DEV_FIXTURES=${HUB_DEV_FIXTURES:-1}
+case $HUB_DEV_FIXTURES in
+  0|1) ;;
+  *) echo "FAIL: HUB_DEV_FIXTURES must be 0 or 1, got $HUB_DEV_FIXTURES" >&2; exit 2 ;;
+esac
+dev_fixtures_args=()
+if [[ $HUB_DEV_FIXTURES == 1 ]]; then dev_fixtures_args=(--var DEV_FIXTURES:1); fi
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -81,7 +92,7 @@ BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
 (cd "$HUB_DIR" && exec setsid wrangler dev --local --test-scheduled --ip 127.0.0.1 --port "$PORT" \
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
-  --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" --var DEV_FIXTURES:1 \
+  --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" "${dev_fixtures_args[@]}" \
   --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 
@@ -101,6 +112,6 @@ for i in $(seq 1 240); do
 done
 (( ready )) || fail "wrangler dev not ready after 240s (GET /healthz != 200)"
 
-echo "== cargo test -p hub --features live --test $name (HUB_URL=$BASE)"
-(cd "$REPO" && HUB_URL="$BASE" cargo test -p hub --features live --test "$name" -- --nocapture)
+echo "== cargo test -p hub --features live --test $name (HUB_URL=$BASE, DEV_FIXTURES=$HUB_DEV_FIXTURES)"
+(cd "$REPO" && HUB_URL="$BASE" HUB_DEV_FIXTURES="$HUB_DEV_FIXTURES" cargo test -p hub --features live --test "$name" -- --nocapture)
 echo "PASS hub-test $name"

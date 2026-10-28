@@ -852,12 +852,10 @@ fn revoking_a_machine_closes_its_tunnel_and_it_cannot_reconnect() {
     let listed = http("GET", "/v1/machines", true, None, None);
     assert_eq!(listed.status, 200, "{}", listed.body);
     assert!(!listed.body.contains(&credential));
-    let row = listed.json()["machines"]
-        .as_array()
-        .and_then(|rows| rows.iter().find(|m| m["id"] == machine.as_str()).cloned())
-        .expect("machine in the list");
-    assert_eq!(row["presence"], "offline");
-    assert_eq!(row["revoked_at"], Value::Null);
+    let row = listed_row(&machine).expect("machine in the list");
+    assert_eq!(row["presence"]["state"], "offline");
+    assert!(row["presence"]["since"].is_string(), "{row}");
+    assert_eq!(row["capabilities"], Value::Null, "no hello yet");
 
     // It connects with the issued credential and is online.
     let mut runner = Runner::first(&machine, &credential);
@@ -899,13 +897,10 @@ fn revoking_a_machine_closes_its_tunnel_and_it_cannot_reconnect() {
         http("DELETE", "/v1/machines/mch_nope", true, None, None).status,
         404
     );
-    let listed = http("GET", "/v1/machines", true, None, None).json();
-    let row = listed["machines"]
-        .as_array()
-        .and_then(|rows| rows.iter().find(|m| m["id"] == machine.as_str()).cloned())
-        .expect("machine in the list");
-    assert!(row["revoked_at"].is_string());
-    assert_eq!(row["presence"], "offline");
+    assert!(
+        listed_row(&machine).is_none(),
+        "a revoked machine is left out of the list"
+    );
 
     // Both mutations are audited, and the credential is nowhere in the log.
     let audit = http("GET", "/v1/dev/audit?limit=1000", true, None, None);
@@ -1298,18 +1293,77 @@ fn presence_reaches_subscribed_threads_and_d1() {
     assert_eq!(offline["event"]["state"], "offline");
     let deadline = Instant::now() + POLL_TIMEOUT;
     loop {
-        let listed = http("GET", "/v1/machines", true, None, None).json();
-        let row = listed["machines"]
-            .as_array()
-            .and_then(|rows| rows.iter().find(|m| m["id"] == machine.as_str()).cloned())
-            .expect("machine in the list");
-        if row["presence"] == "offline" && row["last_seen_at"].is_string() {
-            assert!(row["presence_since"].is_string());
+        let row = listed_row(&machine).expect("machine in the list");
+        if row["presence"]["state"] == "offline" {
+            assert!(row["presence"]["since"].is_string());
             break;
         }
         assert!(
             Instant::now() < deadline,
             "D1 presence did not follow: {row}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// The `GET /v1/machines` row of `machine`, if it is listed.
+fn listed_row(machine: &str) -> Option<Value> {
+    let reply = http("GET", "/v1/machines", true, None, None);
+    assert_eq!(reply.status, 200, "{}", reply.body);
+    reply.json()["machines"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|m| m["machine_id"] == machine).cloned())
+}
+
+#[test]
+fn the_machine_list_is_the_client_api_shape_and_shows_the_hello_capabilities() {
+    let name = unique("box", "list");
+    let created = http(
+        "POST",
+        "/v1/machines",
+        true,
+        None,
+        Some(&json!({"name": name, "kind": "sandbox"})),
+    )
+    .json();
+    let machine = created["machine"]["id"].as_str().expect("id").to_owned();
+    let credential = created["credential"]
+        .as_str()
+        .expect("credential")
+        .to_owned();
+
+    let row = listed_row(&machine).expect("in the list before the first hello");
+    assert_eq!(row["name"], name.as_str());
+    assert_eq!(row["kind"], "sandbox");
+    let mut keys: Vec<&str> = row
+        .as_object()
+        .expect("a row is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["capabilities", "kind", "machine_id", "name", "presence"],
+        "{row}"
+    );
+
+    // The runner says hello: online, and its capabilities as the three §5.1 fields.
+    let _runner = Runner::first(&machine, &credential);
+    let deadline = Instant::now() + POLL_TIMEOUT;
+    loop {
+        let row = listed_row(&machine).expect("machine in the list");
+        if row["presence"]["state"] == "online" && row["capabilities"] != Value::Null {
+            assert_eq!(
+                row["capabilities"],
+                json!({"harnesses": ["claude"], "spawn": ["same_dir"], "max_sessions": 4}),
+                "{row}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no online row with capabilities: {row}"
         );
         std::thread::sleep(Duration::from_millis(100));
     }

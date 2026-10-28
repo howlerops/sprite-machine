@@ -12,15 +12,13 @@ const STATUS = { idle: 'Idle', running: 'Running', needs_you: 'Needs you', done:
 
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-/** A machine from GET /v1/machines, in the spec's shape or the hub's flat one. */
+/** A machine row from GET /v1/machines (client-api §5.1). */
 export function normaliseMachine(machine) {
-  const presence = machine.presence;
-  const state = typeof presence === 'string' ? presence : presence && presence.state;
+  const state = machine.presence && machine.presence.state;
   return {
-    id: machine.machine_id || machine.id,
-    name: machine.name || machine.machine_id || machine.id,
+    id: machine.machine_id,
+    name: machine.name || machine.machine_id,
     presence: PRESENCE[state] ? state : 'offline',
-    revoked: Boolean(machine.revoked_at),
   };
 }
 
@@ -37,7 +35,7 @@ export function ago(iso, now = Date.now()) {
 
 /** Machines (online first, then by name) with their threads (as listed); orphans last. */
 export function group(machines, threads) {
-  const known = machines.filter((m) => !m.revoked);
+  const known = machines.slice();
   const order = { online: 0, asleep: 1, offline: 2 };
   known.sort((a, b) => order[a.presence] - order[b.presence] || a.name.localeCompare(b.name));
   const byMachine = new Map(known.map((m) => [m.id, { machine: m, threads: [] }]));
