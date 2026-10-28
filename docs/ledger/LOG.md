@@ -143,3 +143,5 @@
 2026-10-28T08:15Z M1A-006e merged (haiku); criterion 1 (tracer spawn_with) blocked by paths → M1A-006f
 2026-10-28T08:26Z M2-009 → done, M1A-006e → done (verify: 379 passed, live attachments/thread_do/authz, tracer). M2-008d merged 78f8606 (sonnet), verify running
 2026-10-28T08:26Z MVP-000d paths widened (sidecar tracer, hub machines HostKind::Tracer, wrangler DO deletion migration, tests); assigned (sonnet). M2-008b paths += sidecar session_config test; assigned (haiku). M2B-004d assigned (haiku). M1A-006f deps += MVP-000d
+2026-10-28T08:47Z M2-008d → done (live: foreign/unknown/revoked machine all 404 with nothing written). Tracer exited 1 once with no output under load; PASS on re-run
+2026-10-28T08:47Z M2B-004d assigned→done merged 17a420c (haiku); added M2B-004e (startup wiring, logind inhibitor, macOS watcher)
