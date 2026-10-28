@@ -11,7 +11,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use protocol::acp::{
-    ContentBlock, CreateElicitationRequest, RequestPermissionRequest, SessionId, StopReason,
+    ContentBlock, CreateElicitationRequest, McpServer, NewSessionResponse,
+    RequestPermissionRequest, SessionId, StopReason,
 };
 use protocol::mapping::acp_turn::{AcpTurnMapper, StartTask};
 use protocol::turn_event::Envelope;
@@ -30,6 +31,18 @@ pub enum Attach {
     Resumed,
     /// `session/resume` was unsupported or failed, and `session/load` succeeded.
     Loaded,
+}
+
+/// A thread's session on one connection.
+#[derive(Debug, Clone)]
+pub struct Attached {
+    /// The ACP session.
+    pub session: SessionId,
+    /// How it was obtained.
+    pub how: Attach,
+    /// What the agent answered to `session/new`, `session/resume` or `session/load` (its modes
+    /// and config options); `None` when the session was already attached.
+    pub response: Option<NewSessionResponse>,
 }
 
 /// Errors from re-attaching.
@@ -92,12 +105,8 @@ impl Reattacher {
         Ok(())
     }
 
-    /// Makes sure `thread_id` has an attached session on `client` and returns it.
-    ///
-    /// - no stored session (or a closed one): `session/new`, stored as active;
-    /// - stored session not yet attached on this connection: `session/resume`, and if the
-    ///   agent answers with an error (including "method not found"), `session/load`;
-    /// - already attached: nothing is sent.
+    /// Makes sure `thread_id` has an attached session on `client` and returns it. See
+    /// [`Reattacher::attach`]; no MCP servers are passed.
     pub async fn ensure_session<H: ClientHandler>(
         &self,
         client: &AcpClient<H>,
@@ -105,25 +114,69 @@ impl Reattacher {
         harness: &str,
         cwd: &Path,
     ) -> Result<(SessionId, Attach), ReattachError> {
+        let attached = self.attach(client, thread_id, harness, cwd, &[]).await?;
+        Ok((attached.session, attached.how))
+    }
+
+    /// Makes sure `thread_id` has an attached session on `client`, with `mcp_servers` passed to
+    /// the agent.
+    ///
+    /// - no stored session (or a closed one): `session/new`, stored as active;
+    /// - stored session not yet attached on this connection: `session/resume`, and if the
+    ///   agent answers with an error (including "method not found"), `session/load`;
+    /// - already attached: nothing is sent.
+    pub async fn attach<H: ClientHandler>(
+        &self,
+        client: &AcpClient<H>,
+        thread_id: &str,
+        harness: &str,
+        cwd: &Path,
+        mcp_servers: &[McpServer],
+    ) -> Result<Attached, ReattachError> {
         self.store
             .upsert_thread(thread_id, harness, &cwd.to_string_lossy())?;
         let stored = self.store.session_for_thread(thread_id)?;
         let Some(row) = stored.filter(|row| row.state != SessionState::Closed) else {
-            let session = client.new_session(cwd, Vec::new()).await?;
-            self.record(thread_id, harness, &session, cwd)?;
-            return Ok((session, Attach::New));
+            let response = client
+                .new_session_response(cwd, mcp_servers.to_vec())
+                .await?;
+            self.record(thread_id, harness, &response.session_id, cwd)?;
+            return Ok(Attached {
+                session: response.session_id.clone(),
+                how: Attach::New,
+                response: Some(response),
+            });
         };
         let session = SessionId::new(row.session_id.clone());
         if self.is_attached(&row.session_id) {
-            return Ok((session, Attach::Live));
+            return Ok(Attached {
+                session,
+                how: Attach::Live,
+                response: None,
+            });
         }
         let cwd = Path::new(&row.cwd);
-        let how = match client.resume_session(&session, cwd).await {
-            Ok(()) => Attach::Resumed,
+        let mut response = NewSessionResponse::new(session.clone());
+        let how = match client
+            .resume_session_with(&session, cwd, mcp_servers.to_vec())
+            .await
+        {
+            Ok(resumed) => {
+                response.modes = resumed.modes;
+                response.config_options = resumed.config_options;
+                Attach::Resumed
+            }
             Err(ClientError::Rpc { code, message }) => {
                 let resume = format!("agent error {code}: {message}");
-                match client.load_session(&session, cwd).await {
-                    Ok(()) => Attach::Loaded,
+                match client
+                    .load_session_with(&session, cwd, mcp_servers.to_vec())
+                    .await
+                {
+                    Ok(loaded) => {
+                        response.modes = loaded.modes;
+                        response.config_options = loaded.config_options;
+                        Attach::Loaded
+                    }
                     Err(ClientError::Rpc { code, message }) => {
                         return Err(ReattachError::Unrecoverable {
                             session_id: row.session_id,
@@ -137,7 +190,11 @@ impl Reattacher {
             Err(other) => return Err(other.into()),
         };
         self.record(thread_id, harness, &session, cwd)?;
-        Ok((session, how))
+        Ok(Attached {
+            session,
+            how,
+            response: Some(response),
+        })
     }
 
     /// Re-attaches if needed (see [`Reattacher::ensure_session`]), then sends the prompt.
@@ -203,34 +260,60 @@ pub fn expire_overdue_interrupts(
     store: &Store,
     mut mapper_for: impl FnMut(&PendingInterrupt) -> AcpTurnMapper,
 ) -> Result<Vec<ExpiredRun>, ReattachError> {
+    store
+        .take_expired_interrupts()?
+        .into_iter()
+        .map(|interrupt| end_interrupt(store, interrupt, &mut mapper_for))
+        .collect()
+}
+
+/// Ends every interrupt still open, whatever its deadline, the way [`expire_overdue_interrupts`]
+/// does (`InterruptResolved{expired}` + `RunError{error, code:"expired"}`).
+///
+/// Call once at startup, before any command is applied: an interrupt stored by an earlier
+/// process waits on an ACP request that died with the old agent, so no approval can ever reach
+/// it. Ending its task now beats waiting for the TTL. The interrupts are removed from the store.
+pub fn fail_stale_interrupts(
+    store: &Store,
+    mut mapper_for: impl FnMut(&PendingInterrupt) -> AcpTurnMapper,
+) -> Result<Vec<ExpiredRun>, ReattachError> {
     let mut runs = Vec::new();
-    for interrupt in store.take_expired_interrupts()? {
-        let ts = rfc3339(store.now_ms());
-        let expires_at = rfc3339(interrupt.expires_at_ms);
-        let mut mapper = mapper_for(&interrupt);
-        // Rebuild the paused state; the events were already sent before the restart.
-        mapper.start_task(StartTask::new(interrupt.task_id.clone()), &ts);
-        let bad = |source| ReattachError::BadInterrupt {
-            interrupt_id: interrupt.interrupt_id.clone(),
-            source,
-        };
-        match interrupt.kind {
-            InterruptKind::Approval => {
-                let request: RequestPermissionRequest =
-                    serde_json::from_value(interrupt.request.clone()).map_err(bad)?;
-                mapper.on_request_permission(&request, &interrupt.interrupt_id, &expires_at, &ts);
-            }
-            InterruptKind::Form => {
-                let request: CreateElicitationRequest =
-                    serde_json::from_value(interrupt.request.clone()).map_err(bad)?;
-                mapper.on_elicitation(&request, &interrupt.interrupt_id, &expires_at, &ts);
-            }
-        }
-        let events = mapper.on_interrupt_expired(&interrupt.interrupt_id, &ts);
-        store.upsert_task(&interrupt.task_id, &interrupt.thread_id, "failed")?;
-        runs.push(ExpiredRun { interrupt, events });
+    for interrupt in store.open_interrupts()? {
+        store.resolve_interrupt(&interrupt.interrupt_id)?;
+        runs.push(end_interrupt(store, interrupt, &mut mapper_for)?);
     }
     Ok(runs)
+}
+
+fn end_interrupt(
+    store: &Store,
+    interrupt: PendingInterrupt,
+    mapper_for: &mut impl FnMut(&PendingInterrupt) -> AcpTurnMapper,
+) -> Result<ExpiredRun, ReattachError> {
+    let ts = rfc3339(store.now_ms());
+    let expires_at = rfc3339(interrupt.expires_at_ms);
+    let mut mapper = mapper_for(&interrupt);
+    // Rebuild the paused state; the events were already sent before the restart.
+    mapper.start_task(StartTask::new(interrupt.task_id.clone()), &ts);
+    let bad = |source| ReattachError::BadInterrupt {
+        interrupt_id: interrupt.interrupt_id.clone(),
+        source,
+    };
+    match interrupt.kind {
+        InterruptKind::Approval => {
+            let request: RequestPermissionRequest =
+                serde_json::from_value(interrupt.request.clone()).map_err(bad)?;
+            mapper.on_request_permission(&request, &interrupt.interrupt_id, &expires_at, &ts);
+        }
+        InterruptKind::Form => {
+            let request: CreateElicitationRequest =
+                serde_json::from_value(interrupt.request.clone()).map_err(bad)?;
+            mapper.on_elicitation(&request, &interrupt.interrupt_id, &expires_at, &ts);
+        }
+    }
+    let events = mapper.on_interrupt_expired(&interrupt.interrupt_id, &ts);
+    store.upsert_task(&interrupt.task_id, &interrupt.thread_id, "failed")?;
+    Ok(ExpiredRun { interrupt, events })
 }
 
 /// Unix milliseconds as RFC 3339 UTC with milliseconds (`2026-01-02T03:04:05.678Z`).

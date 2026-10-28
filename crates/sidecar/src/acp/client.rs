@@ -182,6 +182,77 @@ impl Advertised {
 /// The receiving end of `session/update` notifications is the caller's own channel.
 pub type UpdateSender = mpsc::UnboundedSender<SessionNotification>;
 
+/// Where `session/update` goes as raw JSON: the `params` object exactly as the agent sent it,
+/// parsed or not. A bridge that must keep unknown fields (and updates this build cannot parse)
+/// uses this instead of [`UpdateSender`].
+pub type RawUpdateSender = mpsc::UnboundedSender<Value>;
+
+/// Where the client sends `session/update`.
+pub enum Updates {
+    /// Parsed [`SessionNotification`]s; an update that does not parse is logged and dropped.
+    Typed(UpdateSender),
+    /// The raw `params`, whether or not they parse.
+    Raw(RawUpdateSender),
+}
+
+impl From<UpdateSender> for Updates {
+    fn from(sender: UpdateSender) -> Self {
+        Self::Typed(sender)
+    }
+}
+
+impl From<RawUpdateSender> for Updates {
+    fn from(sender: RawUpdateSender) -> Self {
+        Self::Raw(sender)
+    }
+}
+
+/// The two ends of one agent connection, and the process behind it when there is one.
+pub struct Transport {
+    reader: Box<dyn AsyncRead + Send + Unpin>,
+    writer: Box<dyn AsyncWrite + Send + Unpin>,
+    child: Option<Child>,
+}
+
+impl Transport {
+    /// Messages from the agent are read from `reader`; requests to it are written to `writer`.
+    pub fn new<R, W>(reader: R, writer: W) -> Self
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+        W: AsyncWrite + Send + Unpin + 'static,
+    {
+        Self {
+            reader: Box::new(reader),
+            writer: Box::new(writer),
+            child: None,
+        }
+    }
+
+    /// Spawns an agent process and talks to it over its stdin and stdout. The process is killed
+    /// when the client made from this transport is dropped. The agent's stderr is left as the
+    /// command sets it.
+    pub fn spawn(mut command: Command) -> Result<Self, ClientError> {
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = command.spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("agent stdin is not piped"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("agent stdout is not piped"))?;
+        Ok(Self {
+            reader: Box::new(stdout),
+            writer: Box::new(stdin),
+            child: Some(child),
+        })
+    }
+}
+
 /// A prompt submitted with [`AcpClient::submit`].
 pub struct Submitted {
     /// The task id, for [`AcpClient::remove_pending`].
@@ -211,52 +282,34 @@ impl<H: ClientHandler> AcpClient<H> {
         R: AsyncRead + Send + Unpin + 'static,
         W: AsyncWrite + Send + Unpin + 'static,
     {
-        Self::assemble(Box::new(reader), Box::new(writer), handler, updates, None)
+        Self::from_transport(Transport::new(reader, writer), handler, updates)
     }
 
     /// Spawns an agent process and talks to it over its stdin and stdout. The process is
     /// killed when the client is dropped. The agent's stderr is left as the command sets it.
-    pub fn spawn(
-        mut command: Command,
-        handler: H,
-        updates: UpdateSender,
-    ) -> Result<Self, ClientError> {
-        command
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = command.spawn()?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| std::io::Error::other("agent stdin is not piped"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| std::io::Error::other("agent stdout is not piped"))?;
-        Ok(Self::assemble(
-            Box::new(stdout),
-            Box::new(stdin),
+    pub fn spawn(command: Command, handler: H, updates: UpdateSender) -> Result<Self, ClientError> {
+        Ok(Self::from_transport(
+            Transport::spawn(command)?,
             handler,
             updates,
-            Some(child),
         ))
     }
 
-    fn assemble(
-        reader: Box<dyn AsyncRead + Send + Unpin>,
-        writer: Box<dyn AsyncWrite + Send + Unpin>,
-        handler: H,
-        updates: UpdateSender,
-        child: Option<Child>,
-    ) -> Self {
+    /// A client over `transport`, sending `session/update` to `updates` (typed or raw).
+    pub fn from_transport(transport: Transport, handler: H, updates: impl Into<Updates>) -> Self {
+        let Transport {
+            reader,
+            writer,
+            child,
+        } = transport;
         let inner = Arc::new(Inner {
             handler,
             writer: tokio::sync::Mutex::new(writer),
             calls: Mutex::new(Calls::default()),
             sessions: SessionTable::default(),
             advertised: Mutex::new(HashMap::new()),
-            updates,
+            updates: updates.into(),
+            closed: watch::channel(false).0,
         });
         let reader = tokio::spawn(read_loop(Arc::clone(&inner), reader));
         Self {
@@ -264,6 +317,18 @@ impl<H: ClientHandler> AcpClient<H> {
             reader,
             child,
         }
+    }
+
+    /// `true` once the connection has ended (the agent exited or closed its output).
+    pub fn is_closed(&self) -> bool {
+        *self.inner.closed.borrow()
+    }
+
+    /// Resolves when the connection ends; at once if it already has.
+    pub async fn closed(&self) {
+        let mut signal = self.inner.closed.subscribe();
+        // The sender lives in `inner`, so `wait_for` only ends with the value.
+        let _ = signal.wait_for(|closed| *closed).await;
     }
 
     /// The process id of the spawned agent, or `None` for a connection made with
@@ -293,6 +358,18 @@ impl<H: ClientHandler> AcpClient<H> {
         cwd: impl Into<PathBuf>,
         mcp_servers: Vec<McpServer>,
     ) -> Result<SessionId, ClientError> {
+        Ok(self
+            .new_session_response(cwd, mcp_servers)
+            .await?
+            .session_id)
+    }
+
+    /// [`AcpClient::new_session`], returning the whole response (modes and config options).
+    pub async fn new_session_response(
+        &self,
+        cwd: impl Into<PathBuf>,
+        mcp_servers: Vec<McpServer>,
+    ) -> Result<NewSessionResponse, ClientError> {
         let request = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
         let value = self
             .inner
@@ -302,9 +379,9 @@ impl<H: ClientHandler> AcpClient<H> {
         self.inner.sessions.insert(&response.session_id);
         self.inner.remember(
             &response.session_id,
-            Advertised::new(response.modes, response.config_options),
+            Advertised::new(response.modes.clone(), response.config_options.clone()),
         );
-        Ok(response.session_id)
+        Ok(response)
     }
 
     /// Sends `session/resume` for a session this agent process does not know yet (after a
@@ -314,19 +391,34 @@ impl<H: ClientHandler> AcpClient<H> {
         session: &SessionId,
         cwd: impl Into<PathBuf>,
     ) -> Result<(), ClientError> {
-        let request = protocol::acp::ResumeSessionRequest::new(session.clone(), cwd);
+        self.resume_session_with(session, cwd, Vec::new())
+            .await
+            .map(|_| ())
+    }
+
+    /// [`AcpClient::resume_session`] with the thread's MCP servers, returning the response. A
+    /// response that does not parse only means nothing is advertised until the agent says so in
+    /// an update.
+    pub async fn resume_session_with(
+        &self,
+        session: &SessionId,
+        cwd: impl Into<PathBuf>,
+        mcp_servers: Vec<McpServer>,
+    ) -> Result<ResumeSessionResponse, ClientError> {
+        let request =
+            protocol::acp::ResumeSessionRequest::new(session.clone(), cwd).mcp_servers(mcp_servers);
         let value = self
             .inner
             .call("session/resume", serde_json::to_value(request)?)
             .await?;
-        // The response's session state is optional here: a missing one only means nothing is
-        // advertised until the agent says so in an update.
-        let advertised = serde_json::from_value::<ResumeSessionResponse>(value)
-            .map(|response| Advertised::new(response.modes, response.config_options))
-            .unwrap_or_default();
+        let response = serde_json::from_value::<ResumeSessionResponse>(value)
+            .unwrap_or_else(|_| ResumeSessionResponse::new());
         self.inner.sessions.insert(session);
-        self.inner.remember(session, advertised);
-        Ok(())
+        self.inner.remember(
+            session,
+            Advertised::new(response.modes.clone(), response.config_options.clone()),
+        );
+        Ok(response)
     }
 
     /// Sends `session/load` (the fallback when `session/resume` is unsupported or fails) and
@@ -336,17 +428,32 @@ impl<H: ClientHandler> AcpClient<H> {
         session: &SessionId,
         cwd: impl Into<PathBuf>,
     ) -> Result<(), ClientError> {
-        let request = protocol::acp::LoadSessionRequest::new(session.clone(), cwd);
+        self.load_session_with(session, cwd, Vec::new())
+            .await
+            .map(|_| ())
+    }
+
+    /// [`AcpClient::load_session`] with the thread's MCP servers, returning the response.
+    pub async fn load_session_with(
+        &self,
+        session: &SessionId,
+        cwd: impl Into<PathBuf>,
+        mcp_servers: Vec<McpServer>,
+    ) -> Result<LoadSessionResponse, ClientError> {
+        let request =
+            protocol::acp::LoadSessionRequest::new(session.clone(), cwd).mcp_servers(mcp_servers);
         let value = self
             .inner
             .call("session/load", serde_json::to_value(request)?)
             .await?;
-        let advertised = serde_json::from_value::<LoadSessionResponse>(value)
-            .map(|response| Advertised::new(response.modes, response.config_options))
-            .unwrap_or_default();
+        let response = serde_json::from_value::<LoadSessionResponse>(value)
+            .unwrap_or_else(|_| LoadSessionResponse::new());
         self.inner.sessions.insert(session);
-        self.inner.remember(session, advertised);
-        Ok(())
+        self.inner.remember(
+            session,
+            Advertised::new(response.modes.clone(), response.config_options.clone()),
+        );
+        Ok(response)
     }
 
     /// What `session` advertises: its modes and config options as the agent last reported
@@ -472,7 +579,9 @@ struct Inner<H> {
     sessions: SessionTable,
     /// What each session advertises, by session id (see [`AcpClient::advertised`]).
     advertised: Mutex<HashMap<String, Advertised>>,
-    updates: UpdateSender,
+    updates: Updates,
+    /// `true` once the connection has ended.
+    closed: watch::Sender<bool>,
 }
 
 impl<H> Inner<H> {
@@ -583,6 +692,7 @@ impl<H: ClientHandler> Inner<H> {
         // Dropping each sender wakes its caller with `ClientError::Closed`.
         drop(waiting);
         self.sessions.fail_queued();
+        self.closed.send_replace(true);
     }
 
     /// Runs one prompt on the wire and returns its stop reason.
@@ -747,14 +857,22 @@ fn notification<H: ClientHandler>(inner: &Arc<Inner<H>>, method: &str, params: O
         tracing::warn!("session/update without params");
         return;
     };
-    match serde_json::from_value::<SessionNotification>(params.clone()) {
-        Ok(update) => {
-            inner.observe(&update);
-            if inner.updates.send(update).is_err() {
+    let parsed = serde_json::from_value::<SessionNotification>(params.clone());
+    if let Ok(update) = &parsed {
+        inner.observe(update);
+    }
+    match (&inner.updates, parsed) {
+        (Updates::Typed(sender), Ok(update)) => {
+            if sender.send(update).is_err() {
                 tracing::warn!("no receiver for session updates; dropping one");
             }
         }
-        Err(error) => tracing::warn!(%error, "session/update does not parse"),
+        (Updates::Typed(_), Err(error)) => tracing::warn!(%error, "session/update does not parse"),
+        (Updates::Raw(sender), _) => {
+            if sender.send(params.clone()).is_err() {
+                tracing::warn!("no receiver for session updates; dropping one");
+            }
+        }
     }
 }
 

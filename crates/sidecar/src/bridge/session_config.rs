@@ -8,7 +8,7 @@
 //! `StateDelta{session}`.
 //!
 //! The session's `StateSnapshot{session}` is emitted when this process first attaches the session
-//! (see [`Bridge::session_snapshot`]), if the agent advertised modes or config options.
+//! (see [`Bridge::session_snapshot`]) from the response, if the agent advertised modes or config options.
 
 use std::sync::Arc;
 
@@ -142,12 +142,19 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             )));
         }
         let (harness, cwd) = self.thread_defaults(thread_id, None, None)?;
-        let session = match self
+        if let Some(error) = self.ensure_agent().await? {
+            return Ok(Err((
+                CommandErrorCode::Invalid,
+                format!("could not start the agent: {error}"),
+            )));
+        }
+        let mcp_servers = self.config.mcp_servers_for(thread_id);
+        let attached = match self
             .reattacher
-            .ensure_session(&self.client, thread_id, &harness, &cwd)
+            .attach(&self.client, thread_id, &harness, &cwd, &mcp_servers)
             .await
         {
-            Ok((session, _how)) => session,
+            Ok(attached) => attached,
             Err(ReattachError::Store(error)) => return Err(error.into()),
             Err(error) => {
                 return Ok(Err((
@@ -156,6 +163,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                 )));
             }
         };
+        let session = attached.session;
         let ids = Arc::clone(&self.ids);
         self.threads
             .entry(thread_id.to_owned())
@@ -171,28 +179,25 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         if let Some(thread) = self.threads.get_mut(thread_id) {
             thread.session = Some(session.clone());
         }
-        let snapshot = self.session_snapshot(thread_id, &session);
-        self.emit(thread_id, snapshot).await?;
+        if let Some(response) = attached.response {
+            let snapshot = self.session_snapshot(thread_id, response);
+            self.emit(thread_id, snapshot).await?;
+        }
         Ok(Ok(session))
     }
 
-    /// The `StateSnapshot{session}` of a session's advertised modes and config options (§4.6),
-    /// or nothing when the agent advertised neither. Without a snapshot the mapper makes one at
-    /// the session's first update, so the snapshot still comes before any delta.
+    /// The `StateSnapshot{session}` of what the agent answered to `session/new`, `session/resume`
+    /// or `session/load` (§4.6), or nothing when it advertised neither modes nor config options.
+    /// Without a snapshot the mapper makes one at the session's first update, so the snapshot
+    /// still comes before any delta.
     pub(super) fn session_snapshot(
         &mut self,
         thread_id: &str,
-        session: &SessionId,
+        response: NewSessionResponse,
     ) -> Vec<Envelope> {
-        let Some(advertised) = self.client.advertised(session) else {
-            return Vec::new();
-        };
-        if advertised.modes.is_none() && advertised.config_options.is_none() {
+        if response.modes.is_none() && response.config_options.is_none() {
             return Vec::new();
         }
-        let mut response = NewSessionResponse::new(session.clone());
-        response.modes = advertised.modes;
-        response.config_options = advertised.config_options;
         let ts = self.ts();
         match self.threads.get_mut(thread_id) {
             Some(thread) => thread.mapper.on_session_new(&response, &ts),

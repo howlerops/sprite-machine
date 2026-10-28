@@ -29,6 +29,17 @@
 //! `UserMessage` is the hub's (client-api.md §6). [`Config::emit_user_message`] makes the
 //! bridge emit it for the tracer hub, which does not.
 //!
+//! **Harness restart.** When the agent process exits, every running task ends with
+//! `RunError{error, code:"harness_exited"}`, [`Reattacher::connection_lost`] marks the stored
+//! sessions detached, and the next `prompt` respawns the agent (when the bridge was built with
+//! [`Bridge::connect_with`] or [`Bridge::spawn_with`]) and resumes the thread's session. At
+//! startup the interrupts an earlier process left open are ended at once: the ACP request they
+//! wait on died with the old agent.
+//!
+//! **Raw updates.** The ACP client hands `session/update` over as the JSON the agent sent, so
+//! `raw.payload` keeps unknown fields and an update this build cannot parse becomes a `Raw`
+//! event.
+//!
 //! Ordering. The ACP client delivers `session/update` on one channel and requests (permission,
 //! prompt end, terminal tee) on another. The reader enqueues an update before it reads the next
 //! line, so before the bridge acts on a request it drains the update channel first, and the
@@ -48,10 +59,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use protocol::acp::{RequestPermissionResponse, SessionId, SessionNotification};
+use protocol::acp::{McpServer, RequestPermissionResponse, SessionId};
 use protocol::mapping::acp_turn::AcpTurnMapper;
 use protocol::tunnel::{Actor, ContentPart};
 use protocol::turn_event::Envelope;
+use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
@@ -62,7 +74,7 @@ pub use self::io::{
     CommandFailure, CommandFeed, CommandSource, EventSink, IncomingCommand, MemoryCommands,
     MemorySink, SinkError, SinkItem,
 };
-use crate::acp::client::{AcpClient, ClientError};
+use crate::acp::client::{AcpClient, ClientError, Transport};
 use crate::acp::reattach::Reattacher;
 use crate::store::{Store, StoreError};
 
@@ -87,6 +99,11 @@ pub struct Config {
     pub expiry_check_interval: Duration,
     /// Most tasks (running or paused) at once; a `prompt` past it fails with `capacity`.
     pub max_running_tasks: usize,
+    /// MCP servers passed to `session/new`, `session/resume` and `session/load` for every
+    /// thread without an entry in [`Config::thread_mcp_servers`].
+    pub mcp_servers: Vec<McpServer>,
+    /// MCP servers per thread id; replaces [`Config::mcp_servers`] for that thread.
+    pub thread_mcp_servers: HashMap<String, Vec<McpServer>>,
 }
 
 impl Config {
@@ -103,9 +120,23 @@ impl Config {
             approval_ttl: DEFAULT_APPROVAL_TTL,
             expiry_check_interval: Duration::from_secs(5),
             max_running_tasks: 32,
+            mcp_servers: Vec::new(),
+            thread_mcp_servers: HashMap::new(),
         }
     }
+
+    /// The MCP servers a session of `thread_id` is given.
+    pub fn mcp_servers_for(&self, thread_id: &str) -> Vec<McpServer> {
+        self.thread_mcp_servers
+            .get(thread_id)
+            .unwrap_or(&self.mcp_servers)
+            .clone()
+    }
 }
+
+/// Opens a new connection to the agent: called again whenever the agent process has exited and
+/// a prompt needs it.
+pub type Connector = Box<dyn FnMut() -> Result<Transport, ClientError> + Send>;
 
 /// Why the bridge stopped.
 #[derive(Debug, thiserror::Error)]
@@ -163,9 +194,15 @@ pub struct Bridge<S: EventSink, C: CommandSource> {
     client: AcpClient<BridgeHandler>,
     handler: BridgeHandler,
     reattacher: Reattacher,
-    updates: mpsc::UnboundedReceiver<SessionNotification>,
+    /// `session/update` params as the agent sent them.
+    updates: mpsc::UnboundedReceiver<Value>,
+    updates_tx: mpsc::UnboundedSender<Value>,
     internal: mpsc::UnboundedReceiver<Internal>,
     internal_tx: mpsc::UnboundedSender<Internal>,
+    /// Starts the agent again; `None` for a bridge over a fixed connection.
+    connector: Option<std::sync::Mutex<Connector>>,
+    /// The agent process exited and has not been started again.
+    harness_down: bool,
     threads: HashMap<String, ThreadState>,
     /// ACP session id → thread id.
     by_session: HashMap<String, String>,
@@ -177,11 +214,16 @@ struct Wiring {
     handler: BridgeHandler,
     internal_tx: mpsc::UnboundedSender<Internal>,
     internal: mpsc::UnboundedReceiver<Internal>,
-    updates_tx: mpsc::UnboundedSender<SessionNotification>,
-    updates: mpsc::UnboundedReceiver<SessionNotification>,
+    updates_tx: mpsc::UnboundedSender<Value>,
+    updates: mpsc::UnboundedReceiver<Value>,
 }
 
 impl Wiring {
+    /// A client over `transport` that reports to this wiring.
+    fn client(&self, transport: Transport) -> AcpClient<BridgeHandler> {
+        AcpClient::from_transport(transport, self.handler.clone(), self.updates_tx.clone())
+    }
+
     fn new() -> Self {
         let (internal_tx, internal) = mpsc::unbounded_channel();
         let (updates_tx, updates) = mpsc::unbounded_channel();
@@ -196,7 +238,8 @@ impl Wiring {
 }
 
 impl<S: EventSink, C: CommandSource> Bridge<S, C> {
-    /// A bridge talking to an agent over `reader` and `writer` (a duplex pipe in tests).
+    /// A bridge talking to an agent over `reader` and `writer` (a duplex pipe in tests). The
+    /// connection cannot be replaced: when the agent exits, prompts fail with `harness_exited`.
     pub fn connect<R, W>(
         config: Config,
         reader: R,
@@ -211,13 +254,32 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         W: AsyncWrite + Send + Unpin + 'static,
     {
         let wiring = Wiring::new();
-        let client = AcpClient::connect(
-            reader,
-            writer,
-            wiring.handler.clone(),
-            wiring.updates_tx.clone(),
-        );
-        Self::assemble(config, store, ids, sink, commands, client, wiring)
+        let client = wiring.client(Transport::new(reader, writer));
+        Self::assemble(config, store, ids, sink, commands, client, None, wiring)
+    }
+
+    /// A bridge that starts the agent with `connector` now and again each time a prompt finds
+    /// the agent gone.
+    pub fn connect_with(
+        config: Config,
+        mut connector: Connector,
+        store: Arc<Store>,
+        ids: Arc<dyn IdGenerator>,
+        sink: S,
+        commands: C,
+    ) -> Result<Self, ClientError> {
+        let wiring = Wiring::new();
+        let client = wiring.client(connector()?);
+        Ok(Self::assemble(
+            config,
+            store,
+            ids,
+            sink,
+            commands,
+            client,
+            Some(std::sync::Mutex::new(connector)),
+            wiring,
+        ))
     }
 
     /// A bridge that spawns the agent as a child process (killed when the bridge is dropped).
@@ -230,12 +292,33 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         commands: C,
     ) -> Result<Self, ClientError> {
         let wiring = Wiring::new();
-        let client = AcpClient::spawn(command, wiring.handler.clone(), wiring.updates_tx.clone())?;
+        let client = wiring.client(Transport::spawn(command)?);
         Ok(Self::assemble(
-            config, store, ids, sink, commands, client, wiring,
+            config, store, ids, sink, commands, client, None, wiring,
         ))
     }
 
+    /// [`Bridge::spawn`] that spawns the agent again (with a command from `command`) when it
+    /// has exited and a prompt needs it.
+    pub fn spawn_with(
+        config: Config,
+        mut command: impl FnMut() -> tokio::process::Command + Send + 'static,
+        store: Arc<Store>,
+        ids: Arc<dyn IdGenerator>,
+        sink: S,
+        commands: C,
+    ) -> Result<Self, ClientError> {
+        Self::connect_with(
+            config,
+            Box::new(move || Transport::spawn(command())),
+            store,
+            ids,
+            sink,
+            commands,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn assemble(
         config: Config,
         store: Arc<Store>,
@@ -243,6 +326,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         sink: S,
         commands: C,
         client: AcpClient<BridgeHandler>,
+        connector: Option<std::sync::Mutex<Connector>>,
         wiring: Wiring,
     ) -> Self {
         let reattacher = Reattacher::new(Arc::clone(&store));
@@ -256,8 +340,11 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             handler: wiring.handler,
             reattacher,
             updates: wiring.updates,
+            updates_tx: wiring.updates_tx,
             internal: wiring.internal,
             internal_tx: wiring.internal_tx,
+            connector,
+            harness_down: false,
             threads: HashMap::new(),
             by_session: HashMap::new(),
             approvals: HashMap::new(),
