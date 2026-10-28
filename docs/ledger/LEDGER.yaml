@@ -2746,6 +2746,34 @@ items:
       - 'cargo test -p hub'
       - 'bash scripts/hub-test.sh notify'
 
+  - id: M2-010a
+    title: 'Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check'
+    milestone: M2
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-010]
+    paths:
+      - 'crates/hub/src/tasks/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/auth/service.rs'
+      - 'crates/hub/src/links*'
+      - 'crates/hub/tests/tasks.rs'
+      - 'crates/hub/tests/links.rs'
+      - 'scripts/hub-test.sh'
+    context:
+      - 'docs/ledger/reports/M2-010.md (Known limitations, Discovered work)'
+    acceptance:
+      - 'Leader decision: a soft-deleted thread answers 404 not_found on every /v1/threads/{id}/... route (prompts, subscribe, interrupts, ...) like an unknown one; live test'
+      - 'A reconcile (on the Cron Trigger) upserts index rows for hosted threads that have none or a stale one (failed upsert); native test'
+      - 'A thread whose last task ended (RunFinished success, no pending tasks) is `done` in the index until the next prompt (native test); last_seq/updated_at semantics documented in client-api §5.2'
+      - 'hub-test.sh links runs with the APPLE_*/ANDROID_* vars set and the live test asserts 200 + body'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh tasks'
+      - 'bash scripts/hub-test.sh links'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
