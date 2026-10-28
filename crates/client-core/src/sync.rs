@@ -416,26 +416,23 @@ impl Subscription {
     /// seq and returns [`Applied::Gap`]. On a closed socket it returns
     /// [`SubscriptionError::Closed`]; call [`Subscription::reconnect`] to continue.
     pub async fn next(&mut self) -> Result<Applied, SubscriptionError> {
-        Ok(self.next_frame().await?.0)
+        self.read(None).await
     }
 
-    /// Like [`Subscription::next`], and also appends each new event to `cache` with
-    /// [`Cache::append_raw`], as the envelope text the hub sent. An event this build does not
-    /// know therefore survives a restart byte for byte.
+    /// Like [`Subscription::next`], but a new event is appended to `cache` with
+    /// [`Cache::append_raw`] before it is applied, as the envelope text the hub sent. If the
+    /// append fails, the event is not applied, so the view never runs ahead of the cache, and
+    /// the error is returned. An event this build does not know survives a restart byte for
+    /// byte.
     pub async fn next_persisted(
         &mut self,
         cache: &mut Cache,
     ) -> Result<Applied, SubscriptionError> {
-        let (applied, text) = self.next_frame().await?;
-        if let Some(text) = text {
-            cache.append_raw(self.sync.view().thread_id(), &[text.as_str()])?;
-        }
-        Ok(applied)
+        self.read(Some(cache)).await
     }
 
-    /// The read behind [`Subscription::next`] and [`Subscription::next_persisted`]. The text is
-    /// `Some` only for a new event: the envelope's own wire text.
-    async fn next_frame(&mut self) -> Result<(Applied, Option<String>), SubscriptionError> {
+    /// The read behind [`Subscription::next`] and [`Subscription::next_persisted`].
+    async fn read(&mut self, cache: Option<&mut Cache>) -> Result<Applied, SubscriptionError> {
         let socket = self.socket.as_mut().ok_or(SubscriptionError::Closed)?;
         let message = match socket.next().await {
             None => return Err(self.closed()),
@@ -450,28 +447,27 @@ impl Subscription {
         match message {
             Message::Text(body) => {
                 let Some(incoming) = parse_incoming(body.as_str())? else {
-                    return Ok((Applied::Ignored, None));
+                    return Ok(Applied::Ignored);
                 };
+                // Only the next event in line is new: it is persisted before the view sees it.
+                if let (Some(cache), Incoming::Event(envelope)) = (cache, &incoming)
+                    && envelope.seq == self.sync.last_seq() + 1
+                {
+                    let text = envelope_text(body.as_str()).ok_or_else(|| {
+                        SyncError::Malformed("event frame without an envelope".to_owned())
+                    })?;
+                    cache.append_raw(self.sync.view().thread_id(), &[text])?;
+                }
                 let applied = self.sync.feed(incoming)?;
-                let text = match applied {
-                    Applied::Event(_) => Some(
-                        envelope_text(body.as_str())
-                            .ok_or_else(|| {
-                                SyncError::Malformed("event frame without an envelope".to_owned())
-                            })?
-                            .to_owned(),
-                    ),
-                    _ => None,
-                };
                 match applied {
                     Applied::Live => self.set_connectivity(Connectivity::Online),
                     Applied::Gap { .. } => self.reconnect().await?,
                     _ => {}
                 }
-                Ok((applied, text))
+                Ok(applied)
             }
             Message::Close(_) => Err(self.closed()),
-            _ => Ok((Applied::Ignored, None)),
+            _ => Ok(Applied::Ignored),
         }
     }
 
