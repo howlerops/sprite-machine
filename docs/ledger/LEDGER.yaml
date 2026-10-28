@@ -3436,7 +3436,8 @@ items:
     title: 'runner: interactive TUI shared with remote devices (`sm --rc`)'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; workspace clippy clean, cargo test -p runner 220 passed (tui 40) on merged tree; hub arbitration of local answers split to M2B-010a, tunnel path e2e to M2B-010b"
     assignee: "sonnet"
     attempt: 1
     size: M
@@ -3728,7 +3729,8 @@ items:
     title: 'web: PWA + Web Push'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; full playwright 40/40 on merged tree (pwa, composer, transcript, pairing)"
     assignee: "sonnet"
     attempt: 1
     deps: [WEB-003, M2-011]
@@ -5594,7 +5596,8 @@ items:
     title: 'hub: DELETE /v1/threads/{id}/pending/{task_id} is member-level (client-api §5.3/§5.5) instead of admin; the web composer uses it instead of the cancel workaround'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged + leader fixed auth/tests.rs expectation; cargo test -p hub 289/0, live authz PASS, playwright composer 14/14"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -5720,3 +5723,71 @@ items:
       - 'A test fails if a file under web/src or the page files is not in the shell list; the cache version changes when any shell file changes'
     verify:
       - 'cd web && npx playwright test tests/pwa.spec.js'
+
+  - id: M2B-010a
+    title: 'hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: M
+    risk: high
+    deps: [M2B-010]
+    paths:
+      - 'docs/specs/tunnel.md'
+      - 'crates/protocol/src/tunnel/**'
+      - 'crates/hub/src/do/thread.rs'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/machines/**'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/src/tui/**'
+      - 'crates/hub/tests/thread_do.rs'
+      - 'crates/runner/tests/tui.rs'
+    context:
+      - 'docs/ledger/reports/M2B-010.md (Design notes and limits, M2B-010a)'
+      - 'docs/specs/tunnel.md, docs/specs/turn-event.md §4 (InterruptResolved)'
+    acceptance:
+      - 'Spec text (tunnel.md): a runner-local answer goes up as a frame the Thread DO resolves with the same first-answer-wins rule as the phone route; the loser gets a typed refusal'
+      - 'The TUI applies its local answer only after the hub accepts it; if the phone answered first the TUI shows "already answered" and the agent runs the phone choice; live test with a fake runner racing a phone answer'
+    verify:
+      - 'cargo test -p protocol -p hub -p runner'
+      - 'bash scripts/hub-test.sh thread_do'
+
+  - id: M2B-010b
+    title: 'cli e2e tui: sm TUI session with acp-mock against wrangler dev (/rc registers, a phone prompt shows in the TUI, tunnel drop and restore)'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-010]
+    paths:
+      - 'crates/cli/src/e2e/tui*'
+      - 'crates/cli/src/e2e/mod.rs'
+      - 'crates/cli/src/main.rs'
+      - 'crates/runner/src/tui/host.rs'
+    context:
+      - 'docs/ledger/reports/M2B-010.md (host.rs tunnel path untested)'
+      - 'crates/cli/src/e2e/app.rs, tracer.rs'
+    acceptance:
+      - 'cargo run -p cli -- e2e tui drives a TUI session headlessly (TestBackend) through host.rs: /rc registers the thread, a prompt posted on the hub appears in the TUI buffer, the tunnel is dropped and restored and the session continues'
+    verify:
+      - 'cargo run -p cli -- e2e tui'
+
+  - id: M2B-010c
+    title: 'sm TUI: --permission-mode and harness flags; live tunnel state in the header; local author is the paired user'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-010]
+    paths:
+      - 'crates/runner/src/tui/**'
+      - 'crates/runner/src/main.rs'
+      - 'crates/runner/tests/tui.rs'
+    context:
+      - 'docs/ledger/reports/M2B-010.md'
+    acceptance:
+      - 'Flags parsed and applied like sm rc; header shows Online/Connecting/Offline from the tunnel; snapshot tests'
+    verify:
+      - 'cargo test -p runner --test tui'
