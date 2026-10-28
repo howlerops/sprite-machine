@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 protocol = { path = "../protocol" }
+sidecar = { path = "../sidecar" }
 anyhow.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
