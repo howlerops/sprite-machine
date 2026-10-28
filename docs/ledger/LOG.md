@@ -234,3 +234,4 @@
 2026-10-28T17:32Z M2B-010 back (sonnet): ratatui TUI over client-core, 40 tests; runner holds only a machine credential so local approvals are arbitrated at the runner, not the hub → merged, done; M2B-010a (P2, high: hub arbitration of TUI answers), M2B-010b (P2 e2e tui), M2B-010c (P4). WEB-004 done (playwright 40/40). M2-008k back (haiku, blocked on auth/tests.rs out of paths) → leader updated the unit test on merge; hub 289/0, authz PASS, composer 14/14 → done. Janitor hit its 2 h limit; leader prunes manually
 2026-10-28T17:33Z assign M2B-010a (sonnet, high), M3-017a (haiku)
 2026-10-28T17:34Z M2B-014d back (haiku): every subscription + machine_id OK; it flagged that my 'title names the machine' criterion breaks plan §4.2 (ids + generic title). Plan wins: worker drops the name lookup on the same attempt; criterion 2 struck
+2026-10-28T17:45Z M2B-014d fixed (generic title) → merged, verify running. Assign M2-003b (sonnet, auth)

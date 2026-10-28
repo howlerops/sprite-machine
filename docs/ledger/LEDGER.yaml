@@ -1827,6 +1827,9 @@ items:
     title: 'hub: GitHub OAuth + PKCE for the desktop app and web page; members + invites'
     milestone: M2
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     deps: [M2-003a]
     paths:
       - 'crates/hub/src/auth/github*'
