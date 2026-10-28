@@ -2396,6 +2396,32 @@ items:
       - 'bash scripts/hub-test.sh thread_session'
       - 'cargo run -p cli -- e2e tracer'
 
+  - id: M1A-006g
+    title: 'Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording'
+    milestone: M1a
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [MVP-000d, M2B-004d]
+    paths:
+      - 'crates/sidecar/src/bridge/**'
+      - 'crates/sidecar/tests/bridge.rs'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/do/machine.rs'
+      - 'crates/client-core/src/outbox.rs'
+    context:
+      - 'docs/ledger/reports/MVP-000d.md (Decision to check, Discovered work)'
+    acceptance:
+      - 'IncomingCommand carries an origin (hub | local); the tunnel client always sets hub; the bridge emits UserMessage only for origin local; LOCAL_KEY_PREFIX is removed (tests: a hub prompt whose key starts with "local:" emits no UserMessage)'
+      - 'Comments and messages that still mention the tracer hub (do/machine.rs, threads/{mod,core,store}.rs, client-core outbox.rs) are updated'
+    verify:
+      - 'cargo test -p sidecar'
+      - 'cargo test -p runner'
+      - 'cargo test -p hub'
+      - 'cargo run -p cli -- e2e tracer'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
