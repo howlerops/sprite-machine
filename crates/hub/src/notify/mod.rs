@@ -66,6 +66,7 @@
 
 pub mod job;
 pub mod prefs;
+pub mod presence;
 pub mod provider;
 pub mod service;
 pub mod store;
