@@ -25,9 +25,12 @@ VAPID_SUBJECT = "mailto:push@sprite-machine.invalid"
 [build]
 # The `wasm-release` profile (root Cargo.toml: opt-level "z", lto, codegen-units 1, strip off;
 # `strip` breaks worker-build 0.8.7, see docs/spikes/cloudflare.md). Then `cli wasm strip-names`
-# drops the `name` and `producers` custom sections (MVP-000f, docs/spikes/hub-size.md). The cli
-# builds with the same command first, with RUSTFLAGS unset; wrangler dev reruns this command.
-command = "env ${HUB_WASM_TARGET_DIR:+CARGO_TARGET_DIR=$HUB_WASM_TARGET_DIR} worker-build --profile wasm-release && cargo run -q -p cli -- wasm strip-names build/index_bg.wasm"
+# drops the `name` and `producers` custom sections (MVP-000f, docs/spikes/hub-size.md). wrangler dev
+# reruns this command, so it never runs cargo: it calls a prebuilt cli binary by path. The scripts
+# (scripts/hub-test.sh, web/tests/helpers-hub.sh, the tracer) build cli before wrangler starts and
+# set HUB_STRIP_BIN to a per-run copy. A manual `wrangler dev` needs `cargo build -q -p cli` first;
+# without HUB_STRIP_BIN it uses ${CARGO_TARGET_DIR:-../../target}/debug/cli.
+command = "env ${HUB_WASM_TARGET_DIR:+CARGO_TARGET_DIR=$HUB_WASM_TARGET_DIR} worker-build --profile wasm-release && ${HUB_STRIP_BIN:-${CARGO_TARGET_DIR:-../../target}/debug/cli} wasm strip-names build/index_bg.wasm"
 
 # ---- Durable Objects (SQLite-backed: a class cannot switch storage later) -------------------
 

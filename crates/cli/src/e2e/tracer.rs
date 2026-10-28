@@ -470,6 +470,17 @@ pub(super) fn wasm_target_dir(hub_dir: &Path) -> Result<PathBuf> {
     Ok(shared.join(format!("wasm-{key}")))
 }
 
+/// The binary the wrangler `[build]` strip step runs (`HUB_STRIP_BIN`): a copy of this running
+/// `cli` in the run's temp dir. It is already built, so wrangler never waits on the shared cargo
+/// lock, and a later build that replaces `debug/cli` cannot swap it mid-run.
+fn strip_tool(work: &TempDir) -> Result<PathBuf> {
+    let exe = std::env::current_exe().context("current cli binary")?;
+    let copy = work.path.join("cli-strip");
+    fs::copy(&exe, &copy)
+        .with_context(|| format!("copy {} to {}", exe.display(), copy.display()))?;
+    Ok(copy)
+}
+
 /// Walks up from `start` to the first directory that holds the workspace `Cargo.toml` and
 /// `crates/hub/wrangler.toml`, and returns `crates/hub` under it.
 fn find_hub_dir(start: &Path) -> Option<PathBuf> {
@@ -563,6 +574,7 @@ impl Wrangler {
         let persist = work.path.join("persist");
         // wrangler dev reruns the [build] command: it must use this worktree's wasm target dir.
         let wasm_dir = wasm_target_dir(hub_dir)?;
+        let strip_bin = strip_tool(work)?;
         let mut command = Command::new("wrangler");
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         command
@@ -588,6 +600,7 @@ impl Wrangler {
             .env_remove("RUSTC_WRAPPER")
             .env("WRANGLER_SEND_METRICS", "false")
             .env("HUB_WASM_TARGET_DIR", &wasm_dir)
+            .env("HUB_STRIP_BIN", &strip_bin)
             .stdin(Stdio::null())
             .stdout(std::process::Stdio::from(
                 File::create(&log).context("wrangler log")?,

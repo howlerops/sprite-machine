@@ -85,6 +85,14 @@ echo "built in $(( $(date +%s) - start ))s"
 grep -qF "($HUB_DIR)" "$STATE/build.log" \
   || { tail -n 20 "$STATE/build.log" >&2; fail "worker-build log does not name $HUB_DIR (bundle not built from this tree)"; }
 
+# MVP-000h: the wrangler [build] strip step runs a prebuilt cli binary by path, never cargo (cargo
+# waits on the shared target lock). Build cli here, before wrangler starts, and give wrangler a
+# per-run copy so a later build replacing debug/cli cannot change it mid-run.
+echo "== cargo build -p cli (strip tool)"
+(cd "$REPO" && cargo build -q -p cli) || fail "cargo build -p cli"
+STRIP_BIN=$STATE/cli-strip
+cp "$SHARED_TARGET_DIR/debug/cli" "$STRIP_BIN" || fail "copy $SHARED_TARGET_DIR/debug/cli"
+
 echo "== d1 migrations (local)"
 (cd "$HUB_DIR" && wrangler d1 migrations apply DB --local --persist-to "$STATE/persist") \
   >"$STATE/d1.log" 2>&1 \
@@ -139,7 +147,7 @@ fi
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
-(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --test-scheduled --inspector-port 0 --ip 127.0.0.1 --port "$PORT" \
+(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" HUB_STRIP_BIN="$STRIP_BIN" setsid wrangler dev --local --test-scheduled --inspector-port 0 --ip 127.0.0.1 --port "$PORT" \
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" "${dev_fixtures_args[@]}" \
   --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
