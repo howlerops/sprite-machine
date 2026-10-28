@@ -1,1 +1,70 @@
-//! `do` (stub; filled in by later ledger items).
+//! Durable Object skeletons (wasm32 only, M2-001). Each class is SQLite-backed (wrangler.toml
+//! `new_sqlite_classes`) and answers `501` until its ledger item fills it in:
+//!
+//! - [`Thread`]: one per thread / flow run (M2-008).
+//! - [`Machine`]: one per runner, the tunnel endpoint (M2B-002).
+//! - [`Flow`]: one per flow run, the durable state machine with alarms (§4.9).
+
+// `#[durable_object]` expands to wasm-bindgen code that expects `wasm_bindgen` in scope.
+use worker::wasm_bindgen;
+use worker::{DurableObject, Env, Request, Response, State, durable_object};
+
+/// The Thread DO (binding `THREAD`). Skeleton: no state yet.
+#[durable_object]
+pub struct Thread {
+    _state: State,
+    _env: Env,
+}
+
+impl DurableObject for Thread {
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            _state: state,
+            _env: env,
+        }
+    }
+
+    async fn fetch(&self, _req: Request) -> worker::Result<Response> {
+        Response::error("thread: not implemented yet", 501)
+    }
+}
+
+/// The Machine DO (binding `MACHINE`). Skeleton: no state yet.
+#[durable_object]
+pub struct Machine {
+    _state: State,
+    _env: Env,
+}
+
+impl DurableObject for Machine {
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            _state: state,
+            _env: env,
+        }
+    }
+
+    async fn fetch(&self, _req: Request) -> worker::Result<Response> {
+        Response::error("machine: not implemented yet", 501)
+    }
+}
+
+/// The Flow DO (binding `FLOW`). Skeleton: no state yet.
+#[durable_object]
+pub struct Flow {
+    _state: State,
+    _env: Env,
+}
+
+impl DurableObject for Flow {
+    fn new(state: State, env: Env) -> Self {
+        Self {
+            _state: state,
+            _env: env,
+        }
+    }
+
+    async fn fetch(&self, _req: Request) -> worker::Result<Response> {
+        Response::error("flow: not implemented yet", 501)
+    }
+}
