@@ -593,3 +593,217 @@ fn audit_log_stays_append_only() {
             .is_err()
     );
 }
+
+// ---- subscribe tickets (SPEC-006, M2-008h) ----------------------------------------------
+
+mod subscribe_tickets {
+    use super::*;
+    use crate::auth::ticket::{self, TICKET_TTL_MS};
+
+    const T0: i64 = 1_700_000_000_000;
+
+    fn minted(db: &Fake, who: &Principal, thread: &str, now: i64) -> String {
+        let out = block_on(ticket::mint(db, who, thread, now)).expect("mint");
+        out["ticket"].as_str().expect("ticket").to_owned()
+    }
+
+    fn consume(db: &Fake, ticket_value: &str, thread: &str, now: i64) -> Result<Principal, u16> {
+        block_on(ticket::consume(db, false, ticket_value, thread, now)).map_err(|e| e.status)
+    }
+
+    fn setup() -> (Fake, Principal, Principal, String) {
+        let (db, owner, _) = bootstrapped();
+        let (viewer, viewer_token) = issue(&db, &owner, "viewer");
+        host_thread(&db, "t1", &owner.org_id);
+        (db, owner, viewer, viewer_token)
+    }
+
+    fn host_other_org(db: &Fake) {
+        db.exec("INSERT INTO orgs (id, slug, name) VALUES ('org_b', 'b', 'B')");
+        assert!(
+            block_on(crate::db::queries::claim_thread_host(
+                db, "t_other", "org_b", "mach_b"
+            ))
+            .expect("claim")
+        );
+    }
+
+    #[test]
+    fn a_ticket_is_256_bits_stored_only_as_a_hash_and_expires_in_60_seconds() {
+        let (db, _, viewer, _) = setup();
+        let out = block_on(ticket::mint(&db, &viewer, "t1", T0)).expect("mint");
+        let value = out["ticket"].as_str().expect("ticket");
+        assert!(
+            value.starts_with("sst_") && value.len() == 4 + 64,
+            "{value}"
+        );
+        assert!(out["expires_at"].as_str().expect("expires").ends_with('Z'));
+        let rows = db.rows(
+            "SELECT ticket_hash, session_id, user_id, thread_id, expires_at_ms \
+             FROM subscribe_tickets",
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ticket_hash"], hash_token(value));
+        assert_eq!(
+            rows[0]["session_id"],
+            viewer.session_id.as_deref().expect("session")
+        );
+        assert_eq!(rows[0]["user_id"], viewer.user_id.as_str());
+        assert_eq!(rows[0]["thread_id"], "t1");
+        assert_eq!(rows[0]["expires_at_ms"], T0 + 60_000);
+        assert!(!format!("{rows:?}").contains(value));
+        // Never in an audit row either.
+        assert!(!format!("{:?}", db.rows("SELECT * FROM audit_log")).contains(value));
+        assert_ne!(minted(&db, &viewer, "t1", T0), value);
+    }
+
+    #[test]
+    fn minting_goes_through_the_viewer_and_org_gate_and_writes_no_audit_row() {
+        let (db, _, _, viewer_token) = setup();
+        host_other_org(&db);
+        let before = db.rows("SELECT id FROM audit_log").len();
+        let go = |thread: &str| {
+            block_on(authorize_thread(
+                &db,
+                Some(&bearer(&viewer_token)),
+                false,
+                "POST",
+                &format!("/v1/threads/{thread}/subscribe-ticket"),
+                "req_x",
+            ))
+        };
+        let (principal, policy) = go("t1").expect("viewer may mint");
+        assert_eq!((principal.role, policy.action), (Role::Viewer, None));
+        assert_eq!(db.rows("SELECT id FROM audit_log").len(), before);
+        // A thread of another org (or none) is the same 404 as subscribe.
+        for thread in ["t_other", "t_unknown"] {
+            assert_eq!(go(thread).expect_err("not visible").status, 404, "{thread}");
+        }
+    }
+
+    #[test]
+    fn a_ticket_works_once_for_its_thread_and_its_principal() {
+        let (db, _, viewer, _) = setup();
+        let value = minted(&db, &viewer, "t1", T0);
+        let principal = consume(&db, &value, "t1", T0 + 1).expect("first use");
+        assert_eq!(principal, viewer);
+        assert_eq!(consume(&db, &value, "t1", T0 + 2), Err(401));
+    }
+
+    #[test]
+    fn two_racing_consumes_have_exactly_one_winner() {
+        let (db, _, viewer, _) = setup();
+        let value = minted(&db, &viewer, "t1", T0);
+        // Both consumes are in flight together; the single conditional UPDATE is what lets
+        // only one of them change the row.
+        let (a, b) = block_on(async {
+            let first = ticket::consume(&db, false, &value, "t1", T0 + 1);
+            let second = ticket::consume(&db, false, &value, "t1", T0 + 1);
+            (first.await, second.await)
+        });
+        assert_eq!(u8::from(a.is_ok()) + u8::from(b.is_ok()), 1, "{a:?} {b:?}");
+    }
+
+    #[test]
+    fn expired_malformed_unknown_and_other_thread_tickets_are_401() {
+        let (db, owner, viewer, _) = setup();
+        host_thread(&db, "t2", &owner.org_id);
+        let value = minted(&db, &viewer, "t1", T0);
+        // Other thread: refused.
+        assert_eq!(consume(&db, &value, "t2", T0 + 1), Err(401));
+        // Expired exactly at the TTL.
+        assert_eq!(consume(&db, &value, "t1", T0 + TICKET_TTL_MS), Err(401));
+        let fresh = minted(&db, &viewer, "t1", T0);
+        assert!(consume(&db, &fresh, "t1", T0 + TICKET_TTL_MS - 1).is_ok());
+        let session_like = format!("smt_{}", "a".repeat(64));
+        let unknown = format!("sst_{}", "0".repeat(64));
+        for bad in [
+            "",
+            "sst_",
+            "smt_00",
+            unknown.as_str(),
+            session_like.as_str(),
+        ] {
+            assert_eq!(consume(&db, bad, "t1", T0 + 1), Err(401), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_revoked_session_or_device_or_removed_member_loses_its_tickets() {
+        let (db, owner, viewer, viewer_token) = setup();
+        let value = minted(&db, &viewer, "t1", T0);
+        block_on(revoke_current(&db, &viewer, "r")).expect("revoke");
+        assert_eq!(consume(&db, &value, "t1", T0 + 1), Err(401));
+        // The revoked session cannot mint either.
+        assert!(
+            block_on(authorize_thread(
+                &db,
+                Some(&bearer(&viewer_token)),
+                false,
+                "POST",
+                "/v1/threads/t1/subscribe-ticket",
+                "r"
+            ))
+            .is_err()
+        );
+
+        let (member, _) = issue(&db, &owner, "member");
+        let value = minted(&db, &member, "t1", T0);
+        db.exec(&format!(
+            "UPDATE devices SET revoked_at = '2020-01-01T00:00:00.000Z' WHERE id = '{}'",
+            member.device_id
+        ));
+        assert_eq!(consume(&db, &value, "t1", T0 + 1), Err(401));
+
+        let (other, _) = issue(&db, &owner, "viewer");
+        let value = minted(&db, &other, "t1", T0);
+        db.exec(&format!(
+            "DELETE FROM members WHERE user_id = '{}'",
+            other.user_id
+        ));
+        assert_eq!(consume(&db, &value, "t1", T0 + 1), Err(401));
+    }
+
+    #[test]
+    fn a_ticket_for_a_thread_that_moved_org_is_refused() {
+        let (db, _, viewer, _) = setup();
+        let value = minted(&db, &viewer, "t1", T0);
+        db.exec("INSERT INTO orgs (id, slug, name) VALUES ('org_b', 'b', 'B')");
+        db.exec("UPDATE thread_hosts SET org_id = 'org_b' WHERE thread_id = 't1'");
+        assert_eq!(consume(&db, &value, "t1", T0 + 1), Err(401));
+    }
+
+    #[test]
+    fn a_dev_ticket_needs_the_dev_fixtures() {
+        let db = Fake::new();
+        let dev = block_on(authenticate(&db, Some("Bearer dev"), true)).expect("dev");
+        host_thread(&db, "t1", &dev.org_id);
+        let value = minted(&db, &dev, "t1", T0);
+        let refused = block_on(ticket::consume(&db, false, &value, "t1", T0 + 1));
+        assert_eq!(refused.expect_err("fixtures off").status, 401);
+        let value = minted(&db, &dev, "t1", T0);
+        let ok = block_on(ticket::consume(&db, true, &value, "t1", T0 + 1)).expect("dev ticket");
+        assert_eq!(ok, dev);
+    }
+
+    #[test]
+    fn query_helpers_find_and_strip_only_the_ticket() {
+        assert_eq!(
+            ticket::ticket_in_query(Some("after=3&ticket=sst_ab")),
+            Some("sst_ab")
+        );
+        assert_eq!(ticket::ticket_in_query(Some("after=3")), None);
+        assert_eq!(ticket::ticket_in_query(None), None);
+        assert_eq!(ticket::strip_ticket("after=3&ticket=sst_ab"), "after=3");
+        assert_eq!(ticket::strip_ticket("ticket=x&after=3&ticket=y"), "after=3");
+        assert_eq!(ticket::strip_ticket("ticket=x"), "");
+    }
+
+    #[test]
+    fn minting_sweeps_old_tickets() {
+        let (db, _, viewer, _) = setup();
+        minted(&db, &viewer, "t1", T0);
+        minted(&db, &viewer, "t1", T0 + 10 * TICKET_TTL_MS);
+        assert_eq!(db.rows("SELECT id FROM subscribe_tickets").len(), 1);
+    }
+}

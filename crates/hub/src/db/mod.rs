@@ -67,6 +67,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0011_signin_links.sql",
         include_str!("../../migrations/0011_signin_links.sql"),
     ),
+    (
+        "0013_subscribe_tickets.sql",
+        include_str!("../../migrations/0013_subscribe_tickets.sql"),
+    ),
 ];
 
 /// One result row: column name to JSON value (what D1 returns for an object row).

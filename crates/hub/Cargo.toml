@@ -92,3 +92,7 @@ worker = { version = "=0.8.7", features = ["http", "axum", "d1", "queue"] }
 worker-macros = { version = "=0.8.7", features = ["http"] }
 axum = { version = "0.8", default-features = false, features = ["json"] }
 tower-service = "0.3"
+
+[[test]]
+name = "subscribe_ticket"
+required-features = ["live"]

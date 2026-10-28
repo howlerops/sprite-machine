@@ -53,6 +53,24 @@ pub async fn find_by_hash(
     db: &impl Db,
     hash: &str,
 ) -> Result<Option<(String, Principal)>, DbError> {
+    find_live(db, "s.token_hash = ?", hash).await
+}
+
+/// The live session with this id (same conditions as [`find_by_hash`]).
+pub async fn find_by_session_id(
+    db: &impl Db,
+    session_id: &str,
+) -> Result<Option<Principal>, DbError> {
+    Ok(find_live(db, "s.id = ?", session_id)
+        .await?
+        .map(|(_, principal)| principal))
+}
+
+async fn find_live(
+    db: &impl Db,
+    condition: &str,
+    value: &str,
+) -> Result<Option<(String, Principal)>, DbError> {
     let sql = format!(
         "SELECT s.id AS session_id, s.token_hash, s.user_id, s.device_id, s.org_id, \
                 u.display_name, m.role, s.role_cap \
@@ -60,10 +78,10 @@ pub async fn find_by_hash(
          JOIN users u ON u.id = s.user_id \
          JOIN members m ON m.org_id = s.org_id AND m.user_id = s.user_id \
          JOIN devices d ON d.id = s.device_id \
-         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > {NOW} \
+         WHERE {condition} AND s.revoked_at IS NULL AND s.expires_at > {NOW} \
            AND d.revoked_at IS NULL"
     );
-    let rows = db.query(&sql, &[hash.into()]).await?;
+    let rows = db.query(&sql, &[value.into()]).await?;
     let Some(row) = rows.first() else {
         return Ok(None);
     };

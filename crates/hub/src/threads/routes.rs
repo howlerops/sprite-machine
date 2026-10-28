@@ -8,7 +8,8 @@
 //! | `GET  /v1/threads/{id}`                              | session token (viewer+), or `Bearer dev` + `DEV_FIXTURES=1` |
 //! | `PATCH /v1/threads/{id}`                             | member; `{title?, archived?}` (M2-010) |
 //! | `DELETE /v1/threads/{id}`                            | admin, `Idempotency-Key`; soft delete (M2-010) |
-//! | `GET  /v1/threads/{id}/subscribe?after=<seq>` (WebSocket) | same                 |
+//! | `GET  /v1/threads/{id}/subscribe?after=<seq>` (WebSocket) | same, or `?ticket=` instead of the header (SPEC-006) |
+//! | `POST /v1/threads/{id}/subscribe-ticket`             | viewer+; 201 `{ticket, expires_at}` for the browser subscribe (SPEC-006, M2-008h) |
 //! | `POST /v1/threads/{id}/prompts`                      | same                      |
 //! | `GET  /v1/threads/{id}/pending`                      | same                      |
 //! | `DELETE /v1/threads/{id}/pending/{task_id}`          | same                      |
@@ -30,7 +31,10 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Path, Request, State},
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION},
+    http::{
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri,
+        header::{AUTHORIZATION, CACHE_CONTROL},
+    },
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
@@ -44,7 +48,7 @@ use super::error::ApiError;
 use super::valid_idempotency_key;
 use crate::audit::{self, Event};
 use crate::auth::{
-    Principal, authenticate, policy::thread_policy, routes::authorize_thread_request,
+    Principal, authenticate, policy::thread_policy, routes::authorize_thread_request, ticket,
 };
 use crate::db::{Db, d1::D1, queries};
 use crate::router::{REQUEST_ID_HEADER, request_id};
@@ -68,6 +72,10 @@ pub fn thread_routes() -> Router<AppState> {
             get(forward).patch(forward).delete(forward),
         )
         .route("/v1/threads/{thread_id}/subscribe", get(forward))
+        .route(
+            "/v1/threads/{thread_id}/subscribe-ticket",
+            post(subscribe_ticket),
+        )
         .route("/v1/threads/{thread_id}/prompts", post(forward))
         .route("/v1/threads/{thread_id}/pending", get(forward))
         .route("/v1/threads/{thread_id}/pending/{task_id}", delete(forward))
@@ -114,9 +122,32 @@ async fn forward_inner(
             req.uri().path()
         )));
     }
-    let (principal, _policy) =
-        authorize_thread_request(env, req.headers(), req.method().as_str(), req.uri().path())
-            .await?;
+    // SPEC-006: a browser WebSocket carries no Authorization header, so the subscribe upgrade
+    // may present `?ticket=` instead. The ticket never travels past this function.
+    let ticket = if req.method() == Method::GET
+        && req.uri().path().ends_with("/subscribe")
+        && !req.headers().contains_key(AUTHORIZATION)
+    {
+        ticket::ticket_in_query(req.uri().query()).map(str::to_owned)
+    } else {
+        None
+    };
+    strip_ticket_from_uri(&mut req)?;
+    let principal = match ticket {
+        Some(ticket) => {
+            let thread_id = params.get("thread_id").map(String::as_str).unwrap_or("");
+            let database = env
+                .d1("DB")
+                .map_err(|error| ApiError::internal(format!("D1 binding DB: {error}")))?;
+            let now = i64::try_from(worker::Date::now().as_millis()).unwrap_or(i64::MAX);
+            ticket::consume(&D1::new(&database), dev_fixtures, &ticket, thread_id, now).await?
+        }
+        None => {
+            authorize_thread_request(env, req.headers(), req.method().as_str(), req.uri().path())
+                .await?
+                .0
+        }
+    };
     let actor = principal.actor();
     let thread_id = params
         .get("thread_id")
@@ -133,6 +164,64 @@ async fn forward_inner(
         .insert(HeaderName::from_static(ACTOR_HEADER), value);
 
     to_thread(env, thread_id, req).await
+}
+
+/// Removes `ticket=` from the request's query, so neither the DO nor any log downstream of the
+/// Worker sees it.
+fn strip_ticket_from_uri(req: &mut Request) -> Result<(), ApiError> {
+    let Some(query) = req.uri().query() else {
+        return Ok(());
+    };
+    if ticket::ticket_in_query(Some(query)).is_none() {
+        return Ok(());
+    }
+    let cleaned = ticket::strip_ticket(query);
+    let path = req.uri().path();
+    let path_and_query = if cleaned.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{path}?{cleaned}")
+    };
+    let mut parts = req.uri().clone().into_parts();
+    parts.path_and_query = Some(
+        path_and_query
+            .parse()
+            .map_err(|_| ApiError::invalid_request("malformed query"))?,
+    );
+    *req.uri_mut() =
+        Uri::from_parts(parts).map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(())
+}
+
+/// `POST /v1/threads/{id}/subscribe-ticket` (SPEC-006): viewer and up, the same org and thread
+/// check as subscribe (`authorize_thread`). Not audited: the policy names no action, and the
+/// ticket is never recorded anywhere but as a hash.
+#[worker::send]
+async fn subscribe_ticket(State(env): State<AppState>, req: Request) -> Response {
+    let result = async {
+        let (principal, policy) =
+            authorize_thread_request(&env, req.headers(), req.method().as_str(), req.uri().path())
+                .await?;
+        let database = env
+            .d1("DB")
+            .map_err(|error| ApiError::internal(format!("D1 binding DB: {error}")))?;
+        let now = i64::try_from(worker::Date::now().as_millis()).unwrap_or(i64::MAX);
+        ticket::mint(&D1::new(&database), &principal, &policy.thread_id, now).await
+    }
+    .await;
+    match result {
+        Ok(body) => (
+            StatusCode::CREATED,
+            [(CACHE_CONTROL, "no-store")],
+            Json(body),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            Json(error.body()),
+        )
+            .into_response(),
+    }
 }
 
 /// Hands a request to the Thread DO named `thread_id` and returns its answer.
