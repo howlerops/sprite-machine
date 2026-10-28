@@ -20,6 +20,12 @@ serde_json.workspace = true
 # stays a plain native run. `scripts/hub-test.sh <name>` turns it on.
 live = []
 
+[dev-dependencies]
+# The native SQLite fake for the D1 schema tests (tests/d1_schema.rs). It runs the same
+# migration files the Worker runs on D1. Dev/test only: never in the wasm32 Worker or the
+# native lib. Same version and bundling as client-core, so the lock file gains no new crate.
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+
 [[test]]
 name = "smoke"
 required-features = ["live"]
