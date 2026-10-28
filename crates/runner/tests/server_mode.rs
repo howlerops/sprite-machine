@@ -16,6 +16,7 @@ use runner::server::{self, Options, PermissionMode, Projects, RcArgs, SpawnMode}
 use runner::tunnel::Timing;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -53,9 +54,49 @@ async fn mock_agent_child() {
     let script = acp_mock::Script::from_json(&script).expect("valid script");
     // The test harness printed `test ... ` without a newline: end that line.
     println!();
-    acp_mock::run(script, tokio::io::stdin(), tokio::io::stdout())
+    // What the runner sent is kept in `recorded-<n>.json` (a dump every 20 ms).
+    let recorder = acp_mock::Recorder::new();
+    let dump = dir.join(format!("recorded-{n}.json"));
+    let dumper = {
+        let recorder = recorder.clone();
+        tokio::spawn(async move {
+            loop {
+                let _ = fs::write(&dump, Value::Array(recorder.messages()).to_string());
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+    };
+    // The mock cannot advertise http / sse MCP servers: when `advertise-mcp` exists, the
+    // `initialize` response is patched on its way out.
+    let advertise = dir.join("advertise-mcp").exists();
+    let (mock_out, relay_in) = tokio::io::duplex(1 << 16);
+    let agent = tokio::spawn(acp_mock::run_recorded(
+        script,
+        recorder,
+        tokio::io::stdin(),
+        mock_out,
+    ));
+    let mut lines = tokio::io::BufReader::new(relay_in).lines();
+    let mut stdout = tokio::io::stdout();
+    while let Some(line) = lines.next_line().await.expect("read the agent") {
+        let mut line = line;
+        if advertise
+            && let Ok(mut message) = serde_json::from_str::<Value>(&line)
+            && message["result"]["agentCapabilities"].is_object()
+        {
+            message["result"]["agentCapabilities"]["mcpCapabilities"] =
+                json!({ "http": true, "sse": true });
+            line = message.to_string();
+        }
+        stdout.write_all(line.as_bytes()).await.unwrap();
+        stdout.write_all(b"\n").await.unwrap();
+        stdout.flush().await.unwrap();
+    }
+    agent
         .await
+        .unwrap()
         .expect("agent serves until stdin closes");
+    dumper.abort();
 }
 
 // ---- the fake hub ----------------------------------------------------------------------------
@@ -309,6 +350,7 @@ impl Rig {
             permission_mode: PermissionMode::Default,
             name_prefix: "tst".to_owned(),
             continue_last: false,
+            idle_timeout: Duration::from_secs(3600),
             timing: Timing {
                 backoff_base: Duration::from_millis(20),
                 backoff_cap: Duration::from_millis(200),
@@ -463,6 +505,240 @@ async fn the_permission_mode_is_set_on_the_session() {
         .until(|f| event_type(f) == Some("StateDelta") && f.to_string().contains("plan"))
         .await;
     assert!(!frames.is_empty());
+    running.stop().await;
+}
+
+fn plan_modes(script: &mut Value) {
+    script["modes"] = json!({
+        "currentModeId": "default",
+        "availableModes": [{ "id": "default", "name": "Default" }, { "id": "plan", "name": "Plan" }]
+    });
+}
+
+/// What the first agent received, in order, as `method` (`method:modeId` for `session/set_mode`),
+/// once `until` holds for it.
+async fn received(rig: &Rig, until: impl Fn(&[String]) -> bool) -> Vec<String> {
+    let path = rig.root.join("mock/recorded-1.json");
+    let mut methods = Vec::new();
+    for _ in 0..500 {
+        methods = fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| {
+                let method = m["method"].as_str()?;
+                Some(match m["params"]["modeId"].as_str() {
+                    Some(mode) => format!("{method}:{mode}"),
+                    None => method.to_owned(),
+                })
+            })
+            .collect();
+        if until(&methods) {
+            return methods;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the agent did not receive what was expected: {methods:?}");
+}
+
+#[tokio::test]
+async fn the_permission_mode_is_in_force_before_the_first_prompt() {
+    let mut script = one("done");
+    plan_modes(&mut script);
+    let rig = Rig::new(&[script]).await;
+    let mut options = rig.options();
+    options.permission_mode = PermissionMode::Plan;
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &rig.work()).await;
+    conn.until(run_finished("tk_1")).await;
+    let methods = received(&rig, |m| m.iter().any(|x| x == "session/prompt")).await;
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap();
+    assert!(
+        at("session/set_mode:plan") < at("session/prompt"),
+        "{methods:?}"
+    );
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_mode_the_agent_does_not_advertise_fails_the_dispatch_without_a_prompt() {
+    // The agent has no `plan` mode.
+    let rig = Rig::new(&[one("must not run")]).await;
+    let mut options = rig.options();
+    options.permission_mode = PermissionMode::Plan;
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &rig.work()).await;
+    let frames = conn.until(|f| is_event(f, "RunError", "tk_1")).await;
+    assert!(!has_text(&frames, "must not run"));
+    let methods = received(&rig, |m| m.iter().any(|x| x == "session/new")).await;
+    assert!(
+        !methods.iter().any(|m| m == "session/prompt"),
+        "{methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m.starts_with("session/set_mode")),
+        "{methods:?}"
+    );
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn http_and_sse_mcp_servers_are_passed_when_the_agent_advertises_them() {
+    let rig = Rig::new(&[one("x")]).await;
+    fs::write(rig.root.join("mock/advertise-mcp"), "").unwrap();
+    fs::write(
+        rig.work().join(".mcp.json"),
+        json!({ "mcpServers": {
+            "remote": { "type": "http", "url": "https://example.test/mcp" },
+            "events": { "type": "sse", "url": "https://example.test/sse" },
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let running = start(rig.options());
+    let (mut conn, _) = rig.hub.accept().await;
+    conn.dispatch("th_1", "tk_1", "opencode", &rig.work()).await;
+    conn.until(run_finished("tk_1")).await;
+    received(&rig, |m| m.iter().any(|x| x == "session/prompt")).await;
+
+    let text = fs::read_to_string(rig.root.join("mock/recorded-1.json")).unwrap();
+    let messages: Vec<Value> = serde_json::from_str(&text).unwrap();
+    let new = messages
+        .iter()
+        .find(|m| m["method"] == "session/new")
+        .expect("session/new");
+    let mut types: Vec<&str> = new["params"]["mcpServers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["type"].as_str())
+        .collect();
+    types.sort_unstable();
+    assert_eq!(types, ["http", "sse"], "{new}");
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn http_mcp_servers_are_left_out_when_the_agent_does_not_advertise_them() {
+    let rig = Rig::new(&[one("x")]).await;
+    fs::write(
+        rig.work().join(".mcp.json"),
+        json!({ "mcpServers": { "remote": { "type": "http", "url": "https://example.test/mcp" } }})
+            .to_string(),
+    )
+    .unwrap();
+    let running = start(rig.options());
+    let (mut conn, _) = rig.hub.accept().await;
+    conn.dispatch("th_1", "tk_1", "opencode", &rig.work()).await;
+    conn.until(run_finished("tk_1")).await;
+    received(&rig, |m| m.iter().any(|x| x == "session/prompt")).await;
+    let text = fs::read_to_string(rig.root.join("mock/recorded-1.json")).unwrap();
+    let messages: Vec<Value> = serde_json::from_str(&text).unwrap();
+    let new = messages.iter().find(|m| m["method"] == "session/new");
+    assert_eq!(new.unwrap()["params"]["mcpServers"], json!([]));
+    running.stop().await;
+}
+
+/// A worktree of `repo` at `rig.state()/worktrees/<name>`.
+fn add_worktree(rig: &Rig, repo: &Path, name: &str) -> PathBuf {
+    let path = rig.state().join("worktrees").join(name);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let status = Process::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "add", "--detach"])
+        .arg(&path)
+        .arg("HEAD")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    path
+}
+
+#[tokio::test]
+async fn stale_worktrees_are_swept_at_start_clean_ones_removed_and_dirty_ones_kept() {
+    let rig = Rig::new(&[one("x")]).await;
+    let repo = rig.repo();
+    let clean = add_worktree(&rig, &repo, "left-clean");
+    let dirty = add_worktree(&rig, &repo, "left-dirty");
+    fs::write(dirty.join("work.txt"), "unsaved").unwrap();
+    assert_eq!(worktrees(&repo), 3);
+
+    let running = start(rig.options());
+    let (_conn, _) = rig.hub.accept().await;
+    assert!(!clean.exists(), "the clean leftover is removed");
+    assert!(dirty.join("work.txt").exists(), "the dirty one is kept");
+    assert_eq!(worktrees(&repo), 2);
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_cancel_of_an_idle_thread_ends_the_session_and_removes_its_worktree() {
+    let rig = Rig::new(&[one("a"), one("b")]).await;
+    let repo = rig.repo();
+    let mut options = rig.options();
+    options.spawn = Some(SpawnMode::Worktree);
+    options.cwd = repo.clone();
+    options.capacity = 1;
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &repo).await;
+    conn.until(run_finished("tk_1")).await;
+    assert_eq!(worktrees(&repo), 2);
+
+    let key = conn
+        .command(json!({ "kind": "cancel", "thread_id": "th_1", "task_id": "tk_1" }))
+        .await;
+    conn.until(|f| f["t"] == "ack" && f["seq"] == 2).await;
+    assert_eq!(worktrees(&repo), 1, "the worktree is removed");
+    assert!(!key.is_empty());
+    // The agent process is gone with the session.
+    let pid = rig.pids()[0];
+    let mut gone = false;
+    for _ in 0..200 {
+        if !Path::new(&format!("/proc/{pid}")).exists() {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(gone, "the agent process is stopped");
+
+    // The slot is free, and the thread can be prompted again (a new session over its store).
+    conn.dispatch("th_2", "tk_2", "opencode", &repo).await;
+    conn.until(run_finished("tk_2")).await;
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_session_ends_after_the_idle_timeout() {
+    let rig = Rig::new(&[one("a")]).await;
+    let repo = rig.repo();
+    let mut options = rig.options();
+    options.spawn = Some(SpawnMode::Worktree);
+    options.cwd = repo.clone();
+    options.idle_timeout = Duration::from_millis(400);
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch("th_1", "tk_1", "opencode", &repo).await;
+    conn.until(run_finished("tk_1")).await;
+    assert_eq!(worktrees(&repo), 2);
+    let mut removed = false;
+    for _ in 0..200 {
+        if worktrees(&repo) == 1 {
+            removed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(removed, "the idle session's worktree is removed");
     running.stop().await;
 }
 
@@ -670,6 +946,7 @@ fn rc_flags_parse_with_defaults() {
     assert_eq!(defaults.permission_mode, PermissionMode::Default);
     assert_eq!(defaults.spawn, None);
     assert!(!defaults.continue_last);
+    assert_eq!(defaults.idle_timeout, Duration::from_secs(7200));
 
     let all = RcArgs::parse(&args(&[
         "--spawn",
@@ -680,9 +957,12 @@ fn rc_flags_parse_with_defaults() {
         "acceptEdits",
         "--name-prefix",
         "Box",
+        "--idle-timeout",
+        "15m",
         "-c",
     ]))
     .unwrap();
+    assert_eq!(all.idle_timeout, Duration::from_secs(900));
     assert_eq!(all.spawn, Some(SpawnMode::Worktree));
     assert_eq!(all.capacity, 4);
     assert_eq!(all.permission_mode, PermissionMode::AcceptEdits);
@@ -700,6 +980,8 @@ fn rc_flags_parse_with_defaults() {
         vec!["--spawn", "moon"],
         vec!["--capacity", "0"],
         vec!["--permission-mode", "yolo"],
+        vec!["--idle-timeout", "0"],
+        vec!["--idle-timeout", "2d"],
         vec!["--capacity"],
         vec!["--nope"],
     ] {

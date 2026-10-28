@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use protocol::turn_event::{Envelope, Event, RunOutcome};
 use sidecar::bridge::{CommandFailure, CommandSource, EventSink, IncomingCommand, SinkError};
@@ -10,18 +11,26 @@ use tokio::sync::mpsc;
 
 use crate::tunnel::TunnelSink;
 
-/// Keys of commands the router made up (not from the hub) start with this. They are never acked
-/// and a failure is logged, not reported.
-pub(super) const SYNTHETIC_KEY_PREFIX: &str = "rc-mode:";
-
 /// The tasks of one session that have not ended.
-#[derive(Default)]
 pub(super) struct SessionState {
     inner: Mutex<Inner>,
 }
 
-#[derive(Default)]
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(Inner {
+                touched: Instant::now(),
+                tasks: HashSet::new(),
+                key_task: HashMap::new(),
+            }),
+        }
+    }
+}
+
 struct Inner {
+    /// When the session last started or ended a task (or was created).
+    touched: Instant,
     tasks: HashSet<String>,
     /// Command key → the task it tried to start.
     key_task: HashMap<String, String>,
@@ -35,6 +44,7 @@ impl SessionState {
     /// A `prompt` or `dispatch` for `task_id` was handed to the bridge.
     pub fn begin(&self, key: &str, task_id: &str) {
         let mut inner = self.lock();
+        inner.touched = Instant::now();
         inner.tasks.insert(task_id.to_owned());
         inner.key_task.insert(key.to_owned(), task_id.to_owned());
     }
@@ -44,8 +54,15 @@ impl SessionState {
         !self.lock().tasks.is_empty()
     }
 
+    /// No task for at least `timeout`.
+    pub fn idle_for(&self, timeout: Duration) -> bool {
+        let inner = self.lock();
+        inner.tasks.is_empty() && inner.touched.elapsed() >= timeout
+    }
+
     fn end_task(&self, task_id: &str) {
         let mut inner = self.lock();
+        inner.touched = Instant::now();
         inner.tasks.remove(task_id);
         inner.key_task.retain(|_, task| task != task_id);
     }
@@ -83,14 +100,6 @@ impl EventSink for SessionSink {
     }
 
     async fn command_result(&self, failure: CommandFailure) -> Result<(), SinkError> {
-        if failure.idempotency_key.starts_with(SYNTHETIC_KEY_PREFIX) {
-            tracing::warn!(
-                code = ?failure.code,
-                message = %failure.message,
-                "the permission mode could not be applied to the session"
-            );
-            return Ok(());
-        }
         self.state.fail_key(&failure.idempotency_key);
         self.inner.command_result(failure).await
     }

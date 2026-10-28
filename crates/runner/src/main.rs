@@ -66,6 +66,7 @@ async fn run_rc(args: &[String]) -> Result<()> {
         permission_mode: rc.permission_mode,
         name_prefix: rc.name_prefix.unwrap_or_else(server::host_prefix),
         continue_last: rc.continue_last,
+        idle_timeout: rc.idle_timeout,
         timing: Timing::default(),
     };
     server::run(options, async {

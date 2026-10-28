@@ -17,8 +17,14 @@
 //!   (`thread_open`) as a session started on this runner.
 //!
 //! The runner's `--permission-mode` is the mode every session gets, whatever the dispatch
-//! asked for: whoever sits at the machine decides how far an agent may go. It is applied as an
-//! ACP `session/set_mode` right after the session's first task starts.
+//! asked for: whoever sits at the machine decides how far an agent may go. The bridge applies it
+//! (`Config::initial_mode`, an ACP `session/set_mode`) right after the session is attached and
+//! before the first prompt; a mode the agent refuses fails the task.
+//!
+//! A session ends when the hub cancels its idle thread, or after `--idle-timeout` (default 2 h)
+//! without a task; its clean worktree is removed and its slot is free. At start, worktrees under
+//! `<state dir>/worktrees` that no session owns are removed when clean and listed in one
+//! warning when they have changes.
 
 mod names;
 mod project;
@@ -30,6 +36,7 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use sidecar::store::Store;
@@ -45,6 +52,9 @@ pub use self::worktree::Worktree;
 
 /// Default `--capacity`.
 pub const DEFAULT_CAPACITY: u32 = 32;
+
+/// Default `--idle-timeout`: 2 hours.
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// Where a session's files live.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +136,8 @@ pub struct Options {
     pub name_prefix: String,
     /// `-c` / `--continue`.
     pub continue_last: bool,
+    /// `--idle-timeout`: a session without a task for this long ends.
+    pub idle_timeout: Duration,
     pub timing: Timing,
 }
 
@@ -138,10 +150,28 @@ pub struct RcArgs {
     pub permission_mode: PermissionMode,
     pub name_prefix: Option<String>,
     pub continue_last: bool,
+    pub idle_timeout: Duration,
+}
+
+/// `90`, `90s`, `15m` or `2h`.
+fn parse_duration(text: &str) -> Option<Duration> {
+    let (digits, unit) = match text.char_indices().find(|(_, c)| !c.is_ascii_digit()) {
+        Some((at, _)) => text.split_at(at),
+        None => (text, "s"),
+    };
+    let n: u64 = digits.parse().ok().filter(|n| *n > 0)?;
+    let factor = match unit {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        _ => return None,
+    };
+    n.checked_mul(factor).map(Duration::from_secs)
 }
 
 pub const RC_USAGE: &str = "usage: sm rc [--hub <url>] [--spawn same-dir|worktree] [--capacity <n>] \
-[--permission-mode default|acceptEdits|plan|bypassPermissions] [--name-prefix <prefix>] [-c|--continue]";
+[--permission-mode default|acceptEdits|plan|bypassPermissions] [--name-prefix <prefix>] \
+[--idle-timeout <n>[s|m|h]] [-c|--continue]";
 
 impl RcArgs {
     pub fn parse(args: &[String]) -> Result<Self> {
@@ -152,6 +182,7 @@ impl RcArgs {
             permission_mode: PermissionMode::Default,
             name_prefix: None,
             continue_last: false,
+            idle_timeout: DEFAULT_IDLE_TIMEOUT,
         };
         let mut args = args.iter();
         while let Some(flag) = args.next() {
@@ -189,6 +220,12 @@ impl RcArgs {
                         anyhow!("--name-prefix needs letters, digits or '-', not {text:?}")
                     })?);
                 }
+                "--idle-timeout" => {
+                    let text = value("--idle-timeout")?;
+                    parsed.idle_timeout = parse_duration(text).ok_or_else(|| {
+                        anyhow!("--idle-timeout takes a number with s, m or h (2h), not {text:?}")
+                    })?;
+                }
                 "-c" | "--continue" => parsed.continue_last = true,
                 other => bail!("unknown flag {other:?}\n{RC_USAGE}"),
             }
@@ -217,6 +254,16 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
             .spawn_mode(&options.cwd)
             .unwrap_or(SpawnMode::SameDir),
     };
+
+    // Before any session exists, so every worktree here is a leftover; `-c` still needs the
+    // worktree of the last session.
+    let keep: Vec<PathBuf> = options
+        .continue_last
+        .then(|| projects.last_session(&options.cwd))
+        .flatten()
+        .map(|last| vec![last.cwd])
+        .unwrap_or_default();
+    worktree::sweep(&options.state_dir.join("worktrees"), &keep).await;
 
     let mut capabilities = harness::capabilities(&found, options.capacity);
     // The saved / chosen mode first: it is the one a dispatch without a preference gets.
@@ -254,6 +301,7 @@ pub async fn run(options: Options, shutdown: impl Future<Output = ()>) -> Result
             capacity: usize::try_from(options.capacity).unwrap_or(usize::MAX),
             permission_mode: options.permission_mode,
             name_prefix: options.name_prefix,
+            idle_timeout: options.idle_timeout,
         },
         sink,
         commands,

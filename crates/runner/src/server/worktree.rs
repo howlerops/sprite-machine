@@ -64,6 +64,29 @@ impl Worktree {
         Ok((Self { repo, path }, cwd))
     }
 
+    /// The worktree at `path`, found through git (its repository is the one it was added from).
+    async fn existing(path: &Path) -> Option<Self> {
+        let common = git(
+            path,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await
+        .ok()?;
+        let repo = PathBuf::from(common).parent()?.to_path_buf();
+        Some(Self {
+            repo,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// Removes the worktree unless it has changes; whether it is gone.
+    async fn try_remove(&self) -> bool {
+        let path = self.path.to_string_lossy().into_owned();
+        git(&self.repo, &["worktree", "remove", &path])
+            .await
+            .is_ok()
+    }
+
     /// Removes the worktree. One with uncommitted changes is kept (and reported): the agent's
     /// work is not thrown away.
     pub async fn remove(&self) {
@@ -71,5 +94,36 @@ impl Worktree {
         if let Err(error) = git(&self.repo, &["worktree", "remove", &path]).await {
             tracing::warn!(worktree = %self.path.display(), "worktree kept: {error:#}");
         }
+    }
+}
+
+/// Removes the worktrees under `root` that no session owns: clean ones go, the rest (changes, or
+/// not removable) stay and are listed in one warning. `keep` are worktrees still needed.
+pub async fn sweep(root: &Path, keep: &[PathBuf]) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let mut kept = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || keep.iter().any(|k| k.starts_with(&path)) {
+            continue;
+        }
+        let removed = match Worktree::existing(&path).await {
+            Some(worktree) => worktree.try_remove().await,
+            None => false,
+        };
+        if !removed {
+            kept.push(path);
+        }
+    }
+    if !kept.is_empty() {
+        kept.sort();
+        let list: Vec<_> = kept.iter().map(|p| p.display().to_string()).collect();
+        tracing::warn!(
+            "{} worktree(s) of earlier sessions have changes and were kept: {}",
+            list.len(),
+            list.join(", ")
+        );
     }
 }

@@ -62,7 +62,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use protocol::acp::{McpServer, RequestPermissionResponse, SessionId};
+use protocol::acp::{McpCapabilities, McpServer, RequestPermissionResponse, SessionId};
 use protocol::mapping::acp_turn::AcpTurnMapper;
 use protocol::tunnel::{Actor, ContentPart};
 use protocol::turn_event::Envelope;
@@ -90,6 +90,27 @@ pub const LOCAL_KEY_PREFIX: &str = "local:";
 /// Default approval TTL (PLAN-v2 §4.1): 10 minutes.
 pub const DEFAULT_APPROVAL_TTL: Duration = Duration::from_secs(10 * 60);
 
+type McpFn = dyn Fn(&str, &McpCapabilities) -> Vec<McpServer> + Send + Sync;
+
+/// Builds the MCP servers of a thread once the agent's `mcp_capabilities` (from its `initialize`
+/// response) are known: `(thread id, capabilities) -> servers`.
+#[derive(Clone)]
+pub struct McpProvider(Arc<McpFn>);
+
+impl McpProvider {
+    pub fn new(
+        provider: impl Fn(&str, &McpCapabilities) -> Vec<McpServer> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(provider))
+    }
+}
+
+impl std::fmt::Debug for McpProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("McpProvider")
+    }
+}
+
 /// What the bridge needs to know about its runner.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -110,6 +131,13 @@ pub struct Config {
     pub mcp_servers: Vec<McpServer>,
     /// MCP servers per thread id; replaces [`Config::mcp_servers`] for that thread.
     pub thread_mcp_servers: HashMap<String, Vec<McpServer>>,
+    /// Builds the MCP servers from the agent's advertised `mcp_capabilities`; replaces
+    /// [`Config::mcp_servers`] and [`Config::thread_mcp_servers`] when set.
+    pub mcp_provider: Option<McpProvider>,
+    /// The ACP session mode every session is put in right after `session/new`, `session/resume`
+    /// or `session/load` and before its first prompt. A mode the agent does not advertise, or
+    /// that it refuses, fails the task (`RunError`) instead of running in another mode.
+    pub initial_mode: Option<String>,
 }
 
 impl Config {
@@ -127,6 +155,8 @@ impl Config {
             max_running_tasks: 32,
             mcp_servers: Vec::new(),
             thread_mcp_servers: HashMap::new(),
+            mcp_provider: None,
+            initial_mode: None,
         }
     }
 
@@ -210,6 +240,10 @@ pub struct Bridge<S: EventSink, C: CommandSource> {
     connector: Option<std::sync::Mutex<Connector>>,
     /// The agent process exited and has not been started again.
     harness_down: bool,
+    /// What the agent's last `initialize` advertised for MCP.
+    agent_mcp: McpCapabilities,
+    /// ACP sessions already put in [`Config::initial_mode`] on this connection.
+    moded: std::collections::HashSet<String>,
     threads: HashMap<String, ThreadState>,
     /// ACP session id → thread id.
     by_session: HashMap<String, String>,
@@ -354,6 +388,8 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             internal_tx: wiring.internal_tx,
             connector,
             harness_down: false,
+            agent_mcp: McpCapabilities::default(),
+            moded: std::collections::HashSet::new(),
             threads: HashMap::new(),
             by_session: HashMap::new(),
             approvals: HashMap::new(),
