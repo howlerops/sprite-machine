@@ -5,7 +5,7 @@
 
 use std::fmt;
 use std::future::Future;
-use std::io::Write;
+use std::io::{BufRead, IsTerminal, Write};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +29,9 @@ pub enum LoginError {
     Expired,
     /// Someone refused the pairing.
     Denied,
+    /// The person running `sm login` did not confirm the org that approved it (or there was no
+    /// terminal to ask on); the credential was not stored and the machine was revoked.
+    Declined,
 }
 
 impl fmt::Display for LoginError {
@@ -38,6 +41,9 @@ impl fmt::Display for LoginError {
                 f.write_str("the code expired before it was approved; run `sm login` again")
             }
             Self::Denied => f.write_str("the pairing was denied"),
+            Self::Declined => {
+                f.write_str("not joined: nothing was stored and the hub revoked this machine")
+            }
         }
     }
 }
@@ -46,6 +52,87 @@ impl std::error::Error for LoginError {}
 
 /// How the flow waits between polls. Production sleeps; tests record the durations.
 pub type Sleeper = Arc<dyn Fn(Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+/// Asks the person a yes/no question (already printed); `None` when nobody can answer (no
+/// terminal, end of input), which counts as "no".
+pub type Prompter = Arc<dyn Fn() -> Option<bool> + Send + Sync>;
+
+/// Whether `sm login` may keep the credential of the org that approved it (RFC 8628 §5.4: remote
+/// phishing: someone else's approval must not silently enrol this machine).
+#[derive(Clone)]
+pub enum Confirm {
+    /// `--yes`: no question.
+    Yes,
+    /// Ask "Join org X approved by Y? [y/N]".
+    Ask(Prompter),
+}
+
+/// Reads one line from stdin when it is a terminal; `y`/`yes` is a yes, anything else a no.
+pub fn terminal_prompter() -> Prompter {
+    Arc::new(|| {
+        let stdin = std::io::stdin();
+        if !stdin.is_terminal() {
+            return None;
+        }
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line).ok().filter(|n| *n > 0)?;
+        Some(matches!(
+            line.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes"
+        ))
+    })
+}
+
+/// The org and person that approved the pairing, as the hub reports them. Display only; it is
+/// attacker-influenced text, so control characters are dropped before it reaches a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Approval {
+    pub org_id: String,
+    pub org_name: String,
+    pub user_name: String,
+    pub user_email: String,
+}
+
+fn printable(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).take(200).collect()
+}
+
+impl Approval {
+    fn from_body(body: &Value) -> Self {
+        let field = |object: &str, name: &str| {
+            printable(
+                body.get(object)
+                    .and_then(|o| o.get(name))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            )
+        };
+        Self {
+            org_id: field("org", "id"),
+            org_name: field("org", "name"),
+            user_name: field("approved_by", "name"),
+            user_email: field("approved_by", "email"),
+        }
+    }
+
+    fn org(&self) -> String {
+        match (self.org_name.is_empty(), self.org_id.is_empty()) {
+            (false, false) => format!("{} ({})", self.org_name, self.org_id),
+            (false, true) => self.org_name.clone(),
+            (true, false) => self.org_id.clone(),
+            (true, true) => "(unknown org)".to_owned(),
+        }
+    }
+
+    fn user(&self) -> String {
+        match (self.user_name.is_empty(), self.user_email.is_empty()) {
+            (false, false) => format!("{} <{}>", self.user_name, self.user_email),
+            (false, true) => self.user_name.clone(),
+            (true, false) => self.user_email.clone(),
+            (true, true) => "(unknown user)".to_owned(),
+        }
+    }
+}
 
 /// The real sleeper (`tokio::time::sleep`).
 pub fn real_sleeper() -> Sleeper {
@@ -138,7 +225,7 @@ async fn request_code(http: &reqwest::Client, hub: &str) -> Result<Code> {
 /// One poll: `Ok(Some(login))` when approved, `Ok(None)` to keep waiting (the interval may have
 /// changed through `interval`).
 enum Polled {
-    Granted(Login),
+    Granted(Login, Approval),
     Pending,
     SlowDown(Option<Duration>),
 }
@@ -153,11 +240,14 @@ async fn poll_once(http: &reqwest::Client, hub: &str, device_code: &str) -> Resu
     let status = response.status();
     let body: Value = response.json().await.unwrap_or(Value::Null);
     if status.is_success() {
-        return Ok(Polled::Granted(Login {
-            hub: hub.to_owned(),
-            machine_id: str_field(&body, "machine_id")?,
-            credential: str_field(&body, "credential")?,
-        }));
+        return Ok(Polled::Granted(
+            Login {
+                hub: hub.to_owned(),
+                machine_id: str_field(&body, "machine_id")?,
+                credential: str_field(&body, "credential")?,
+            },
+            Approval::from_body(&body),
+        ));
     }
     match body.get("error").and_then(Value::as_str) {
         Some("authorization_pending") => Ok(Polled::Pending),
@@ -169,13 +259,32 @@ async fn poll_once(http: &reqwest::Client, hub: &str, device_code: &str) -> Resu
     }
 }
 
-/// Runs `sm login`: shows the code, polls until approved, saves the credential in `store`.
-/// `out` is where the instructions go (stdout in the binary).
+/// `DELETE /v1/devices/self` with the new machine's own credential: the org that approved it
+/// loses the machine.
+async fn revoke_self(http: &reqwest::Client, hub: &str, credential: &str) -> Result<()> {
+    let response = http
+        .delete(format!("{hub}/v1/devices/self"))
+        .bearer_auth(credential)
+        .send()
+        .await
+        .context("could not reach the hub")?;
+    let status = response.status();
+    if !status.is_success() {
+        bail!("the hub refused to revoke the machine (HTTP {status})");
+    }
+    Ok(())
+}
+
+/// Runs `sm login`: shows the code, polls until approved, tells the person which org and user
+/// approved it and (unless `confirm` is `Yes`) asks before saving the credential in `store`. On
+/// "no" nothing is stored and the machine is revoked at the hub. `out` is where the
+/// instructions go (stdout in the binary).
 pub async fn login(
     hub: &str,
     store: &CredentialStore,
     out: &mut (impl Write + Send),
     sleep: &Sleeper,
+    confirm: &Confirm,
 ) -> Result<Login> {
     let hub = normalize_hub(hub)?;
     let http = reqwest::Client::builder()
@@ -207,11 +316,11 @@ pub async fn login(
     let mut interval = code.interval;
     let mut waited = Duration::ZERO;
     let mut failures = 0u32;
-    let login = loop {
+    let (login, approval) = loop {
         sleep(interval).await;
         waited += interval;
         match poll_once(&http, &hub, &code.device_code).await {
-            Ok(Polled::Granted(login)) => break login,
+            Ok(Polled::Granted(login, approval)) => break (login, approval),
             Ok(Polled::Pending) => failures = 0,
             Ok(Polled::SlowDown(next)) => {
                 failures = 0;
@@ -236,6 +345,56 @@ pub async fn login(
             return Err(LoginError::Expired.into());
         }
     };
+
+    writeln!(
+        out,
+        "\nThis pairing was approved for:\n\n    org:         {}\n    approved by: {}\n",
+        approval.org(),
+        approval.user()
+    )?;
+    let joined = match confirm {
+        Confirm::Yes => {
+            writeln!(out, "Joining (--yes).")?;
+            true
+        }
+        Confirm::Ask(ask) => {
+            write!(
+                out,
+                "Join org {} approved by {}? [y/N] ",
+                approval.org(),
+                approval.user()
+            )?;
+            out.flush()?;
+            let answer = ask();
+            writeln!(out)?;
+            if answer.is_none() {
+                writeln!(
+                    out,
+                    "No terminal to ask on: not joining (use --yes to skip the question)."
+                )?;
+            }
+            answer == Some(true)
+        }
+    };
+    if !joined {
+        // The credential has not been stored and is dropped here; tell the hub so the org that
+        // approved this pairing loses the machine.
+        return match revoke_self(&http, &hub, &login.credential).await {
+            Ok(()) => {
+                writeln!(
+                    out,
+                    "Not joined: nothing was stored and the machine was revoked."
+                )?;
+                Err(LoginError::Declined.into())
+            }
+            Err(error) => Err(error.context(format!(
+                "not joined and nothing was stored, but the hub could not revoke machine {}: \
+                 ask an admin of {} to revoke it",
+                login.machine_id,
+                approval.org()
+            ))),
+        };
+    }
 
     let backend = store.save(&login)?;
     writeln!(

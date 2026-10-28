@@ -3,7 +3,9 @@
 //!
 //! - [`flow`]: request a code, show the user code, the verification URL and a terminal QR, poll
 //!   with the server's interval (honouring `slow_down`), receive the machine id and the `smm_`
-//!   credential once;
+//!   credential once, then show the approving org and user and ask "Join org X approved by Y?"
+//!   (`--yes` skips the question); on "no" the credential is dropped and `DELETE
+//!   /v1/devices/self` revokes the machine;
 //! - [`store`]: the credential store: the OS keychain (`keyring`, platform-native backends only)
 //!   with a `0600` file fallback, used when the keychain is unavailable and forced by
 //!   `SM_CREDENTIAL_FILE` (CI, containers);
@@ -17,5 +19,7 @@ pub mod flow;
 pub mod store;
 
 pub use self::credentials::KeychainCredentials;
-pub use self::flow::{LoginError, Sleeper, login, real_sleeper};
+pub use self::flow::{
+    Approval, Confirm, LoginError, Prompter, Sleeper, login, real_sleeper, terminal_prompter,
+};
 pub use self::store::{Backend, CredentialStore, Keychain, Login};

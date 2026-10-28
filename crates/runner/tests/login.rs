@@ -12,7 +12,8 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use runner::login::flow::normalize_hub;
 use runner::login::{
-    Backend, CredentialStore, Keychain, KeychainCredentials, Login, LoginError, Sleeper, login,
+    Backend, Confirm, CredentialStore, Keychain, KeychainCredentials, Login, LoginError, Sleeper,
+    login,
 };
 use runner::tunnel::CredentialSource;
 use serde_json::{Value, json};
@@ -31,6 +32,10 @@ struct HubState {
     token_replies: VecDeque<(u16, Value)>,
     /// `(method, path, body)` of every request.
     requests: Vec<(String, String, Value)>,
+    /// The `Authorization` header of every `DELETE /v1/devices/self`.
+    revoke_bearers: Vec<String>,
+    /// The status `DELETE /v1/devices/self` answers.
+    revoke_status: u16,
     interval: u64,
 }
 
@@ -46,6 +51,7 @@ impl FakeHub {
         let state = Arc::new(Mutex::new(HubState {
             token_replies: token_replies.into(),
             interval: 5,
+            revoke_status: 200,
             ..HubState::default()
         }));
         let shared = Arc::clone(&state);
@@ -63,6 +69,15 @@ impl FakeHub {
     fn with_interval(self, seconds: u64) -> Self {
         self.state.lock().expect("state").interval = seconds;
         self
+    }
+
+    fn failing_revoke(self) -> Self {
+        self.state.lock().expect("state").revoke_status = 500;
+        self
+    }
+
+    fn revoke_bearers(&self) -> Vec<String> {
+        self.state.lock().expect("state").revoke_bearers.clone()
     }
 
     fn requests(&self) -> Vec<(String, String, Value)> {
@@ -104,6 +119,15 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<Mutex<HubState>>) {
     );
     let body: Value =
         serde_json::from_slice(&raw[head_end..head_end + length]).unwrap_or(Value::Null);
+    let bearer = head
+        .lines()
+        .find_map(|line| line.strip_prefix("authorization: "))
+        .or_else(|| {
+            head.lines()
+                .find_map(|line| line.strip_prefix("Authorization: "))
+        })
+        .unwrap_or_default()
+        .to_owned();
 
     let (status, reply) = {
         let mut state = state.lock().expect("state");
@@ -128,6 +152,10 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<Mutex<HubState>>) {
                 } else {
                     state.token_replies.front().cloned().expect("a reply")
                 }
+            }
+            ("DELETE", "/v1/devices/self") => {
+                state.revoke_bearers.push(bearer);
+                (state.revoke_status, json!({ "revoked": true }))
             }
             _ => (404, json!({ "error": "not_found" })),
         }
@@ -156,8 +184,23 @@ fn slow_down(interval: Option<u64>) -> (u16, Value) {
 fn granted() -> (u16, Value) {
     (
         200,
-        json!({ "machine_id": "mch_abc", "credential": CREDENTIAL, "org_id": "org_1", "name": "laptop" }),
+        json!({
+            "machine_id": "mch_abc", "credential": CREDENTIAL, "org_id": "org_1", "name": "laptop",
+            "org": { "id": "org_1", "name": "Acme Inc" },
+            "approved_by": { "id": "usr_1", "name": "Ann Admin", "email": "ann@acme.example" },
+        }),
     )
+}
+
+/// A prompter that answers `answer` and counts how often it was asked.
+fn answering(answer: Option<bool>) -> (Confirm, Arc<Mutex<u32>>) {
+    let asked = Arc::new(Mutex::new(0));
+    let count = Arc::clone(&asked);
+    let prompter: runner::login::Prompter = Arc::new(move || {
+        *count.lock().expect("asked") += 1;
+        answer
+    });
+    (Confirm::Ask(prompter), asked)
 }
 
 // ---- helpers --------------------------------------------------------------------------------
@@ -245,9 +288,15 @@ async fn full_flow_pending_then_approved() {
     let (sleeper, log) = recording_sleeper();
     let mut out = Vec::new();
 
-    let done = login(&format!("{}/", hub.url), &store, &mut out, &sleeper)
-        .await
-        .expect("login");
+    let done = login(
+        &format!("{}/", hub.url),
+        &store,
+        &mut out,
+        &sleeper,
+        &Confirm::Yes,
+    )
+    .await
+    .expect("login");
 
     assert_eq!(done.machine_id, "mch_abc");
     assert_eq!(done.credential, CREDENTIAL);
@@ -288,9 +337,15 @@ async fn slow_down_backs_off_by_the_servers_interval_or_five_seconds() {
     .await;
     let dir = TempDir::new().expect("dir");
     let (sleeper, log) = recording_sleeper();
-    login(&hub.url, &file_store(&dir), &mut Vec::new(), &sleeper)
-        .await
-        .expect("login");
+    login(
+        &hub.url,
+        &file_store(&dir),
+        &mut Vec::new(),
+        &sleeper,
+        &Confirm::Yes,
+    )
+    .await
+    .expect("login");
     // 5 (pending), 5 (-> slow_down{10}), 10 (-> slow_down, +5), 15 (granted).
     assert_eq!(secs(&log), [5, 5, 10, 15]);
 }
@@ -301,7 +356,7 @@ async fn expired_code_ends_the_login_and_stores_nothing() {
     let dir = TempDir::new().expect("dir");
     let store = file_store(&dir);
     let (sleeper, _) = recording_sleeper();
-    let error = login(&hub.url, &store, &mut Vec::new(), &sleeper)
+    let error = login(&hub.url, &store, &mut Vec::new(), &sleeper, &Confirm::Yes)
         .await
         .expect_err("expired");
     assert_eq!(
@@ -318,9 +373,15 @@ async fn a_hub_that_never_expires_the_code_is_given_up_on() {
     let hub = FakeHub::start(vec![pending()]).await;
     let dir = TempDir::new().expect("dir");
     let (sleeper, log) = recording_sleeper();
-    let error = login(&hub.url, &file_store(&dir), &mut Vec::new(), &sleeper)
-        .await
-        .expect_err("gives up");
+    let error = login(
+        &hub.url,
+        &file_store(&dir),
+        &mut Vec::new(),
+        &sleeper,
+        &Confirm::Yes,
+    )
+    .await
+    .expect_err("gives up");
     assert_eq!(
         error.downcast_ref::<LoginError>(),
         Some(&LoginError::Expired)
@@ -334,7 +395,7 @@ async fn denied_pairing_ends_the_login_and_stores_nothing() {
     let dir = TempDir::new().expect("dir");
     let store = file_store(&dir);
     let (sleeper, _) = recording_sleeper();
-    let error = login(&hub.url, &store, &mut Vec::new(), &sleeper)
+    let error = login(&hub.url, &store, &mut Vec::new(), &sleeper, &Confirm::Yes)
         .await
         .expect_err("denied");
     assert_eq!(
@@ -475,7 +536,7 @@ async fn sm_login_runs_end_to_end_with_the_forced_credential_file() {
     let file = dir.path().join("forced").join("cred.json");
 
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sm"))
-        .args(["login", "--hub", &hub.url])
+        .args(["login", "--hub", &hub.url, "--yes"])
         .env("SM_CREDENTIAL_FILE", &file)
         .env("HOME", dir.path())
         .env_remove("XDG_CONFIG_HOME")
@@ -509,4 +570,151 @@ async fn sm_login_without_a_hub_prints_usage() {
         .expect("run sm");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("usage: sm login --hub"));
+}
+
+// ---- confirming the approving org (RFC 8628 §5.4) -------------------------------------------
+
+#[tokio::test]
+async fn accepting_shows_the_org_and_approver_and_stores_the_credential() {
+    let hub = FakeHub::start(vec![granted()]).await;
+    let dir = TempDir::new().expect("dir");
+    let store = file_store(&dir);
+    let (sleeper, _) = recording_sleeper();
+    let (confirm, asked) = answering(Some(true));
+    let mut out = Vec::new();
+
+    let done = login(&hub.url, &store, &mut out, &sleeper, &confirm)
+        .await
+        .expect("login");
+
+    assert_eq!(*asked.lock().expect("asked"), 1);
+    let shown = String::from_utf8(out).expect("utf8");
+    assert!(
+        shown.contains("Join org Acme Inc (org_1) approved by Ann Admin <ann@acme.example>? [y/N]"),
+        "{shown}"
+    );
+    assert!(!shown.contains(CREDENTIAL));
+    assert_eq!(store.load().expect("load"), Some(done));
+    assert!(hub.revoke_bearers().is_empty(), "nothing is revoked on yes");
+}
+
+#[tokio::test]
+async fn declining_stores_nothing_and_the_hub_sees_the_revoke() {
+    let hub = FakeHub::start(vec![granted()]).await;
+    let dir = TempDir::new().expect("dir");
+    let store = file_store(&dir);
+    let (sleeper, _) = recording_sleeper();
+    let (confirm, asked) = answering(Some(false));
+    let mut out = Vec::new();
+
+    let error = login(&hub.url, &store, &mut out, &sleeper, &confirm)
+        .await
+        .expect_err("declined");
+
+    assert_eq!(*asked.lock().expect("asked"), 1);
+    assert_eq!(
+        error.downcast_ref::<LoginError>(),
+        Some(&LoginError::Declined)
+    );
+    assert_eq!(store.load().expect("load"), None);
+    assert!(!store.file_path().exists());
+    // The new machine's own credential, in the Authorization header, revoked it.
+    assert_eq!(hub.revoke_bearers(), [format!("Bearer {CREDENTIAL}")]);
+    let requests = hub.requests();
+    let revoke = requests.last().expect("a request");
+    assert_eq!(
+        (revoke.0.as_str(), revoke.1.as_str()),
+        ("DELETE", "/v1/devices/self")
+    );
+    let shown = String::from_utf8(out).expect("utf8");
+    assert!(!shown.contains(CREDENTIAL), "{shown}");
+}
+
+#[tokio::test]
+async fn no_terminal_and_no_yes_means_no() {
+    let hub = FakeHub::start(vec![granted()]).await;
+    let dir = TempDir::new().expect("dir");
+    let store = file_store(&dir);
+    let (sleeper, _) = recording_sleeper();
+    let (confirm, _) = answering(None);
+
+    let error = login(&hub.url, &store, &mut Vec::new(), &sleeper, &confirm)
+        .await
+        .expect_err("no answer");
+
+    assert_eq!(
+        error.downcast_ref::<LoginError>(),
+        Some(&LoginError::Declined)
+    );
+    assert_eq!(store.load().expect("load"), None);
+    assert_eq!(hub.revoke_bearers().len(), 1);
+}
+
+#[tokio::test]
+async fn a_failed_revoke_still_stores_nothing_and_says_who_to_ask() {
+    let hub = FakeHub::start(vec![granted()]).await.failing_revoke();
+    let dir = TempDir::new().expect("dir");
+    let store = file_store(&dir);
+    let (sleeper, _) = recording_sleeper();
+    let (confirm, _) = answering(Some(false));
+
+    let error = login(&hub.url, &store, &mut Vec::new(), &sleeper, &confirm)
+        .await
+        .expect_err("declined");
+
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("mch_abc") && message.contains("Acme Inc"),
+        "{message}"
+    );
+    assert!(!message.contains(CREDENTIAL));
+    assert_eq!(store.load().expect("load"), None);
+}
+
+#[tokio::test]
+async fn yes_skips_the_question_and_hostile_names_cannot_move_the_cursor() {
+    let (status, mut body) = granted();
+    body["org"]["name"] = json!("Evil\u{1b}[2J Corp\r");
+    let hub = FakeHub::start(vec![(status, body)]).await;
+    let dir = TempDir::new().expect("dir");
+    let store = file_store(&dir);
+    let (sleeper, _) = recording_sleeper();
+    let mut out = Vec::new();
+
+    login(&hub.url, &store, &mut out, &sleeper, &Confirm::Yes)
+        .await
+        .expect("login");
+
+    let shown = String::from_utf8(out).expect("utf8");
+    assert!(shown.contains("Evil[2J Corp (org_1)"), "{shown}");
+    assert!(!shown.contains('\u{1b}') && !shown.contains('\r'));
+    assert!(
+        shown.contains("Ann Admin"),
+        "the approver is shown with --yes too"
+    );
+    assert!(store.load().expect("load").is_some());
+}
+
+#[tokio::test]
+async fn sm_login_without_yes_and_without_a_terminal_does_not_store() {
+    let hub = FakeHub::start(vec![granted()]).await.with_interval(1);
+    let dir = TempDir::new().expect("dir");
+    let file = dir.path().join("forced").join("cred.json");
+
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sm"))
+        .args(["login", "--hub", &hub.url])
+        .env("SM_CREDENTIAL_FILE", &file)
+        .env("HOME", dir.path())
+        .env_remove("XDG_CONFIG_HOME")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .expect("run sm");
+
+    assert!(!output.status.success());
+    assert!(!file.exists(), "nothing stored");
+    assert_eq!(hub.revoke_bearers(), [format!("Bearer {CREDENTIAL}")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Join org Acme Inc"), "{stdout}");
+    assert!(!stdout.contains(CREDENTIAL));
 }

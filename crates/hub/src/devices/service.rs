@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use super::codes::{
     display_user_code, hash_device_code, new_device_code, new_user_code, normalize_user_code,
 };
+use super::limits;
 use crate::audit::{self, Event};
 use crate::auth::Principal;
 use crate::auth::token::new_id;
@@ -72,9 +73,19 @@ impl From<ApiError> for PollError {
 
 /// `POST /v1/devices/code`: unauthenticated. `base_url` is the hub's public origin.
 ///
-/// TODO(rate limit): this is open to the world and writes a row per call. Add a per-IP limit
-/// (Workers rate-limiting binding) and a purge of expired rows before this leaves local dev.
-pub async fn start(db: &impl Db, base_url: &str, now_ms: i64) -> Result<Value, ApiError> {
+/// Open to the world, so it is limited (`limits::check_start`: per `client_ip` when known, and a
+/// cap on live pairings; `429`) and it purges long-expired rows as it goes.
+pub async fn start(
+    db: &impl Db,
+    base_url: &str,
+    client_ip: Option<&str>,
+    now_ms: i64,
+) -> Result<Value, ApiError> {
+    // Best effort: a failed purge must not stop a pairing (the cron trigger purges too).
+    let _ = limits::purge(db, now_ms).await;
+    if let Some(limited) = limits::check_start(db, client_ip, now_ms).await? {
+        return Err(limited.into_api());
+    }
     let device_code = new_device_code()?;
     let id = new_id("dpr")?;
     // A user-code collision (31^8 space) hits the UNIQUE index; retry a few times.
@@ -180,6 +191,29 @@ async fn resolve_pending(
         .ok_or_else(|| ApiError::internal("pairing row vanished"))
 }
 
+/// [`resolve_pending`] behind the user-code brute-force limit (RFC 8628 §5.1): refused with
+/// `429` once the caller's user or org has too many failed attempts; a miss counts as one. A hit
+/// writes nothing to the counters, so it resets nobody's.
+async fn resolve_limited(
+    db: &impl Db,
+    caller: &Principal,
+    user_code: &str,
+    now_ms: i64,
+    set: &str,
+    params: Vec<Param>,
+) -> Result<String, ApiError> {
+    if let Some(limited) =
+        limits::check_approve(db, &caller.user_id, &caller.org_id, now_ms).await?
+    {
+        return Err(limited.into_api());
+    }
+    let result = resolve_pending(db, user_code, now_ms, set, params).await;
+    if matches!(&result, Err(error) if error.status == 404) {
+        limits::record_approve_failure(db, &caller.user_id, &caller.org_id, now_ms).await?;
+    }
+    result
+}
+
 /// `POST /v1/devices/approve {user_code, name}`: member. Approves the pairing for the caller's
 /// org; the runner's next poll receives the machine.
 pub async fn approve(
@@ -192,8 +226,9 @@ pub async fn approve(
     caller.require(Role::Member)?;
     let user_code = user_code_of(body)?;
     let name = machine_name_of(body)?;
-    let id = resolve_pending(
+    let id = resolve_limited(
         db,
+        caller,
         &user_code,
         now_ms,
         "status = 'approved', org_id = ?, approved_by_user_id = ?, approved_by_device_id = ?, \
@@ -231,8 +266,9 @@ pub async fn deny(
 ) -> Result<Value, ApiError> {
     caller.require(Role::Member)?;
     let user_code = user_code_of(body)?;
-    let id = resolve_pending(
+    let id = resolve_limited(
         db,
+        caller,
         &user_code,
         now_ms,
         "status = 'denied', org_id = ?, approved_by_user_id = ?, approved_by_device_id = ?",
@@ -441,12 +477,84 @@ async fn grant(
         },
     )
     .await?;
+    // Who vouched for this machine, so the runner can show it before keeping the credential
+    // (RFC 8628 §5.4: a victim must not join an attacker's org unknowingly).
+    let who = db
+        .query(
+            "SELECT o.name AS org_name, u.display_name AS user_name, u.email AS user_email \
+             FROM orgs o, users u WHERE o.id = ? AND u.id = ?",
+            &[org_id.into(), user_id.into()],
+        )
+        .await
+        .map_err(db_failure)?;
+    let who = who.first();
+    let field = |column: &str| {
+        who.and_then(|row| opt_text(row, column).ok().flatten())
+            .unwrap_or_default()
+    };
     Ok(json!({
         "machine_id": machine_id,
         "credential": credential,
         "org_id": org_id,
         "name": name,
+        "org": { "id": org_id, "name": field("org_name") },
+        "approved_by": { "id": user_id, "name": field("user_name"), "email": field("user_email") },
     }))
+}
+
+/// `DELETE /v1/devices/self`: authenticated by the machine's own credential (`Bearer smm_...`),
+/// no session. A runner whose person declined "Join org X approved by Y?" calls it so the org
+/// that approved the pairing loses the machine: the credential stops working at once.
+pub async fn revoke_self(
+    db: &impl Db,
+    control: &impl MachineControl,
+    authorization: Option<&str>,
+    request_id: &str,
+) -> Result<Value, ApiError> {
+    let credential = crate::auth::bearer_token(authorization)
+        .ok_or_else(|| ApiError::unauthorized("missing machine credential"))?;
+    let rows = db
+        .query(
+            "SELECT m.id AS id, m.org_id AS org_id, m.name AS name, \
+             p.approved_by_user_id AS user_id, p.approved_by_device_id AS device_id \
+             FROM machines m JOIN device_pairings p ON p.machine_id = m.id \
+             WHERE m.credential_hash = ? AND m.origin = 'device' AND m.revoked_at IS NULL",
+            &[hash(credential).into()],
+        )
+        .await
+        .map_err(db_failure)?;
+    let Some(row) = rows.first() else {
+        return Err(ApiError::unauthorized("invalid machine credential"));
+    };
+    let machine_id = text(row, "id").map_err(db_failure)?;
+    let org_id = text(row, "org_id").map_err(db_failure)?;
+    let user_id = text(row, "user_id").map_err(db_failure)?;
+    let device_id = text(row, "device_id").map_err(db_failure)?;
+    let name = text(row, "name").map_err(db_failure)?;
+    audit::record(
+        db,
+        &Event {
+            org_id: &org_id,
+            actor_user_id: &user_id,
+            actor_device_id: &device_id,
+            action: "device.decline",
+            target_kind: "machine",
+            target_id: &machine_id,
+            request_id,
+            detail: json!({ "name": name }),
+        },
+    )
+    .await?;
+    db.execute(
+        "UPDATE machines SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+         presence = 'offline', presence_since = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ? AND revoked_at IS NULL",
+        &[machine_id.as_str().into()],
+    )
+    .await
+    .map_err(db_failure)?;
+    control.revoke(&machine_id).await?;
+    Ok(json!({ "id": machine_id, "revoked": true }))
 }
 
 /// `GET /v1/devices`: viewer. The org's paired devices (machines with `origin = 'device'`),

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
 use runner::login::flow::normalize_hub;
-use runner::login::{CredentialStore, login, real_sleeper};
+use runner::login::{Confirm, CredentialStore, login, real_sleeper, terminal_prompter};
 use runner::server::{self, Options, RcArgs};
 use runner::tunnel::Timing;
 
@@ -12,7 +12,7 @@ use runner::tunnel::Timing;
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
 const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags]";
-const LOGIN_USAGE: &str = "usage: sm login --hub <url>";
+const LOGIN_USAGE: &str = "usage: sm login --hub <url> [--yes]";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,12 +30,27 @@ async fn main() -> Result<()> {
 
 /// `sm login --hub <url>`: pair this machine with a hub by device code.
 async fn run_login(args: &[String]) -> Result<()> {
-    let hub = match args {
-        [flag, url] if flag == "--hub" => url.as_str(),
+    let is_yes = |arg: &String| arg == "--yes" || arg == "-y";
+    let (hub, yes) = match args {
+        [flag, url] if flag == "--hub" => (url.as_str(), false),
+        [flag, url, yes] if flag == "--hub" && is_yes(yes) => (url.as_str(), true),
+        [yes, flag, url] if flag == "--hub" && is_yes(yes) => (url.as_str(), true),
         _ => bail!("{LOGIN_USAGE}"),
     };
+    let confirm = if yes {
+        Confirm::Yes
+    } else {
+        Confirm::Ask(terminal_prompter())
+    };
     let store = CredentialStore::from_env()?;
-    login(hub, &store, &mut std::io::stdout(), &real_sleeper()).await?;
+    login(
+        hub,
+        &store,
+        &mut std::io::stdout(),
+        &real_sleeper(),
+        &confirm,
+    )
+    .await?;
     Ok(())
 }
 
