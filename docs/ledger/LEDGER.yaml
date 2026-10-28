@@ -5970,7 +5970,8 @@ items:
     title: 'Bench prep for M1B-008c: run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its fixture output; terminal/approval repaints are logged'
     milestone: M1b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; dry-run shows GPUI_SPIKE_WORKLOAD=common on all 5 runs; spikes/gpui cargo test pass (worker), looping terminal + repaint frame-log tests"
     assignee: "haiku"
     attempt: 1
     lane: docs
