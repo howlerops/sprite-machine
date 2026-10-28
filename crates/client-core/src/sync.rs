@@ -371,17 +371,42 @@ impl Subscription {
         sync: ThreadSync,
         auth: Option<String>,
     ) -> Result<Self, SubscriptionError> {
-        let (connectivity, _) = watch::channel(Connectivity::Connecting);
-        let mut subscription = Self {
+        let mut subscription = Self::detached(base_url, sync, auth, Connectivity::Connecting);
+        subscription.reconnect().await?;
+        Ok(subscription)
+    }
+
+    /// Like [`Subscription::connect`], but an unreachable hub is not an error: the subscription
+    /// is returned Offline, with no socket, and [`Subscription::reconnect`] retries it. Other
+    /// failures (for example a bad base URL) are still returned.
+    pub async fn connect_or_offline(
+        base_url: &str,
+        sync: ThreadSync,
+        auth: Option<String>,
+    ) -> Result<Self, SubscriptionError> {
+        let mut subscription = Self::detached(base_url, sync, auth, Connectivity::Offline);
+        match subscription.reconnect().await {
+            Ok(()) | Err(SubscriptionError::Connect(_)) => Ok(subscription),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// A subscription with no socket, starting in `connectivity`.
+    fn detached(
+        base_url: &str,
+        sync: ThreadSync,
+        auth: Option<String>,
+        connectivity: Connectivity,
+    ) -> Self {
+        let (connectivity, _) = watch::channel(connectivity);
+        Self {
             base_url: base_url.to_owned(),
             auth,
             socket: None,
             sync,
             connected_after: 0,
             connectivity,
-        };
-        subscription.reconnect().await?;
-        Ok(subscription)
+        }
     }
 
     /// Opens a new socket with `?after=` the last applied seq. Nothing is re-POSTed.
