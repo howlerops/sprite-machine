@@ -250,7 +250,8 @@ before it stores the token.
   "muted_threads": [..], "quiet_hours": { "start": "22:00", "end": "07:00", "tz": "Europe/Berlin" } }`.
 - **Payload** (encrypted to the subscription): `{ "kind", "thread_id", "task_id", "interrupt_id"?,
   "title", "actions"? }`. `title` is generic ("Approval needed", "Task finished", "Task failed");
-  no prompt text, tool input, file names or agent output ever appears in a push. `actions` (for an
+  no prompt text, tool input, file names or agent output ever appears in a push. A `machine_back`
+  also carries `"machine_id"` (its title stays generic: "Machine back online"). `actions` (for an
   approval) carries `{ "action", "option_id" }` pairs; the service worker answers through
   §5.4 with the page's session — there is no unauthenticated action route.
 - One pending notification per task (`Topic` = task id). A user cancel (`RunError{cancelled}`)

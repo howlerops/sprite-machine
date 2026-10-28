@@ -464,6 +464,7 @@ fn payload_is_ids_a_generic_title_and_approval_actions() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     };
@@ -482,6 +483,7 @@ fn topic_is_the_task_id_or_a_32_character_hash() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     };
@@ -511,6 +513,7 @@ fn a_batch_sends_only_the_last_job_per_task() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     };
@@ -560,6 +563,7 @@ fn job_for(thread: &str, kind: Kind) -> NotifyJob {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     }
@@ -756,6 +760,42 @@ fn a_partly_failed_job_is_followed_up_for_its_failed_subscriptions_only() {
         job = next;
     }
     assert_eq!(job.attempt, MAX_ATTEMPTS - 1);
+}
+
+#[test]
+fn a_machine_back_goes_to_every_subscription_with_the_generic_title_and_machine_id() {
+    let db = subscribed_world();
+    // Ada has a second device (a second endpoint).
+    let ada = principal("ada", "org_a", Role::Owner);
+    let (status, _) = subscribe_as(
+        &db,
+        &ada,
+        &Browser::new(5),
+        "https://push.example.net/ada-2",
+    )
+    .expect("subscribe");
+    assert_eq!(status, 201);
+    let job = NotifyJob {
+        task_id: None,
+        machine_id: Some("m_1".into()),
+        ..job_for("th_1", Kind::MachineBack)
+    };
+
+    let web = Recording::new(Delivery::Delivered);
+    let report = run(&db, &web, &job, NOON);
+    // Both of Ada's subscriptions, Bob and Vic (this class has no role check); not Eve.
+    assert_eq!(users(&web), ["u_ada", "u_ada", "u_bob", "u_vic"]);
+    assert_eq!(report.delivered, 4);
+    // The generic title and the machine id only: no machine name, no prompt text.
+    for (_, payload) in web.sent.borrow().iter() {
+        assert_eq!(
+            *payload,
+            json!({
+                "kind": "machine_back", "title": "Machine back online",
+                "thread_id": "th_1", "task_id": null, "machine_id": "m_1",
+            })
+        );
+    }
 }
 
 #[test]

@@ -59,8 +59,8 @@ pub fn machine_back_thread<'a>(
 }
 
 /// The NOTIFY job for a machine that came back: one per comeback, named by the first thread with
-/// queued work. Ids only; the payload is the generic title and the thread id.
-pub fn machine_back_job(thread_id: &str) -> NotifyJob {
+/// queued work. Ids only: the thread and the machine, and the generic title.
+pub fn machine_back_job(thread_id: &str, machine_id: &str) -> NotifyJob {
     NotifyJob {
         kind: Kind::MachineBack,
         thread_id: thread_id.to_owned(),
@@ -68,6 +68,7 @@ pub fn machine_back_job(thread_id: &str) -> NotifyJob {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: Some(machine_id.to_owned()),
         subscriptions: None,
         attempt: 0,
     }

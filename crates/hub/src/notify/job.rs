@@ -76,6 +76,10 @@ pub struct NotifyJob {
     /// The id of the interrupt's first reject option.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny_option_id: Option<String>,
+    /// The machine that came back (`machine_back` only). An id, like the thread; the title stays
+    /// generic and the phone looks up the name itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<String>,
     /// The subscriptions still to send, when this job re-queues the failed part of an earlier
     /// send. `None` sends to every subscription of the thread's org.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,6 +130,7 @@ pub fn jobs_for(appended: &[Envelope]) -> Vec<NotifyJob> {
             interrupt_id: None,
             allow_option_id: None,
             deny_option_id: None,
+            machine_id: None,
             subscriptions: None,
             attempt: 0,
         };
@@ -226,7 +231,8 @@ impl Notification {
         }
     }
 
-    /// The push payload (JSON): ids, the kind, a generic title and, for an approval, the actions.
+    /// The push payload (JSON): ids, the kind, a title and, for an approval, the actions. A
+    /// `machine_back` also carries the machine id.
     ///
     /// ```json
     /// { "kind": "approval_needed", "title": "Approval needed",
@@ -242,6 +248,9 @@ impl Notification {
             "thread_id": job.thread_id,
         });
         body["task_id"] = json!(job.task_id);
+        if let Some(machine_id) = &job.machine_id {
+            body["machine_id"] = json!(machine_id);
+        }
         if let Some(interrupt_id) = &job.interrupt_id {
             body["interrupt_id"] = json!(interrupt_id);
             if job.kind == Kind::ApprovalNeeded

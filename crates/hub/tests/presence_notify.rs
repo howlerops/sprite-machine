@@ -1,5 +1,5 @@
 //! M2B-014 live tests: a machine that comes back online while commands are queued for it sends
-//! one "machine back" push to the org's subscribed users, and a comeback inside the debounce
+//! one "machine back" push to each of the org's subscriptions, and a comeback inside the debounce
 //! window sends none.
 //!
 //! The runner side is the hand-written tunnel client of `machine_do.rs` and the push side the fake
@@ -472,6 +472,23 @@ fn unique(prefix: &str, name: &str) -> String {
     format!("{prefix}_{name}_{}_{nanos:x}", std::process::id())
 }
 
+/// A named machine through the admin API (its row gives the push title its name): `(id, credential)`.
+fn named_machine(name: &str) -> (String, String) {
+    let reply = http(
+        "POST",
+        "/v1/machines",
+        true,
+        None,
+        Some(&json!({"name": name, "kind": "local"})),
+    );
+    assert_eq!(reply.status, 201, "create machine: {}", reply.body);
+    let body = reply.json();
+    (
+        body["machine"]["id"].as_str().expect("id").to_owned(),
+        body["credential"].as_str().expect("credential").to_owned(),
+    )
+}
+
 /// A machine for the Machine DO named `machine`, through the DEV_FIXTURES credential route.
 fn dev_credential(machine: &str) -> String {
     let reply = http(
@@ -759,12 +776,12 @@ fn setup(name: &str) -> (PushService, Browser, String) {
 // ---- tests ------------------------------------------------------------------------------
 
 #[test]
-fn a_machine_back_with_queued_work_sends_one_push_with_ids_only() {
+fn a_machine_back_with_queued_work_sends_one_push_with_ids_and_a_generic_title() {
     let _serial = serial();
     let (service, browser, endpoint) = setup("back");
-    let machine = unique("mch", "back");
+    // A named machine: its name must not reach the push (the phone looks it up itself).
+    let (machine, credential) = named_machine("Garage Mac");
     let thread = unique("th", "back");
-    let credential = dev_credential(&machine);
     init_thread(&thread, &machine);
 
     // The machine is offline, so the prompt waits in its outbox.
@@ -779,8 +796,13 @@ fn a_machine_back_with_queued_work_sends_one_push_with_ids_only() {
     assert_eq!(payload["kind"], "machine_back");
     assert_eq!(payload["title"], "Machine back online");
     assert_eq!(payload["thread_id"], thread.as_str());
+    assert_eq!(payload["machine_id"], machine.as_str());
     let text = payload.to_string();
     assert!(!text.contains("do it"), "prompt text in a push: {text}");
+    assert!(
+        !text.contains("Garage Mac"),
+        "machine name in a push: {text}"
+    );
     service.assert_no_more_than(1);
 
     unsubscribe(&endpoint);
@@ -830,7 +852,7 @@ fn a_machine_back_with_nothing_queued_sends_no_push() {
 }
 
 #[test]
-fn a_machine_back_goes_to_each_user_once_not_once_per_device() {
+fn a_machine_back_goes_to_every_subscription_of_the_user() {
     let _serial = serial();
     let (service, browser, endpoint) = setup("device-a");
     // The same user's second device (a second endpoint of the same browser keys).
@@ -846,8 +868,14 @@ fn a_machine_back_goes_to_each_user_once_not_once_per_device() {
 
     let mut runner = Runner::first(&machine, &credential);
     runner.read_commands(1);
-    service.wait_for(0);
-    service.assert_no_more_than(1);
+    // One push on each of the two subscriptions, both with the machine id.
+    for n in 0..2 {
+        let payload = browser.open(&service.wait_for(n));
+        assert_eq!(payload["kind"], "machine_back");
+        assert_eq!(payload["machine_id"], machine.as_str());
+        assert_eq!(payload["title"], "Machine back online");
+    }
+    service.assert_no_more_than(2);
 
     unsubscribe(&endpoint);
     unsubscribe(&second);
