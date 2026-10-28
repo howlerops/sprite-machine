@@ -27,6 +27,6 @@ unic-langid = "0.9"
 url = "2"
 
 [dev-dependencies]
-axum.workspace = true
+axum = { workspace = true, features = ["ws"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui-kit = { workspace = true, features = ["test-support"] }

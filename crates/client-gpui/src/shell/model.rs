@@ -129,9 +129,12 @@ impl ShellModel {
         self.save_prefs()
     }
 
+    /// Changes the hub address that the next sign-in uses, and saves it. Text that is not an
+    /// absolute http or https address is refused and changes nothing.
     pub fn set_hub(&mut self, hub: &str) -> Result<(), String> {
-        self.hub = hub.to_string();
-        self.prefs.hub_url = hub.to_string();
+        let hub = parse_hub(hub).ok_or_else(|| format!("not an http or https address: {hub}"))?;
+        self.hub = hub.clone();
+        self.prefs.hub_url = hub;
         self.save_prefs()
     }
 
@@ -198,6 +201,7 @@ impl ShellModel {
                     theme_a11y(choice, choice == self.prefs.theme),
                 ));
             }
+            slots.push(FocusSlot::new("hub-address", i18n::tr("settings-hub")));
             slots.push(FocusSlot::new(
                 "sign-out",
                 i18n::tr("settings-sign-out-a11y"),
@@ -205,6 +209,15 @@ impl ShellModel {
         }
         slots
     }
+}
+
+/// A hub address as the settings field takes it: an absolute http or https URL with a host,
+/// trimmed. `None` for anything else.
+pub fn parse_hub(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let url = url::Url::parse(trimmed).ok()?;
+    let web = matches!(url.scheme(), "http" | "https");
+    (web && url.host().is_some()).then(|| trimmed.to_string())
 }
 
 /// Screen-reader label of a theme choice button.
