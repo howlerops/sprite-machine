@@ -158,3 +158,6 @@
 2026-10-28T09:38Z M2B-006 assigned (haiku), M1B-008b assigned (haiku). WEB-001 held until M2-008e lands (hub auth files)
 2026-10-28T09:44Z M2B-006 assigned→done merged b316bb5 (haiku); added M2B-006a (confirm invocations), M2B-006c (MCP command resolution, sse, ${VAR}); M2B-007 acceptance += discovery/MCP wiring. Harness flagged the report as settings-json-shaped: it describes reading ~/.claude.json for MCP servers (the feature); no instructions
 2026-10-28T09:44Z M2B-004e assigned (haiku)
+2026-10-28T09:57Z M2B-004e assigned→done (haiku); added M2B-004f (macOS build + real sleep test, mock logind; deps CI-001)
+2026-10-28T09:57Z M1B-008b merged 397fc7b (haiku); worker's final verify hit the full disk — leader re-running spike tests/clippy on the merged tree
+2026-10-28T09:57Z leader: disk full again — M2-008e worker built into a private worktree target/ (4.7 GB) against the brief; asked it to switch to the shared target and delete it
