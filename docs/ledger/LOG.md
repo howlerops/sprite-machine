@@ -152,3 +152,4 @@
 2026-10-28T08:59Z M2-008b → done (verify: 323 passed, thread_session/authz/thread_do live, tracer). MVP-000d merged bd4e526 (sonnet), full verify running
 2026-10-28T09:20Z MVP-000d → done (clean verify: 590 passed, 7 live hub suites, tracer on /v1). Disk: stale test executables cleared, 11 GB free
 2026-10-28T09:20Z M2-008e assigned (sonnet, priority 1 security). M1A-006f assigned (haiku)
+2026-10-28T09:25Z M2B-005 merged 0ed5a67 (sonnet; out-of-path db/mod.rs MIGRATIONS entry accepted). Review: device-code remote-phishing risk (attacker approves a guessed code into their org) → M2B-005a (priority 1: tunnel trust gate, approve rate limit, runner confirms approving org). M2B-005b (logout/status/run). Verify running

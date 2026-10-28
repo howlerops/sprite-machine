@@ -2430,6 +2430,54 @@ items:
       - 'cargo test -p hub'
       - 'cargo run -p cli -- e2e tracer'
 
+  - id: M2B-005a
+    title: 'hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential'
+    milestone: M2b
+    phase: P2
+    priority: 1
+    lane: rust
+    size: M
+    risk: high
+    deps: [M2B-005, M2-008e]
+    paths:
+      - 'crates/hub/src/machines/routes.rs'
+      - 'crates/hub/src/devices/**'
+      - 'crates/hub/tests/devices.rs'
+      - 'crates/runner/src/login/**'
+      - 'crates/runner/tests/login.rs'
+    context:
+      - 'docs/ledger/reports/M2B-005.md (criterion 1 caveat, Discovered work)'
+      - 'RFC 8628 §5.1 (user code brute force), §5.4 (remote phishing)'
+    acceptance:
+      - 'GET /v1/machines/{id}/tunnel calls devices::trust::machine_may_connect before forwarding; live test with a machine whose origin is not vouched while require_trusted_devices is on gets refused'
+      - 'POST /v1/devices/approve: failed user_code attempts are limited per user and per org (e.g. 5 per minute, 20 per hour) with 429 + Retry-After; POST /v1/devices/code is limited (per IP header or global cap on pending pairings); expired pairings are purged (scheduled handler) (native tests with injected clock)'
+      - 'The token response names the approving org and user; sm login prints them and asks for confirmation (y/N) before storing the credential, with --yes for non-interactive use; on "no" it revokes the machine via the API (test)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh devices'
+      - 'cargo test -p runner --test login'
+
+  - id: M2B-005b
+    title: 'runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-005, M2B-004e]
+    paths:
+      - 'crates/runner/src/main.rs'
+      - 'crates/runner/src/login/**'
+      - 'crates/runner/tests/login.rs'
+    context:
+      - 'docs/ledger/reports/M2B-005.md (Discovered work d, e)'
+    acceptance:
+      - 'sm logout wipes the credential (keychain and file); sm status prints hub, machine id and whether a credential is present (never the credential)'
+      - 'The run path builds the tunnel from KeychainCredentials::from_env and the stored hub URL / machine id (test with a fake hub)'
+      - 'On Linux the report states the persistence path (0600 file) and why keyutils alone is not enough'
+    verify:
+      - 'cargo test -p runner'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
