@@ -53,6 +53,9 @@ const DESKTOP_SESSION_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
 /// Rides in `oauth_codes.invite_ids` when the sign-in linked a pre-created user by login, so the
 /// redeem can audit it (`auth.github.link`). Not an invite id (those start with `inv_`).
 const LINKED_MARKER: &str = "@linked";
+/// The same, for the bootstrap owner linked by `BOOTSTRAP_OWNER_GITHUB_LOGIN` (audited with
+/// `by` = `bootstrap_owner_login`).
+const BOOTSTRAP_LINKED_MARKER: &str = "@bootstrap";
 /// The path GitHub redirects to; also the web page's `redirect_uri`.
 pub const CALLBACK_PATH: &str = "/auth/github/callback";
 const LOOPBACK_PATH: &str = "/callback";
@@ -76,6 +79,9 @@ pub struct GithubConfig {
     pub api_base: Option<String>,
     /// The hub's public origin (`https://host`, no trailing slash).
     pub hub_origin: String,
+    /// `BOOTSTRAP_OWNER_GITHUB_LOGIN` (lowercase), when the operator set a valid one. The first
+    /// sign-in of this login links the bootstrap owner (see `finish_callback`); unset links nothing.
+    pub bootstrap_login: Option<String>,
 }
 
 impl GithubConfig {
@@ -435,10 +441,22 @@ pub async fn finish_callback(
     let denied = || error_location(pending, &config.hub_origin, "access_denied");
     let login = user.login.to_ascii_lowercase();
 
-    let mut linked = false;
+    // Rides in the code's invite list so the redeem can audit how the account was linked.
+    let mut link_marker: Option<&str> = None;
     let mut hub_user = store::user_by_github_id(db, user.id)
         .await
         .map_err(db_failure)?;
+    if hub_user.is_none() && config.bootstrap_login.as_deref() == Some(login.as_str()) {
+        // The operator named this login for the bootstrap owner, so it links that owner whatever
+        // their age: once, and only while the owner has no GitHub id (the link sets one, so a
+        // later sign-in finds them by id). Only the bootstrap owner is reachable this way.
+        hub_user = store::link_bootstrap_owner(db, user.id, &login)
+            .await
+            .map_err(db_failure)?;
+        if hub_user.is_some() {
+            link_marker = Some(BOOTSTRAP_LINKED_MARKER);
+        }
+    }
     if hub_user.is_none() {
         // A user an admin created with this login and no GitHub id yet is linked, once, and
         // only while they are younger than 7 days: an older one may belong to a login that was
@@ -447,7 +465,9 @@ pub async fn finish_callback(
         hub_user = store::link_user_by_login(db, user.id, &login, now_ms)
             .await
             .map_err(db_failure)?;
-        linked = hub_user.is_some();
+        if hub_user.is_some() {
+            link_marker = Some(LINKED_MARKER);
+        }
     }
     let invites = store::open_invites(db, &login, now_ms)
         .await
@@ -471,8 +491,8 @@ pub async fn finish_callback(
     };
 
     let mut accepted = Vec::new();
-    if linked {
-        accepted.push(LINKED_MARKER.to_owned());
+    if let Some(marker) = link_marker {
+        accepted.push(marker.to_owned());
     }
     for invite in &invites {
         if store::accept_invite(db, invite, &user_id, now_ms)
@@ -588,12 +608,17 @@ pub async fn redeem(
         json!({ "github_login": login, "client": device_name }),
     )];
     for invite_id in row.invite_ids.split(',').filter(|id| !id.is_empty()) {
-        if invite_id == LINKED_MARKER {
+        if invite_id == LINKED_MARKER || invite_id == BOOTSTRAP_LINKED_MARKER {
+            let by = if invite_id == LINKED_MARKER {
+                "login"
+            } else {
+                "bootstrap_owner_login"
+            };
             events.push((
                 "auth.github.link",
                 "user",
                 row.user_id.clone(),
-                json!({ "github_login": login, "by": "login" }),
+                json!({ "github_login": login, "by": by }),
             ));
             continue;
         }

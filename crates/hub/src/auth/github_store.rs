@@ -162,6 +162,37 @@ pub async fn link_user_by_login(
     Ok((changed == 1).then_some(id))
 }
 
+/// Links the bootstrap owner to this GitHub id: the user that the hub's `auth.bootstrap` audit row
+/// names, while they have no GitHub id and no login or this login. Not limited by age, because the
+/// operator set the login (`BOOTSTRAP_OWNER_GITHUB_LOGIN`). `login` is lowercase. `None` when there
+/// is no such owner.
+pub async fn link_bootstrap_owner(
+    db: &impl Db,
+    github_id: i64,
+    login: &str,
+) -> Result<Option<String>, DbError> {
+    let rows = db
+        .query(
+            "SELECT u.id AS id FROM audit_log a JOIN users u \
+             ON u.id = json_extract(a.detail_json, '$.user_id') \
+             WHERE a.action = 'auth.bootstrap' AND u.github_id IS NULL \
+               AND (u.github_login IS NULL OR lower(u.github_login) = ?) \
+             ORDER BY a.seq LIMIT 1",
+            &[login.into()],
+        )
+        .await?;
+    let Some(id) = rows.first().map(|row| text(row, "id")).transpose()? else {
+        return Ok(None);
+    };
+    let sql = format!(
+        "UPDATE users SET github_id = ?, updated_at = {NOW} WHERE id = ? AND github_id IS NULL"
+    );
+    let changed = db
+        .execute(&sql, &[github_id.into(), id.as_str().into()])
+        .await?;
+    Ok((changed == 1).then_some(id))
+}
+
 /// A login moves with the account: whoever held it before (a rename, or a re-used name) loses it.
 async fn release_login(db: &impl Db, login: &str, except_user: &str) -> Result<(), DbError> {
     db.execute(

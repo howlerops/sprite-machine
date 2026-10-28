@@ -129,6 +129,11 @@ if [[ $name == oauth ]]; then
   export GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET MOCK_GITHUB_PORT
   github_args=(--var "GITHUB_CLIENT_ID:$GITHUB_CLIENT_ID" --var "GITHUB_CLIENT_SECRET:$GITHUB_CLIENT_SECRET" \
     --var "GITHUB_API_BASE:http://127.0.0.1:$MOCK_GITHUB_PORT")
+  # M2-003f: a random per-run login for the bootstrap owner (never a real one): its first GitHub
+  # sign-in links the owner (tests/oauth.rs). Lowercase, as the hub reads it.
+  BOOTSTRAP_OWNER_GITHUB_LOGIN=boss-$(od -An -tx1 -N4 /dev/urandom | tr -d ' \n')
+  export BOOTSTRAP_OWNER_GITHUB_LOGIN
+  github_args+=(--var "BOOTSTRAP_OWNER_GITHUB_LOGIN:$BOOTSTRAP_OWNER_GITHUB_LOGIN")
 fi
 
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
