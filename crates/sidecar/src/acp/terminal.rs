@@ -19,12 +19,18 @@
 //! The ACP `output_byte_limit` truncates only what `terminal/output` returns. The tee sees
 //! every byte. When the request gives no limit, [`DEFAULT_OUTPUT_LIMIT`] applies.
 //!
+//! `terminal/kill` signals the child's whole process group (the child leads its own session
+//! on the PTY): SIGHUP at once, then SIGKILL [`KILL_GRACE`] later if any member is left. A
+//! failed `terminal/create` stops and reaps its child and ends its threads; [`SpawnHooks`]
+//! injects failures for tests.
+//!
 //! A terminal's working directory must be inside the workspace root, the same rule as file
 //! access ([`super::fs`]).
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -58,6 +64,56 @@ const READ_SIZE: usize = 8 * 1024;
 /// How long the waiter waits for the reader to drain the PTY after the child exits. A
 /// grandchild that keeps the PTY open must not hold the terminal open forever.
 const READER_GRACE: Duration = Duration::from_secs(2);
+
+/// Time a child gets to act on SIGHUP before the process group is sent SIGKILL.
+const KILL_GRACE: Duration = Duration::from_secs(2);
+/// How often the kill escalation checks whether the child has gone.
+const KILL_POLL: Duration = Duration::from_millis(20);
+
+/// A step of `terminal/create` after which a failure must leave nothing running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnStep {
+    /// The PTY reader handle is about to be cloned. The child is already running.
+    CloneReader,
+    /// The reader thread is about to start.
+    ReaderThread,
+    /// The waiter thread is about to start. The reader thread already runs.
+    WaiterThread,
+}
+
+/// Fault-injection point for `terminal/create`. `before` runs ahead of each [`SpawnStep`]; an
+/// `Err` is treated exactly like the step failing for real. `pid` is the child's process id.
+/// The default does nothing.
+pub trait SpawnHooks: Send + Sync {
+    /// Called before `step`. Return an error to make the step fail.
+    fn before(&self, step: SpawnStep, pid: Option<u32>) -> std::io::Result<()>;
+}
+
+/// The production hooks: never fail.
+struct NoHooks;
+
+impl SpawnHooks for NoHooks {
+    fn before(&self, _step: SpawnStep, _pid: Option<u32>) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Counts a running terminal thread while it lives; dropping it (thread end, or the closure
+/// dropped because the thread never started) uncounts it.
+struct ThreadGuard(Arc<AtomicUsize>);
+
+impl ThreadGuard {
+    fn new(counter: &Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(counter))
+    }
+}
+
+impl Drop for ThreadGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// Where the Activity envelopes go.
 pub type ActivitySink = Arc<dyn Fn(Envelope) + Send + Sync>;
@@ -100,6 +156,9 @@ pub struct Terminals {
     sink: ActivitySink,
     table: Mutex<HashMap<String, Arc<Terminal>>>,
     next: AtomicU64,
+    hooks: Arc<dyn SpawnHooks>,
+    /// Reader and waiter threads currently alive.
+    threads: Arc<AtomicUsize>,
 }
 
 impl Terminals {
@@ -112,7 +171,27 @@ impl Terminals {
             sink,
             table: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
+            hooks: Arc::new(NoHooks),
+            threads: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    /// Like [`Terminals::new`], with `hooks` consulted at each spawn step (fault injection).
+    pub fn with_hooks(
+        workspace: Workspace,
+        scope: TerminalScope,
+        sink: ActivitySink,
+        hooks: Arc<dyn SpawnHooks>,
+    ) -> Self {
+        let mut terminals = Self::new(workspace, scope, sink);
+        terminals.hooks = hooks;
+        terminals
+    }
+
+    /// The number of reader and waiter threads still running. Zero once every terminal has
+    /// finished, and after a `create` that failed.
+    pub fn live_threads(&self) -> usize {
+        self.threads.load(Ordering::SeqCst)
     }
 
     /// Answers `terminal/create`: starts the command on a PTY and returns its id.
@@ -151,12 +230,27 @@ impl Terminals {
                 pixel_height: 0,
             })
             .map_err(spawn_error)?;
-        let child = pair.slave.spawn_command(command).map_err(spawn_error)?;
+        let mut child = pair.slave.spawn_command(command).map_err(spawn_error)?;
         // The parent must not hold the slave: the reader only sees end-of-file once the
         // child, and anything it started, has closed it.
         drop(pair.slave);
-        let reader = pair.master.try_clone_reader().map_err(spawn_error)?;
-        let killer = child.clone_killer();
+        let pid = child.process_id();
+        let mut killer = child.clone_killer();
+        let master = pair.master;
+
+        // From here the child runs. Any failure must stop it, reap it and end the threads.
+        let reader = match self
+            .hooks
+            .before(SpawnStep::CloneReader, pid)
+            .map_err(spawn_error)
+            .and_then(|()| master.try_clone_reader().map_err(spawn_error))
+        {
+            Ok(reader) => reader,
+            Err(error) => {
+                abort_spawn(pid, killer.as_mut(), &mut child, None);
+                return Err(error);
+            }
+        };
 
         let emit = Emit {
             sink: Arc::clone(&self.sink),
@@ -171,25 +265,74 @@ impl Terminals {
         });
         let (exit_tx, _) = watch::channel(None);
         let exit_tx = Arc::new(exit_tx);
-        // The snapshot goes out before any thread can produce output.
-        shared.emit.snapshot();
 
+        // The reader waits for `go` so the opening snapshot goes out before any output. If
+        // `create` fails, `go` is dropped and the reader ends without reading.
+        let (go_tx, go_rx) = mpsc::channel::<()>();
         let reader_shared = Arc::clone(&shared);
-        let reader_thread = std::thread::Builder::new()
-            .name(format!("pty-read-{id}"))
-            .spawn(move || read_output(&reader_shared, reader))?;
+        let reader_guard = ThreadGuard::new(&self.threads);
+        let reader_thread = self
+            .hooks
+            .before(SpawnStep::ReaderThread, pid)
+            .and_then(|()| {
+                std::thread::Builder::new()
+                    .name(format!("pty-read-{id}"))
+                    .spawn(move || {
+                        let _guard = reader_guard;
+                        if go_rx.recv().is_ok() {
+                            read_output(&reader_shared, reader);
+                        }
+                    })
+            });
+        let reader_thread = match reader_thread {
+            Ok(handle) => handle,
+            Err(error) => {
+                abort_spawn(pid, killer.as_mut(), &mut child, None);
+                return Err(error.into());
+            }
+        };
+
+        // The waiter owns the child and the reader handle. They sit in a slot so a failed
+        // spawn, which drops the closure, does not lose them.
+        let child_slot = Arc::new(Mutex::new(Some((child, reader_thread))));
+        let waiter_slot = Arc::clone(&child_slot);
         let waiter_shared = Arc::clone(&shared);
         let waiter_exit = Arc::clone(&exit_tx);
-        std::thread::Builder::new()
-            .name(format!("pty-wait-{id}"))
-            .spawn(move || wait_for_child(&waiter_shared, &waiter_exit, child, reader_thread))?;
+        let waiter_guard = ThreadGuard::new(&self.threads);
+        let waiter = self
+            .hooks
+            .before(SpawnStep::WaiterThread, pid)
+            .and_then(|()| {
+                std::thread::Builder::new()
+                    .name(format!("pty-wait-{id}"))
+                    .spawn(move || {
+                        let _guard = waiter_guard;
+                        let taken = lock(&waiter_slot).take();
+                        if let Some((child, reader)) = taken {
+                            wait_for_child(&waiter_shared, &waiter_exit, child, reader);
+                        }
+                    })
+            });
+        if let Err(error) = waiter {
+            let taken = lock(&child_slot).take();
+            if let Some((mut child, reader)) = taken {
+                drop(go_tx);
+                abort_spawn(pid, killer.as_mut(), &mut child, Some(reader));
+            }
+            return Err(error.into());
+        }
+        shared.emit.snapshot();
+        // The reader is alive and waiting, so this cannot fail; a gone reader has nothing to start.
+        let _ = go_tx.send(());
 
         let terminal = Arc::new(Terminal {
             session: session.clone(),
             shared,
             exit: exit_tx,
+            pid,
+            escalating: AtomicBool::new(false),
             killer: Mutex::new(killer),
-            master: Mutex::new(Some(pair.master)),
+            master: Mutex::new(Some(master)),
         });
         lock(&self.table).insert(id.clone(), terminal);
         Ok(CreateTerminalResponse::new(TerminalId::from(id)))
@@ -289,19 +432,114 @@ struct Terminal {
     shared: Arc<Shared>,
     /// `None` until the child has exited; then the exit status.
     exit: Arc<watch::Sender<Option<Exit>>>,
+    /// The child's process id. The child leads its own session and process group.
+    pid: Option<u32>,
+    /// Set once a kill has started the SIGKILL escalation.
+    escalating: AtomicBool,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     /// Dropped on release, which frees the PTY.
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
 }
 
 impl Terminal {
-    /// Kills the child, unless it has already exited.
+    /// Kills the child's process group: SIGHUP now, and SIGKILL after `KILL_GRACE` if the
+    /// child has still not exited. A child that has already exited is left alone.
     fn kill(&self) -> Result<(), TerminalError> {
         if self.exit.borrow().is_some() {
             return Ok(());
         }
-        lock(&self.killer).kill()?;
+        let hung_up = self.pid.is_some_and(|pid| signal_group(pid, Sig::Hup));
+        if !hung_up {
+            // No group to signal. A child that has just exited is not an error.
+            let killed = lock(&self.killer).kill();
+            if killed.is_err() && self.exit.borrow().is_none() {
+                killed?;
+            }
+        }
+        let Some(pid) = self.pid else {
+            return Ok(());
+        };
+        if self.escalating.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        let exit = Arc::clone(&self.exit);
+        let spawned = std::thread::Builder::new()
+            .name(format!("pty-kill-{pid}"))
+            .spawn(move || escalate(pid, &exit));
+        if spawned.is_err() {
+            // No thread to wait with: do not leave the child with only a SIGHUP.
+            signal_group(pid, Sig::Kill);
+        }
         Ok(())
+    }
+}
+
+/// Sends SIGKILL to the process group once `KILL_GRACE` has passed. The group may outlive its
+/// leader (a grandchild that ignores SIGHUP), so the leader's exit does not end the grace:
+/// only an empty group does.
+fn escalate(pid: u32, exit: &watch::Sender<Option<Exit>>) {
+    let deadline = Instant::now() + KILL_GRACE;
+    while Instant::now() < deadline {
+        if exit.borrow().is_some() && !signal_group(pid, Sig::Probe) {
+            return;
+        }
+        std::thread::sleep(KILL_POLL);
+    }
+    signal_group(pid, Sig::Kill);
+}
+
+/// The signals this module sends.
+#[derive(Clone, Copy)]
+enum Sig {
+    Hup,
+    Kill,
+    /// Signal 0: only asks whether the group still has members.
+    Probe,
+}
+
+/// Signals the process group led by `pid`. True when the signal was delivered; false when it
+/// could not be (no such group, or an error), so the caller may use another way.
+#[cfg(unix)]
+fn signal_group(pid: u32, signal: Sig) -> bool {
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+
+    // A pid of 0 or 1 would name this process's own group or everything: never signal it.
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    if raw <= 1 {
+        return false;
+    }
+    let signal = match signal {
+        Sig::Hup => Some(Signal::SIGHUP),
+        Sig::Kill => Some(Signal::SIGKILL),
+        Sig::Probe => None,
+    };
+    killpg(Pid::from_raw(raw), signal).is_ok()
+}
+
+#[cfg(not(unix))]
+fn signal_group(_pid: u32, _signal: Sig) -> bool {
+    false
+}
+
+/// Undoes a half-finished `create`: SIGKILLs the child's group, reaps the child, and waits
+/// (bounded) for the reader thread if there is one.
+fn abort_spawn(
+    pid: Option<u32>,
+    killer: &mut (dyn ChildKiller + Send + Sync),
+    child: &mut Box<dyn Child + Send + Sync>,
+    reader: Option<JoinHandle<()>>,
+) {
+    if let Some(pid) = pid {
+        signal_group(pid, Sig::Kill);
+    }
+    // Also the direct kill, for a pid that could not be signalled as a group.
+    let _ = killer.kill();
+    let _ = child.wait();
+    if let Some(reader) = reader {
+        join_reader(reader);
     }
 }
 

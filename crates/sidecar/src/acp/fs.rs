@@ -1,32 +1,63 @@
 //! Client-side file access for the ACP `fs/read_text_file` and `fs/write_text_file` requests,
 //! confined to the workspace root.
 //!
-//! [`Workspace`] resolves every path the agent sends against its root and refuses any path
-//! that leaves it:
+//! [`Workspace`] holds an opened [capability directory](cap_std::fs::Dir) for its root. Every
+//! read and write resolves its path one component at a time relative to that directory
+//! (`openat` with no-follow semantics, symlinks emulated inside the sandbox), so a path can
+//! never leave the root, even when a component is swapped for a symlink while the operation
+//! runs. There is no check-then-use gap: the lookup is the check.
 //!
-//! - a `..` component ([`FsError::Traversal`]);
-//! - an absolute path outside the root, or a path whose real location is outside it
-//!   ([`FsError::Outside`]). The real location follows symlinks, so a symlinked file or a
-//!   symlinked parent directory that points out of the root is caught, and so is a write
-//!   into a path that does not exist yet;
-//! - a dangling symlink, which a write would follow to an unchecked target
-//!   ([`FsError::DanglingSymlink`]).
+//! - a `..` component is refused up front ([`FsError::Traversal`]);
+//! - an absolute path must lie lexically under the root, else [`FsError::Outside`];
+//! - a symlink (file or directory) whose target leaves the root is refused
+//!   ([`FsError::Outside`]), and so is a write through a symlink whose target is missing and
+//!   outside the root ([`FsError::DanglingSymlink`]). The error kind is classified after the
+//!   fact for the caller's benefit; the refusal itself comes from the capability lookup.
+//!
+//! The capability lookup refuses every absolute symlink, so symlinks are first expanded by a
+//! left-to-right walk (see `Workspace::confined`): an absolute target under the root is
+//! re-based onto it, anything else is refused. The walk is not the guard; the I/O that follows
+//! is relative to the root handle again and refuses any escape however the tree changed.
+//!
+//! Changes from the path-based version: an absolute path must be lexically under the canonical
+//! root (an absolute alias of the root that goes through a symlink is `Outside`), and a
+//! dangling symlink that points inside the root is followed and its target created, where it
+//! used to be `DanglingSymlink`. All other error kinds are unchanged.
 //!
 //! Relative paths are taken as relative to the root. Symlinks that stay inside the root are
-//! followed. A write creates missing parent directories, which are inside the root by
-//! construction.
+//! followed, including a dangling one inside the root, whose target a write then creates
+//! (inside the root). A write creates missing parent directories, inside the root.
 //!
-//! The check and the I/O that follows are two steps. A process that swaps a path component for
-//! a symlink in between can still escape. The agent writes through the runner, so this is the
-//! limit of the check and is not guarded against further.
+//! [`Workspace::resolve`] is an advisory, path-based resolution used for a terminal's `cwd`.
+//! File I/O does not rely on it.
 
+use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
 use protocol::acp::{
     ReadTextFileRequest, ReadTextFileResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
+
+/// Symlinks followed in one path before giving up, as the kernel does.
+const MAX_LINK_HOPS: usize = 40;
+/// `ENOTDIR`, which `read_link` reports for a component below a regular file.
+const NOT_A_DIRECTORY: i32 = 20;
+
+/// The components of `path` as owned names. `..` and `.` are kept; root and prefix are not.
+fn components_of(path: &Path) -> VecDeque<OsString> {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(name) => Some(name.to_os_string()),
+            Component::ParentDir => Some(OsString::from("..")),
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => None,
+        })
+        .collect()
+}
 
 /// Errors from the workspace file access.
 #[derive(Debug, thiserror::Error)]
@@ -49,11 +80,12 @@ pub enum FsError {
 #[derive(Debug, Clone)]
 pub struct Workspace {
     root: PathBuf,
+    dir: Arc<Dir>,
 }
 
 impl Workspace {
-    /// Opens the workspace at `root`. The root is canonicalized, so later checks compare
-    /// real paths. It must be an existing directory.
+    /// Opens the workspace at `root`. The root is canonicalized and opened as a directory
+    /// handle that all later file I/O is relative to. It must be an existing directory.
     pub fn new(root: impl AsRef<Path>) -> io::Result<Self> {
         let root = std::fs::canonicalize(root)?;
         if !root.is_dir() {
@@ -62,7 +94,11 @@ impl Workspace {
                 "workspace root is not a directory",
             ));
         }
-        Ok(Self { root })
+        let dir = Dir::open_ambient_dir(&root, ambient_authority())?;
+        Ok(Self {
+            root,
+            dir: Arc::new(dir),
+        })
     }
 
     /// The canonical root.
@@ -70,9 +106,12 @@ impl Workspace {
         &self.root
     }
 
-    /// Resolves `path` to its real location inside the root. The path does not have to
-    /// exist. Missing components are returned as they are, under the deepest existing
-    /// ancestor's real path.
+    /// Resolves `path` to its real location inside the root, by path. The path does not
+    /// have to exist. Missing components are returned as they are, under the deepest
+    /// existing ancestor's real path.
+    ///
+    /// This is a snapshot: it is fine for choosing a terminal's working directory, but file
+    /// I/O does not rely on it.
     pub fn resolve(&self, path: &Path) -> Result<PathBuf, FsError> {
         if path.components().any(|c| matches!(c, Component::ParentDir)) {
             return Err(FsError::Traversal(path.to_path_buf()));
@@ -125,19 +164,161 @@ impl Workspace {
         Ok(resolved)
     }
 
+    /// The path relative to the root, with `.` removed. Lexical only; the capability lookup
+    /// does the real confinement.
+    fn relative(&self, path: &Path) -> Result<PathBuf, FsError> {
+        if path.components().any(|c| matches!(c, Component::ParentDir)) {
+            return Err(FsError::Traversal(path.to_path_buf()));
+        }
+        let stripped = if path.is_absolute() {
+            path.strip_prefix(&self.root)
+                .map_err(|_| FsError::Outside(path.to_path_buf()))?
+        } else {
+            path
+        };
+        let mut relative = PathBuf::new();
+        for component in stripped.components() {
+            if let Component::Normal(name) = component {
+                relative.push(name);
+            }
+        }
+        if relative.as_os_str().is_empty() {
+            relative.push(".");
+        }
+        Ok(relative)
+    }
+
+    /// The symlink-free path of `path` relative to the root.
+    ///
+    /// The capability lookup refuses every absolute symlink, even one that points back into
+    /// the root. So symlinks are expanded here, left to right: an absolute target must lie
+    /// under the root and is re-based onto it, a relative one is spliced in place. Each
+    /// component before the one being looked at is a real directory, so `..` in a target is
+    /// exact. This walk is advisory, not the guard: the I/O that follows goes through the
+    /// capability directory again, which refuses any escape however the tree changed in
+    /// between.
+    fn confined(&self, path: &Path) -> Result<PathBuf, FsError> {
+        let relative = self.relative(path)?;
+        let result = self.expand_links(&relative);
+        result.map_err(|error| match error {
+            FsError::Io(error) => self.classify(path, error),
+            // A refused link: say whether it was dangling, as the path-based walk can tell.
+            FsError::Outside(_) => match self.resolve(path) {
+                Err(dangling @ FsError::DanglingSymlink(_)) => dangling,
+                _ => FsError::Outside(path.to_path_buf()),
+            },
+            other => other,
+        })
+    }
+
+    fn expand_links(&self, relative: &Path) -> Result<PathBuf, FsError> {
+        let mut pending: VecDeque<OsString> = components_of(relative);
+        let mut done = PathBuf::new();
+        let mut hops = 0usize;
+        while let Some(name) = pending.pop_front() {
+            if name == "." {
+                continue;
+            }
+            if name == ".." {
+                if !done.pop() {
+                    return Err(FsError::Outside(relative.to_path_buf()));
+                }
+                continue;
+            }
+            let candidate = done.join(&name);
+            match self.dir.read_link_contents(&candidate) {
+                Ok(target) => {
+                    hops += 1;
+                    if hops > MAX_LINK_HOPS {
+                        return Err(FsError::Io(io::Error::other("too many levels of symlinks")));
+                    }
+                    let rebased = if target.is_absolute() {
+                        done = PathBuf::new();
+                        target
+                            .strip_prefix(&self.root)
+                            .map_err(|_| FsError::Outside(relative.to_path_buf()))?
+                            .to_path_buf()
+                    } else {
+                        target
+                    };
+                    let mut spliced = components_of(&rebased);
+                    spliced.extend(pending);
+                    pending = spliced;
+                }
+                // Not a symlink, or nothing there yet: an ordinary component.
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::InvalidInput | io::ErrorKind::NotFound
+                    ) || error.raw_os_error() == Some(NOT_A_DIRECTORY) =>
+                {
+                    done.push(name);
+                }
+                Err(error) => return Err(FsError::Io(error)),
+            }
+        }
+        if done.as_os_str().is_empty() {
+            done.push(".");
+        }
+        Ok(done)
+    }
+
+    /// Names the reason for a failed lookup. The capability layer reports an escape as
+    /// `PermissionDenied` (or, for a directory it could not create, `AlreadyExists`); the
+    /// advisory resolution then says whether it was an escape or a dangling link. Anything
+    /// else stays an I/O error, except an escape that resolution cannot see any more (the
+    /// link changed since), which is still `Outside`. This only picks the error kind: the
+    /// refusal itself has already happened.
+    fn classify(&self, path: &Path, error: io::Error) -> FsError {
+        if let Err(refusal @ (FsError::Outside(_) | FsError::DanglingSymlink(_))) =
+            self.resolve(path)
+        {
+            return refusal;
+        }
+        if error.kind() == io::ErrorKind::PermissionDenied && error.to_string().contains("outside")
+        {
+            return FsError::Outside(path.to_path_buf());
+        }
+        FsError::Io(error)
+    }
+
+    fn read_blocking(&self, path: &Path) -> Result<String, FsError> {
+        let relative = self.confined(path)?;
+        let mut text = String::new();
+        let result = self
+            .dir
+            .open(&relative)
+            .and_then(|mut file| file.read_to_string(&mut text));
+        match result {
+            Ok(_) => Ok(text),
+            Err(error) => Err(self.classify(path, error)),
+        }
+    }
+
+    fn write_blocking(&self, path: &Path, content: &str) -> Result<(), FsError> {
+        let relative = self.confined(path)?;
+        let result = (|| {
+            if let Some(parent) = relative.parent().filter(|p| !p.as_os_str().is_empty()) {
+                self.dir.create_dir_all(parent)?;
+            }
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            let mut file = self.dir.open_with(&relative, &options)?;
+            file.write_all(content.as_bytes())
+        })();
+        result.map_err(|error| self.classify(path, error))
+    }
+
     /// Answers `fs/read_text_file`. `line` is 1-based and `limit` counts lines. A `line` of
     /// 0 reads from the first line, and a `line` past the end gives an empty string.
     pub async fn read_text_file(
         &self,
         request: ReadTextFileRequest,
     ) -> Result<ReadTextFileResponse, FsError> {
-        let path = self.resolve(&request.path)?;
-        let text = tokio::fs::read_to_string(&path).await?;
-        Ok(ReadTextFileResponse::new(slice_lines(
-            &text,
-            request.line,
-            request.limit,
-        )))
+        let workspace = self.clone();
+        let (path, line, limit) = (request.path, request.line, request.limit);
+        let text = run_blocking(move || workspace.read_blocking(&path)).await?;
+        Ok(ReadTextFileResponse::new(slice_lines(&text, line, limit)))
     }
 
     /// Answers `fs/write_text_file`, creating missing parent directories inside the root.
@@ -145,12 +326,19 @@ impl Workspace {
         &self,
         request: WriteTextFileRequest,
     ) -> Result<WriteTextFileResponse, FsError> {
-        let path = self.resolve(&request.path)?;
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        tokio::fs::write(&path, request.content).await?;
+        let workspace = self.clone();
+        run_blocking(move || workspace.write_blocking(&request.path, &request.content)).await?;
         Ok(WriteTextFileResponse::new())
+    }
+}
+
+/// Runs blocking file I/O off the async threads. A panicked or cancelled task is an I/O error.
+async fn run_blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, FsError> + Send + 'static,
+) -> Result<T, FsError> {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(result) => result,
+        Err(error) => Err(FsError::Io(io::Error::other(error))),
     }
 }
 
