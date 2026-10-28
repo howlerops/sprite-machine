@@ -567,7 +567,16 @@ impl Wrangler {
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         command
             .current_dir(hub_dir)
-            .args(["dev", "--local", "--ip", "127.0.0.1", "--port"])
+            // `--inspector-port 0`: the default 9229 is shared by every wrangler on the machine.
+            .args([
+                "dev",
+                "--local",
+                "--inspector-port",
+                "0",
+                "--ip",
+                "127.0.0.1",
+                "--port",
+            ])
             .arg(port.to_string())
             .arg("--persist-to")
             .arg(&persist)

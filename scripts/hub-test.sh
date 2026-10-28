@@ -75,11 +75,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "== worker-build --release ($HUB_DIR, wasm target $WASM_TARGET_DIR)"
+echo "== worker-build --profile wasm-release ($HUB_DIR, wasm target $WASM_TARGET_DIR)"
 start=$(date +%s)
 # CARGO_TERM_VERBOSE makes cargo name the hub package path for fresh builds too ("Fresh hub v0.1.0 (path)").
-(cd "$HUB_DIR" && CARGO_TARGET_DIR=$WASM_TARGET_DIR CARGO_TERM_VERBOSE=true worker-build --release) >"$STATE/build.log" 2>&1 \
-  || { tail -n 40 "$STATE/build.log" >&2; fail "worker-build --release"; }
+(cd "$HUB_DIR" && CARGO_TARGET_DIR=$WASM_TARGET_DIR CARGO_TERM_VERBOSE=true worker-build --profile wasm-release) >"$STATE/build.log" 2>&1 \
+  || { tail -n 40 "$STATE/build.log" >&2; fail "worker-build --profile wasm-release"; }
 echo "built in $(( $(date +%s) - start ))s"
 # CI-002: the bundle must come from this tree: the build log names this worktree's crates/hub.
 grep -qF "($HUB_DIR)" "$STATE/build.log" \
@@ -114,7 +114,7 @@ VAPID_PUBLIC_KEY=${VAPID_KEYS#* }
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
-(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --test-scheduled --ip 127.0.0.1 --port "$PORT" \
+(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --test-scheduled --inspector-port 0 --ip 127.0.0.1 --port "$PORT" \
   --persist-to "$STATE/persist" --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" "${dev_fixtures_args[@]}" \
   --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
