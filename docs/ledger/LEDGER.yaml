@@ -2290,7 +2290,8 @@ items:
     title: 'scripts/hub-test.sh and the tracer build the hub Worker from a per-worktree wasm target dir (shared target lets another worktree''s hub.wasm stand in)'
     milestone: M0
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged a45e280; on merged tree: cargo test -p cli 15 passed, hub-test smoke PASS, tracer PASS; per-worktree wasm dir 538 MB, janitor removes dirs of removed worktrees"
     assignee: "haiku"
     attempt: 1
     lane: docs
@@ -3661,7 +3662,8 @@ items:
     title: 'web: transcript rendering for every TurnEvent variant'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; on merged tree: hub clippy clean, playwright transcript+pairing 18/18"
     attempt: 2
     assignee: "sonnet"
     deps:
