@@ -73,3 +73,5 @@
 2026-10-28T03:07Z M0-008b assigned→done merged acea2f8 (haiku; one denied archive_session call, commit msg mixup self-fixed)
 2026-10-28T03:07Z leader: rust lane cap 2→3 (non-GPUI builds are light; disk watched)
 2026-10-28T03:07Z M1A-009 (sonnet) + M1A-004 (haiku) assigned attempt 1
+2026-10-28T03:12Z M2-008 assigned→done merged 123355e (sonnet); worker wrote a private <worktree>/target (4.5 GB) — deleted; added M2-008a (redaction, catch-up cap, compaction, DEV_FIXTURES); M2B-002 context += Thread DO hooks
+2026-10-28T03:12Z M1A-009 re-dispatched (same attempt; first dispatch stopped on disk)
