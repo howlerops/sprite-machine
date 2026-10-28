@@ -40,6 +40,7 @@ mod ids;
 mod io;
 mod permission;
 mod runtime;
+mod session_config;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -316,6 +316,69 @@ fn cancel_command_roundtrips() {
 }
 
 #[test]
+fn session_config_example_roundtrips() {
+    // §3.5 `session_config`, both fields set (the spec example).
+    let command = roundtrip_command(
+        r#"{
+  "kind": "session_config",
+  "thread_id": "th_1",
+  "mode_id": "plan",
+  "config": { "id": "model", "value": "opus" }
+}"#,
+    );
+    match command {
+        Command::SessionConfig {
+            thread_id,
+            mode_id,
+            config,
+        } => {
+            assert_eq!(thread_id, "th_1");
+            assert_eq!(mode_id.as_deref(), Some("plan"));
+            let config = config.expect("a config change");
+            assert_eq!(config.id, "model");
+            assert_eq!(config.value, Value::String("opus".to_owned()));
+        }
+        other => panic!("expected session_config, got {other:?}"),
+    }
+}
+
+#[test]
+fn session_config_with_only_a_mode_or_only_a_boolean_roundtrips() {
+    let mode_only = roundtrip_command(
+        r#"{ "kind": "session_config", "thread_id": "th_1", "mode_id": "code" }"#,
+    );
+    assert!(matches!(
+        mode_only,
+        Command::SessionConfig {
+            mode_id: Some(_),
+            config: None,
+            ..
+        }
+    ));
+    let boolean = roundtrip_command(
+        r#"{ "kind": "session_config", "thread_id": "th_1", "config": { "id": "auto_fix", "value": true } }"#,
+    );
+    assert!(matches!(
+        boolean,
+        Command::SessionConfig {
+            mode_id: None,
+            config: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn session_config_is_a_known_kind_and_rejects_unknown_fields() {
+    assert!(protocol::tunnel::KNOWN_COMMAND_KINDS.contains(&"session_config"));
+    let extra = r#"{ "kind": "session_config", "thread_id": "th_1", "mode_id": "x", "extra": 1 }"#;
+    assert!(serde_json::from_str::<Command>(extra).is_err());
+    let extra_in_config = r#"{ "kind": "session_config", "thread_id": "th_1",
+        "config": { "id": "model", "value": "opus", "extra": 1 } }"#;
+    assert!(serde_json::from_str::<Command>(extra_in_config).is_err());
+}
+
+#[test]
 fn unknown_command_kind_fails_to_parse() {
     // §3.5: the runner must answer an unknown kind with command_result{unsupported}; the
     // typed parse must not silently accept it.

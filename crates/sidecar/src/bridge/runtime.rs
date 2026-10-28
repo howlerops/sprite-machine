@@ -148,6 +148,14 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                     .await
             }
             Command::Cancel { thread_id, task_id } => self.cancel(key, &thread_id, &task_id).await,
+            Command::SessionConfig {
+                thread_id,
+                mode_id,
+                config,
+            } => {
+                let config = config.map(|change| (change.id, change.value));
+                self.session_config(key, &thread_id, mode_id, config).await
+            }
         }
     }
 
@@ -246,6 +254,10 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         self.store.upsert_task(&task_id, &thread_id, "running")?;
         self.emit(&thread_id, events).await?;
 
+        let first_attach = self
+            .threads
+            .get(&thread_id)
+            .is_some_and(|thread| thread.session.is_none());
         let session = match self
             .reattacher
             .ensure_session(&self.client, &thread_id, &harness, &cwd)
@@ -269,6 +281,11 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             .insert(session_key.clone(), thread_id.clone());
         if let Some(thread) = self.threads.get_mut(&thread_id) {
             thread.session = Some(session.clone());
+        }
+        if first_attach {
+            // The session's modes and config options, before any update of them (§4.6).
+            let snapshot = self.session_snapshot(&thread_id, &session);
+            self.emit(&thread_id, snapshot).await?;
         }
         let scope = TerminalScope {
             thread_id: thread_id.clone(),
@@ -322,7 +339,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
 
     /// The harness and directory of a thread: the command's, else the stored thread's, else the
     /// bridge's own.
-    fn thread_defaults(
+    pub(super) fn thread_defaults(
         &self,
         thread_id: &str,
         harness: Option<String>,

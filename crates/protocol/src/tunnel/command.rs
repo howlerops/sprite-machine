@@ -44,10 +44,30 @@ pub enum Command {
     },
     /// Cancel the running task.
     Cancel { thread_id: String, task_id: String },
+    /// Change the thread's ACP session mode and/or one config option (§3.5). At least one of
+    /// `mode_id` and `config` is set; the runner checks both against what the session advertised.
+    SessionConfig {
+        thread_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config: Option<SessionConfigChange>,
+    },
+}
+
+/// The `config` of a `session_config` command: the id of a config option and its new value.
+///
+/// `value` is a string (a select option's value id) or a boolean (a boolean option).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionConfigChange {
+    pub id: String,
+    pub value: Value,
 }
 
 /// The `kind` values this build of the protocol understands (§3.5).
-pub const KNOWN_COMMAND_KINDS: [&str; 4] = ["prompt", "approval", "dispatch", "cancel"];
+pub const KNOWN_COMMAND_KINDS: [&str; 5] =
+    ["prompt", "approval", "dispatch", "cancel", "session_config"];
 
 /// Result of parsing a `command` frame with [`parse_command_frame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
