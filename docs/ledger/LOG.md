@@ -76,3 +76,6 @@
 2026-10-28T03:12Z M2-008 assigned→done merged 123355e (sonnet); worker wrote a private <worktree>/target (4.5 GB) — deleted; added M2-008a (redaction, catch-up cap, compaction, DEV_FIXTURES); M2B-002 context += Thread DO hooks
 2026-10-28T03:12Z M1A-009 re-dispatched (same attempt; first dispatch stopped on disk)
 2026-10-28T03:13Z M2-003a paths += threads/auth.rs (replace the placeholder), auth/** , migrations/*auth*; risk→high (security); assigned attempt 1 (sonnet)
+2026-10-28T03:28Z M1A-004 assigned→done merged 50d7c45 (haiku)
+2026-10-28T03:28Z M1A-009 assigned→done merged 18aaec8 (sonnet; additive client.rs resume/load methods accepted; leader resolved acp/mod.rs)
+2026-10-28T03:28Z added M1A-004a (terminal/fs hardening, sonnet); M2B-004 + M1A-006b context += Store/Workspace/Terminals APIs

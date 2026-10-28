@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 33/195 (3 dropped) · in-flight M1A-004,M1A-009,M2-003a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 31/120
+done 35/196 (3 dropped) · in-flight M2-003a · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 31/120
 
 P1 running.
 
@@ -11,8 +11,8 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 32 | 16 | 3 |
-| P2 | 23 | 1 | 0 |
+| P1 | 32 | 18 | 1 |
+| P2 | 24 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -32,11 +32,11 @@ P1 running.
 | M0-008b | worker | rust | done | hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests |
 | M1A-001 | worker | rust | done | sidecar (runner-core lib): config, tracing, /healthz server fn |
 | M1A-003 | worker | rust | done | sidecar (runner core): ACP client + session table (concurrency, pending tasks) |
-| M1A-004 | worker | rust | assigned | sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal}) |
+| M1A-004 | worker | rust | done | sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal}) |
 | M1A-006a | worker | rust | done | protocol::mapping ACP→TurnEvent + golden tests |
 | M1A-006b | worker | rust | todo | runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink) |
 | M1A-007 | worker | rust | todo | Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms) |
-| M1A-009 | worker | rust | assigned | Durable store (SQLite) + ACP session re-attach after restart |
+| M1A-009 | worker | rust | done | Durable store (SQLite) + ACP session re-attach after restart |
 | M1A-013 | worker | rust | todo | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
 | M1A-014 | worker | rust | todo | Attachments: user FilePart → ACP image/resource blocks |
 | M1B-004b | worker | client | done | gpui spike: diff pane (gpui-kit editor) |

@@ -778,7 +778,8 @@ items:
     title: 'sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal})'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 50d7c45; verify: acp_fs_term 24 passed (3 stable runs), sidecar 48, clippy clean"
     assignee: "worker:haiku"
     attempt: 1
     size: M
@@ -899,9 +900,10 @@ items:
       - 'crates/sidecar/src/bridge/**'
       - 'crates/sidecar/tests/bridge.rs'
     context:
-      - 'docs/PLAN-v2-ade.md §4.1 (Common core)'
-      - 'crates/protocol/src/mapping/acp_turn*'
-      - 'docs/specs/tunnel.md (event and command frames)'
+      - "docs/PLAN-v2-ade.md §4.1 (Common core)"
+      - "crates/protocol/src/mapping/acp_turn*"
+      - "docs/specs/tunnel.md (event and command frames)"
+      - "docs/ledger/reports/M1A-004.md + M1A-009.md: the bridge implements ClientHandler by delegating fs/* to acp::fs::Workspace and terminal/* to acp::terminal::Terminals, uses acp::reattach::Reattacher per prompt, stores MCP servers for resume, and calls expire_overdue_interrupts at startup + on a timer"
     acceptance:
       - 'An acp-mock scripted turn yields the golden TurnEvent sequence on an EventSink trait (the runner tunnel client implements it in M2B-004); an in-memory sink in tests'
       - 'Commands (prompt, approval, cancel) from a CommandSource trait reach the ACP client; replaces the MVP-000 stub in crates/sidecar/src/tracer*'
@@ -947,11 +949,34 @@ items:
     verify:
       - 'bash scripts/hub-test.sh a2a_push_out'
 
+  - id: M1A-004a
+    title: 'sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn'
+    milestone: M1a
+    phase: P2
+    priority: 2
+    risk: high
+    deps: [M1A-004]
+    paths:
+      - crates/sidecar/src/acp/fs*
+      - crates/sidecar/src/acp/terminal*
+      - crates/sidecar/tests/acp_fs_hardening.rs
+    context:
+      - 'docs/ledger/reports/M1A-004.md (Decisions and limits; discovered M1A-004b/c/d)'
+      - 'docs/PLAN-v2-ade.md §4.8 (sandbox-internal trust)'
+    acceptance:
+      - 'terminal/kill sends SIGHUP then SIGKILL after 2 s; a child that ignores SIGHUP is gone within 3 s (test)'
+      - 'fs read/write resolve each path component relative to an opened root directory fd (openat/O_NOFOLLOW style, e.g. via the cap-std crate) so a component swapped for a symlink mid-operation cannot escape; a race test that swaps a directory for a symlink in a loop never escapes the root'
+      - 'Terminals::create leaves no child or reader thread running when any spawn step fails (test via an injected spawn failure)'
+    verify:
+      - cargo test -p sidecar --test acp_fs_hardening
+      - cargo test -p sidecar --test acp_fs_term
+
   - id: M1A-009
     title: 'Durable store (SQLite) + ACP session re-attach after restart'
     milestone: M1a
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged 18aaec8; verify: durability 12 passed (2 stable runs, real acp-mock killed between turns), workspace 333 tests, tracer PASS, clippy clean"
     assignee: "worker:sonnet"
     attempt: 1
     size: M
@@ -1945,6 +1970,7 @@ items:
       - "docs/specs/tunnel.md"
       - "docs/PLAN-v2-ade.md §4.10 (Connection)"
       - "docs/ledger/reports/M2B-001.md (Discovered work: rebuild Sender from the durable outbox; connection timers/backoff live here, not in protocol)"
+      - "docs/ledger/reports/M1A-009.md (Store API: enqueue_outbound/ack_outbound/outbox_state/restart_outbound_stream, resume token, commit_down_frame); add protocol::tunnel::Sender::from_parts(acked_upto, next_seq, unacked) to rebuild a Sender from the store"
     acceptance:
       - 'Outbound-only (test asserts no listening sockets); heartbeats; exponential backoff with jitter; resume token; detects OS sleep/wake gaps and reconnects'
       - 'Implements the bridge EventSink: un-acked events from the store are re-sent after reconnect and pruned on ack; commands are fed to the CommandSource; replaces the MVP-000 runner tunnel stub'
