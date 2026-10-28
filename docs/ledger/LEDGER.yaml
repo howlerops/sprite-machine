@@ -2652,7 +2652,8 @@ items:
     title: 'Hub build: the wasm strip step does not wait on the shared cargo lock (prebuilt strip binary or path), so wrangler dev reaches Ready while another build holds the lock'
     milestone: M0
     phase: "P3"
-    status: "assigned"
+    status: "done"
+    evidence: "merged; hub-test smoke + tracer pass (worker); leader ran hub-test oauth while a client-gpui build held the shared lock: wrangler ready after ~15 s; playwright pairing 9/9 with the helpers-hub.sh change"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -5947,8 +5948,10 @@ items:
     milestone: M2
     phase: P3
     status: "assigned"
-    assignee: "haiku"
-    attempt: 1
+    review_notes:
+      - "live oauth: the_bootstrap_owner_signs_in_with_the_configured_github_login_and_no_other_login_can fails with access_denied (10/11); native tests pass"
+    assignee: "sonnet"
+    attempt: 2
     lane: rust
     size: S
     risk: low
