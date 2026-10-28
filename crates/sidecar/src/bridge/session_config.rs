@@ -148,7 +148,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                 format!("could not start the agent: {error}"),
             )));
         }
-        let mcp_servers = self.config.mcp_servers_for(thread_id);
+        let mcp_servers = self.mcp_servers_for(thread_id);
         let attached = match self
             .reattacher
             .attach(&self.client, thread_id, &harness, &cwd, &mcp_servers)
@@ -183,7 +183,41 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             let snapshot = self.session_snapshot(thread_id, response);
             self.emit(thread_id, snapshot).await?;
         }
+        if let Err(message) = self.apply_initial_mode(&session).await {
+            return Ok(Err((CommandErrorCode::Invalid, message)));
+        }
         Ok(Ok(session))
+    }
+
+    /// Puts a freshly attached session in [`Config::initial_mode`]. `Err` is why it could not.
+    pub(super) async fn apply_initial_mode(&mut self, session: &SessionId) -> Result<(), String> {
+        let Some(mode) = self.config.initial_mode.clone() else {
+            return Ok(());
+        };
+        if self.moded.contains(&*session.0) {
+            return Ok(());
+        }
+        let known = self
+            .client
+            .advertised(session)
+            .and_then(|advertised| advertised.modes)
+            .is_some_and(|modes| {
+                modes
+                    .available_modes
+                    .iter()
+                    .any(|available| &*available.id.0 == mode.as_str())
+            });
+        if !known {
+            return Err(format!(
+                "the agent does not offer the permission mode `{mode}`"
+            ));
+        }
+        self.client
+            .set_mode(session, SessionModeId::from(mode.clone()))
+            .await
+            .map_err(|error| format!("could not set the permission mode `{mode}`: {error}"))?;
+        self.moded.insert(session.0.to_string());
+        Ok(())
     }
 
     /// The `StateSnapshot{session}` of what the agent answered to `session/new`, `session/resume`

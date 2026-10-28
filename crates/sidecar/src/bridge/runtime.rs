@@ -24,7 +24,12 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
     /// Runs until the command source ends. Fails when the store, the agent connection's
     /// `initialize` or the sink fails.
     pub async fn run(mut self) -> Result<(), BridgeError> {
-        self.client.initialize().await?;
+        self.agent_mcp = self
+            .client
+            .initialize()
+            .await?
+            .agent_capabilities
+            .mcp_capabilities;
         // The agent process is new: no session survives a restart of the bridge, and the
         // interrupts an earlier process left open wait on requests that died with its agent.
         self.reattacher.connection_lost()?;
@@ -50,6 +55,14 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                 }
                 _ = ticker.tick() => self.on_tick().await?,
             }
+        }
+    }
+
+    /// The MCP servers a session of `thread_id` is given, for what the agent advertised.
+    pub(super) fn mcp_servers_for(&self, thread_id: &str) -> Vec<protocol::acp::McpServer> {
+        match &self.config.mcp_provider {
+            Some(provider) => (provider.0)(thread_id, &self.agent_mcp),
+            None => self.config.mcp_servers_for(thread_id),
         }
     }
 
@@ -279,7 +292,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                 )
                 .await;
         }
-        let mcp_servers = self.config.mcp_servers_for(&thread_id);
+        let mcp_servers = self.mcp_servers_for(&thread_id);
         let attached = match self
             .reattacher
             .attach(&self.client, &thread_id, &harness, &cwd, &mcp_servers)
@@ -309,6 +322,10 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             // The session's modes and config options, before any update of them (§4.6).
             let snapshot = self.session_snapshot(&thread_id, response);
             self.emit(&thread_id, snapshot).await?;
+        }
+        // The permission mode is in force before the agent sees the prompt.
+        if let Err(message) = self.apply_initial_mode(&session).await {
+            return self.fail_task(&thread_id, "protocol", &message).await;
         }
         let scope = TerminalScope {
             thread_id: thread_id.clone(),
@@ -564,6 +581,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             thread.session = None;
         }
         self.by_session.clear();
+        self.moded.clear();
         self.reattacher.connection_lost()?;
         Ok(())
     }
@@ -586,8 +604,9 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             }
             Err(error) => return Ok(Some(error)),
         };
-        if let Err(error) = client.initialize().await {
-            return Ok(Some(error));
+        match client.initialize().await {
+            Ok(response) => self.agent_mcp = response.agent_capabilities.mcp_capabilities,
+            Err(error) => return Ok(Some(error)),
         }
         // The old client is dropped here, which reaps its process.
         self.client = client;

@@ -16,11 +16,12 @@ use protocol::tunnel::{Actor, ActorKind, Command, CommandErrorCode, ContentPart}
 use protocol::turn_event::{Envelope, Event, StateScope, ThreadSeq, UserMessage};
 use serde_json::{Value, json};
 use sidecar::bridge::{
-    Bridge, BridgeError, CommandFailure, CommandFeed, Config, MemoryCommands, MemorySink,
-    SequentialGenerator, SinkItem,
+    Bridge, BridgeError, CommandFailure, CommandFeed, Config, McpProvider, MemoryCommands,
+    MemorySink, SequentialGenerator, SinkItem,
 };
 use sidecar::store::{ManualClock, Store};
 use tempfile::TempDir;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -90,15 +91,45 @@ struct Rig {
 impl Rig {
     /// A bridge over acp-mock. The agent's one turn runs `steps` during the test's prompt.
     async fn start(steps: Vec<Value>) -> Self {
+        Self::start_with(steps, false, |_| {}).await
+    }
+
+    /// [`Rig::start`] with `configure` applied to the bridge's config. With `advertise_http` the
+    /// agent's `initialize` response says it takes http and sse MCP servers (acp-mock does not).
+    async fn start_with(
+        steps: Vec<Value>,
+        advertise_http: bool,
+        configure: impl FnOnce(&mut Config),
+    ) -> Self {
         let (client_io, agent_io) = tokio::io::duplex(1 << 16);
         let (agent_r, agent_w) = tokio::io::split(agent_io);
         let agent = acp_mock::Script::from_value(&script(steps)).expect("a valid script");
         let recorder = Recorder::new();
         let agent_recorder = recorder.clone();
+        let (mock_out, relay_in) = tokio::io::duplex(1 << 16);
         tokio::spawn(async move {
-            acp_mock::run_recorded(agent, agent_recorder, agent_r, agent_w)
+            acp_mock::run_recorded(agent, agent_recorder, agent_r, mock_out)
                 .await
                 .expect("acp-mock runs");
+        });
+        tokio::spawn(async move {
+            let mut agent_w = agent_w;
+            let mut lines = tokio::io::BufReader::new(relay_in).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut line = line;
+                if advertise_http
+                    && let Ok(mut message) = serde_json::from_str::<Value>(&line)
+                    && message["result"]["agentCapabilities"].is_object()
+                {
+                    message["result"]["agentCapabilities"]["mcpCapabilities"] =
+                        json!({ "http": true });
+                    line = message.to_string();
+                }
+                line.push('\n');
+                if agent_w.write_all(line.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
         });
         let (reader, writer) = tokio::io::split(client_io);
 
@@ -106,7 +137,8 @@ impl Rig {
         let work = TempDir::new().expect("work dir");
         let clock = Arc::new(ManualClock::new(T0));
         let store = Arc::new(Store::open_with_clock(state.path(), clock).expect("store"));
-        let config = Config::new("mch_1", "agt_fake", work.path());
+        let mut config = Config::new("mch_1", "agt_fake", work.path());
+        configure(&mut config);
         let (sink, events) = MemorySink::new();
         let (commands, feed) = MemoryCommands::new();
         let bridge = Bridge::connect(
@@ -433,4 +465,83 @@ async fn session_config_for_an_unknown_thread_is_unknown_thread() {
     assert!(matches!(failure.code, CommandErrorCode::UnknownThread));
     assert!(rig.acp_calls().is_empty());
     rig.finish().await;
+}
+
+/// The methods the agent received, with the mode id of `session/set_mode`.
+fn received(rig: &Rig) -> Vec<String> {
+    rig.recorder
+        .messages()
+        .iter()
+        .filter_map(|m| {
+            let method = m["method"].as_str()?;
+            Some(match m["params"]["modeId"].as_str() {
+                Some(mode) => format!("{method}:{mode}"),
+                None => method.to_owned(),
+            })
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_initial_mode_is_set_before_the_first_prompt() {
+    let mut rig = Rig::start_with(Vec::new(), false, |config| {
+        config.initial_mode = Some("plan".to_owned());
+    })
+    .await;
+    rig.turn().await;
+    let methods = received(&rig);
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap();
+    assert!(
+        at("session/new") < at("session/set_mode:plan"),
+        "{methods:?}"
+    );
+    assert!(
+        at("session/set_mode:plan") < at("session/prompt"),
+        "{methods:?}"
+    );
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn an_initial_mode_the_agent_does_not_advertise_fails_the_task_without_a_prompt() {
+    let mut rig = Rig::start_with(Vec::new(), false, |config| {
+        config.initial_mode = Some("yolo".to_owned());
+    })
+    .await;
+    rig.feed.send(Command::Prompt {
+        thread_id: "th_1".into(),
+        task_id: "tk_1".into(),
+        message_id: "msg_u".into(),
+        parts: vec![ContentPart::Text { text: "go".into() }],
+        author: user(),
+    });
+    let events = rig.until(|e| matches!(e.event, Event::RunError(_))).await;
+    assert!(matches!(events.last().unwrap().event, Event::RunError(_)));
+    let methods = received(&rig);
+    assert!(
+        !methods.iter().any(|m| m == "session/prompt"),
+        "{methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m.starts_with("session/set_mode")),
+        "{methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_mcp_provider_gets_the_agents_advertised_capabilities() {
+    for advertised in [true, false] {
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let sink = Arc::clone(&seen);
+        let mut rig = Rig::start_with(Vec::new(), advertised, move |config| {
+            config.mcp_provider = Some(McpProvider::new(move |_thread, caps| {
+                *sink.lock().unwrap() = Some(caps.http);
+                Vec::new()
+            }));
+        })
+        .await;
+        rig.turn().await;
+        assert_eq!(*seen.lock().unwrap(), Some(advertised));
+        rig.finish().await;
+    }
 }

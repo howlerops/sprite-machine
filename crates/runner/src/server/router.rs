@@ -8,17 +8,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use protocol::acp::McpCapabilities;
 use protocol::tunnel::{Command, CommandErrorCode, Workspace};
 use sidecar::bridge::{
-    Bridge, CommandFailure, CommandSource, Config, EventSink, IncomingCommand, UlidIds,
+    Bridge, CommandFailure, CommandSource, Config, EventSink, IncomingCommand, McpProvider, UlidIds,
 };
 use sidecar::store::Store;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::project::{LastSession, Projects};
-use super::session::{SYNTHETIC_KEY_PREFIX, SessionCommands, SessionSink, SessionState};
+use super::session::{SessionCommands, SessionSink, SessionState};
 use super::worktree::Worktree;
 use super::{PermissionMode, SpawnMode, names, session_dir};
 use crate::harness::{self, Found};
@@ -37,6 +36,7 @@ pub(super) struct Context {
     pub capacity: usize,
     pub permission_mode: PermissionMode,
     pub name_prefix: String,
+    pub idle_timeout: Duration,
 }
 
 struct Session {
@@ -116,6 +116,10 @@ impl Router {
                 self.continue_last();
             }
             tokio::pin!(shutdown);
+            let period = (self.ctx.idle_timeout / 4)
+                .clamp(Duration::from_millis(10), Duration::from_secs(30));
+            let mut idle_check = tokio::time::interval(period);
+            idle_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     () = &mut shutdown => return Ok(()),
@@ -129,6 +133,7 @@ impl Router {
                     Some((thread_id, error)) = self.ended_rx.recv() => {
                         self.ended(&thread_id, error).await;
                     }
+                    _ = idle_check.tick() => self.end_idle_sessions().await,
                     joined = &mut client_task => {
                         client_result = Some(joined);
                         return Ok(());
@@ -167,6 +172,14 @@ impl Router {
         }
         let outcome = match &incoming.command {
             Command::Dispatch { .. } => self.dispatch(&incoming, &thread_id).await,
+            Command::Cancel { .. } if self.is_idle(&thread_id) => {
+                // Nothing runs: the cancel is the hub closing the session.
+                self.close(&thread_id).await;
+                self.commands
+                    .processed(incoming.seq, &incoming.idempotency_key)
+                    .await;
+                Ok(())
+            }
             _ => self.forward_existing(&incoming, &thread_id).await,
         };
         match outcome {
@@ -245,7 +258,6 @@ impl Router {
         let found = self.find(agent)?;
         self.check_capacity(thread_id)?;
         let mut command = incoming.command.clone();
-        let mut fresh = false;
         if !self.sessions.contains_key(thread_id) {
             let requested = PathBuf::from(&workspace.path);
             if !requested.is_dir() {
@@ -288,7 +300,6 @@ impl Router {
             if let Err(error) = self.projects.set_last_session(&requested, &last) {
                 tracing::warn!("could not save the last session: {error:#}");
             }
-            fresh = true;
         }
         // The session may run in a worktree: it is the session's directory that counts.
         if let (Command::Dispatch { workspace, .. }, Some(session)) =
@@ -299,12 +310,7 @@ impl Router {
                 ..workspace.clone()
             };
         }
-        self.send(thread_id, incoming, command)?;
-        // After the dispatch: the mode is set on the session the dispatch creates.
-        if fresh {
-            self.apply_permission_mode(thread_id);
-        }
-        Ok(())
+        self.send(thread_id, incoming, command)
     }
 
     async fn forward_existing(
@@ -349,25 +355,6 @@ impl Router {
                 format!("session {thread_id} has stopped"),
             )
         })
-    }
-
-    /// The permission mode of the runner, as a `session_config` the router makes up.
-    fn apply_permission_mode(&self, thread_id: &str) {
-        let mode = self.ctx.permission_mode;
-        if mode == PermissionMode::Default {
-            return;
-        }
-        if let Some(session) = self.sessions.get(thread_id) {
-            let _ = session.tx.send(IncomingCommand {
-                seq: 0,
-                idempotency_key: format!("{SYNTHETIC_KEY_PREFIX}{thread_id}"),
-                command: Command::SessionConfig {
-                    thread_id: thread_id.to_owned(),
-                    mode_id: Some(mode.as_str().to_owned()),
-                    config: None,
-                },
-            });
-        }
     }
 
     // ---- sessions ---------------------------------------------------------------------------
@@ -470,17 +457,29 @@ impl Router {
         store: Arc<Store>,
     ) -> Result<(), Reject> {
         let mut config = Config::new(self.ctx.machine_id.clone(), found.harness, cwd.clone());
-        // The agent's own MCP capabilities are known only after `initialize`, which the bridge
-        // runs itself: until the bridge exposes them, only stdio servers are passed.
-        match harness::local_mcp_servers(
-            &self.ctx.home,
-            &cwd,
-            &McpCapabilities::default(),
-            &harness::mcp::process_env(),
-        ) {
-            Ok(servers) => config.mcp_servers = servers,
-            Err(error) => tracing::warn!("no local MCP servers for the session: {error:#}"),
+        // The runner's mode is in force before the first prompt (the bridge fails the task if
+        // the agent does not take it). `default` is what an agent starts in.
+        if self.ctx.permission_mode != PermissionMode::Default {
+            config.initial_mode = Some(self.ctx.permission_mode.as_str().to_owned());
         }
+        // http / sse servers need the agent's `mcp_capabilities`, known after `initialize`.
+        let home = self.ctx.home.clone();
+        let mcp_cwd = cwd.clone();
+        config.mcp_provider =
+            Some(McpProvider::new(
+                move |_thread, caps| match harness::local_mcp_servers(
+                    &home,
+                    &mcp_cwd,
+                    caps,
+                    &harness::mcp::process_env(),
+                ) {
+                    Ok(servers) => servers,
+                    Err(error) => {
+                        tracing::warn!("no local MCP servers for the session: {error:#}");
+                        Vec::new()
+                    }
+                },
+            ));
         let state = Arc::new(SessionState::default());
         let (tx, rx) = mpsc::unbounded_channel();
         let sink = SessionSink {
@@ -531,29 +530,66 @@ impl Router {
         if let Some(error) = error {
             tracing::warn!(%thread_id, "session stopped: {error}");
         }
-        if let Some(session) = self.sessions.remove(thread_id)
+        // A session started again under the same id is not the one that ended.
+        if self
+            .sessions
+            .get(thread_id)
+            .is_some_and(|session| session.task.is_finished())
+            && let Some(session) = self.sessions.remove(thread_id)
             && let Some(worktree) = session.worktree
         {
             worktree.remove().await;
         }
     }
 
+    /// The thread has a session and no task.
+    fn is_idle(&self, thread_id: &str) -> bool {
+        self.sessions
+            .get(thread_id)
+            .is_some_and(|session| !session.state.active())
+    }
+
+    /// Ends the session of `thread_id`: the bridge stops (and its agent with it), the clean
+    /// worktree goes, and the slot is free. The thread stays stored: a later prompt reopens it.
+    async fn close(&mut self, thread_id: &str) {
+        let Some(Session {
+            tx, task, worktree, ..
+        }) = self.sessions.remove(thread_id)
+        else {
+            return;
+        };
+        drop(tx);
+        let mut task = task;
+        if tokio::time::timeout(WIND_DOWN, &mut task).await.is_err() {
+            tracing::warn!(%thread_id, "session did not stop in time");
+            task.abort();
+            let _ = task.await;
+        }
+        if let Some(worktree) = worktree {
+            worktree.remove().await;
+        }
+    }
+
+    /// Ends the sessions that have had no task for `--idle-timeout`.
+    async fn end_idle_sessions(&mut self) {
+        let timeout = self.ctx.idle_timeout;
+        let idle: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.state.idle_for(timeout))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for thread_id in idle {
+            tracing::info!(%thread_id, "session ended after the idle timeout");
+            self.close(&thread_id).await;
+        }
+    }
+
     /// Ends every session: the bridges stop (and their agents with them), then the worktrees go.
     async fn wind_down(&mut self) {
-        for (thread_id, session) in std::mem::take(&mut self.sessions) {
-            let Session {
-                tx, task, worktree, ..
-            } = session;
-            drop(tx);
-            let mut task = task;
-            if tokio::time::timeout(WIND_DOWN, &mut task).await.is_err() {
-                tracing::warn!(%thread_id, "session did not stop in time");
-                task.abort();
-                let _ = task.await;
-            }
-            if let Some(worktree) = worktree {
-                worktree.remove().await;
-            }
+        let ids: Vec<String> = self.sessions.keys().cloned().collect();
+        for thread_id in ids {
+            self.close(&thread_id).await;
         }
     }
 }
