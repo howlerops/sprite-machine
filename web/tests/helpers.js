@@ -7,8 +7,9 @@ let counter = 0;
 export const unique = (prefix) => `${prefix}-${Date.now().toString(36)}-${counter++}`;
 
 /** `{status, body}` of one API call. */
-export async function api(method, path, { token, body } = {}) {
+export async function api(method, path, { token, body, idempotencyKey } = {}) {
   const headers = {};
+  if (idempotencyKey) headers['idempotency-key'] = idempotencyKey;
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers['content-type'] = 'application/json';
   const reply = await fetch(`${base()}${path}`, {
@@ -89,13 +90,41 @@ export function setPresence(machineId, state) {
 }
 
 /** Dev fixture: a thread on a machine (`status`: idle, running, needs_you, done). */
-export function addThread(machineId, title, status = 'idle', threadId) {
+export function addThread(machineId, title, status = 'idle', threadId, { init = false } = {}) {
   return ok(
     api('POST', '/v1/dev/fixtures/threads', {
       token: ownerToken(),
-      body: { machine_id: machineId, title, status, thread_id: threadId },
+      body: { machine_id: machineId, title, status, thread_id: threadId, init },
     }),
     200,
+  );
+}
+
+/** Dev fixture: a thread hosted in the owner's org (a real Thread DO), ready for events. */
+export function addHostedThread(machineId, title = 'Transcript fixture') {
+  return addThread(machineId, title, 'idle', unique('th'), { init: true });
+}
+
+/** Appends one envelope through `POST /v1/dev/threads/{id}/events` (DEV_FIXTURES=1); the hub stamps `seq`. */
+export function appendEvent(threadId, envelope) {
+  return ok(
+    api('POST', `/v1/dev/threads/${threadId}/events`, {
+      token: ownerToken(),
+      body: { ...envelope, thread_id: threadId, seq: 0 },
+    }),
+    200,
+  );
+}
+
+/** A prompt from the owner; while a task runs it is queued (client-api §5.3). */
+export function sendPrompt(threadId, text) {
+  return ok(
+    api('POST', `/v1/threads/${threadId}/prompts`, {
+      token: ownerToken(),
+      body: { task_id: unique('tk'), parts: [{ type: 'text', text }] },
+      idempotencyKey: unique('idk'),
+    }),
+    202,
   );
 }
 

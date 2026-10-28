@@ -3,7 +3,7 @@
 //! | Route                                                  | Effect                                |
 //! | ------------------------------------------------------ | ------------------------------------- |
 //! | `POST /v1/dev/fixtures/machines/{machine_id}/presence` | `{state}`: set a machine's presence in D1 |
-//! | `POST /v1/dev/fixtures/threads`                        | `{machine_id, title, status?, thread_id?}`: upsert a thread index row |
+//! | `POST /v1/dev/fixtures/threads`                        | `{machine_id, title, status?, thread_id?, init?}`: upsert a thread index row; `init: true` also hosts it in the caller's org and runs the Thread DO init hook (WEB-002) |
 //!
 //! Both answer `404 not_found` unless the Worker var `DEV_FIXTURES` is `1`, and otherwise need an
 //! admin session of the org they change (the org comes from the session, never from the body).
