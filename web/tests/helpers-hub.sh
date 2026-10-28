@@ -13,6 +13,10 @@ set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HUB_DIR=$REPO/crates/hub
 
+# CI-002: the wasm32 build goes to a target dir keyed by this worktree's root, like
+# scripts/hub-test.sh, so another worktree's build never replaces the hub this run serves.
+WASM_TARGET_DIR=${CARGO_TARGET_DIR:-$REPO/target}/wasm-$(printf '%s' "$REPO" | sha256sum | cut -c1-16)
+
 # RUSTFLAGS (lld) is for the native target only; `strip` breaks worker-build 0.8.7.
 unset RUSTFLAGS RUSTC_WRAPPER
 export CARGO_PROFILE_RELEASE_STRIP=false
@@ -44,7 +48,7 @@ trap cleanup EXIT
 (cd "$HUB_DIR" && wrangler d1 migrations apply DB --local --persist-to "$STATE/persist") \
   >"$STATE/d1.log" 2>&1 || { cat "$STATE/d1.log" >&2; echo "FAIL: d1 migrations apply" >&2; exit 1; }
 
-(cd "$HUB_DIR" && exec setsid wrangler dev --local --ip 127.0.0.1 --port "$SM_PORT" \
+(cd "$HUB_DIR" && exec env HUB_WASM_TARGET_DIR="$WASM_TARGET_DIR" setsid wrangler dev --local --ip 127.0.0.1 --port "$SM_PORT" \
   --persist-to "$STATE/persist" \
   --var "BOOTSTRAP_OWNER_TOKEN:$BOOTSTRAP_OWNER_TOKEN" \
   --var "ATTACHMENT_SIGNING_KEY:$ATTACHMENT_SIGNING_KEY" \

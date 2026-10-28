@@ -13,6 +13,9 @@ import { request } from '/src/api.js';
 import { Transcript } from '/src/transcript.js';
 import { h, renderTranscript, sessionText, usageText } from '/src/render.js';
 import { normaliseMachine } from '/src/sessions.js';
+import { setApprovalThread } from '/src/approval.js';
+import { mountComposer } from '/src/composer.js';
+import { clearOutbox } from '/src/outbox.js';
 
 export const MACHINE_POLL_MS = 5000;
 const PING_MS = 25000;
@@ -54,6 +57,7 @@ export function clearThreadCaches() {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('sm.thread.')) localStorage.removeItem(key);
     }
+    clearOutbox();
   } catch {
     // Storage blocked: nothing was kept.
   }
@@ -92,7 +96,9 @@ export function mountThread(host, threadId) {
   const session = h('p', { id: 'session-state', class: 'state-line', hidden: true });
   const list = h('div', { id: 'transcript', class: 'transcript', role: 'log', 'aria-label': 'Transcript' });
   const empty = h('p', { id: 'transcript-empty', class: 'empty' }, 'No messages yet.');
-  host.replaceChildren(status, waiting, usage, session, list, empty);
+  setApprovalThread(threadId);
+  const composer = mountComposer(threadId);
+  host.replaceChildren(status, waiting, usage, session, list, empty, composer.el);
 
   function setConnection(state, text) {
     status.dataset.state = state;
@@ -108,6 +114,7 @@ export function mountThread(host, threadId) {
     session.textContent = sessionLine;
     session.hidden = !sessionLine;
     renderWaiting(merged.thread);
+    composer.setPending(merged.thread && merged.thread.pending_tasks);
   }
 
   function renderWaiting(thread) {
@@ -156,6 +163,7 @@ export function mountThread(host, threadId) {
   function applyEnvelope(envelope) {
     if (model.apply(envelope)) {
       log.push(envelope);
+      composer.observe(envelope);
       scheduleSave();
     }
     scheduleRender();
@@ -274,7 +282,10 @@ export function mountThread(host, threadId) {
   const cached = loadCache(threadId);
   if (cached) {
     for (const envelope of cached.events) {
-      if (model.apply(envelope)) log.push(envelope);
+      if (model.apply(envelope)) {
+        log.push(envelope);
+        composer.observe(envelope);
+      }
     }
     model.setStates(cached.states);
     render();
@@ -292,6 +303,7 @@ export function mountThread(host, threadId) {
     document.removeEventListener('visibilitychange', onVisible);
     window.removeEventListener('pagehide', flush);
     if (socket) socket.close();
+    composer.stop();
     flush();
   };
 }

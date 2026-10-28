@@ -479,3 +479,99 @@ a:focus-visible {
   background: var(--off-bg);
   color: var(--off);
 }
+
+/* Composer, queued chips, Allow/Deny */
+.composer {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 0 max(10px, env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  resize: vertical;
+}
+
+.composer-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composer-bar .primary {
+  margin-left: auto;
+}
+
+.composer [hidden] {
+  display: none;
+}
+
+.composer p {
+  margin: 0;
+}
+
+.pending-chips {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+}
+
+.pending-chip .chip-text {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chip-remove {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+}
+
+.approval {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.approval-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.approval-note:empty {
+  display: none;
+}
+
+.approval button:disabled,
+.composer button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

@@ -1,6 +1,8 @@
 // Transcript items (transcript.js) to DOM. Event text is untrusted: every string goes in with
 // textContent, never as HTML.
 
+import { approvalControls, approvalNote } from '/src/approval.js';
+
 /** `h('div', {class: 'x', 'data-k': 'v'}, child | 'text', ...)`. */
 export function h(tag, attrs = {}, ...children) {
   const element = document.createElement(tag);
@@ -231,6 +233,8 @@ function interruptItem(item) {
         { class: 'muted' },
         `${outcomeText(resolved)}${item.resolved_by ? ` by ${author(item.resolved_by)}` : ''}`,
       ),
+    !resolved && approvalControls(item),
+    approvalNote(item),
     !resolved && item.expires_at && h('p', { class: 'muted' }, `Expires ${item.expires_at}`),
   );
 }
