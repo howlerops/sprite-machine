@@ -5418,7 +5418,8 @@ items:
     title: 'hub: scheduled purge of expired subscribe_tickets (and of other short-lived rows in one place)'
     milestone: M2
     phase: P4
-    status: "assigned"
+    status: "done"
+    evidence: "merged; hub+runner tests 441 passed on merged tree, clippy incl. wasm clean"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -6046,7 +6047,8 @@ items:
     title: 'runner tui: a line typed while a task runs is queued behind it (like a phone prompt at the hub) or the TUI says busy; never dropped silently'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged with the leak fix; runner tui 48 passed; e2e rc PASS on merged tree (after leader fix of the strip-tool copy)"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -6183,3 +6185,22 @@ items:
     verify:
       - 'cargo test -p runner --test tui'
       - 'cargo run -p cli -- e2e rc'
+
+  - id: M3-002c
+    title: 'client (desktop): the signed-in session creates its client_core::Connection and calls AppShell::follow_connectivity; hub field feedback (saved/refused strings, Save control); changing the hub signs out with a clear notice'
+    milestone: M3
+    phase: P3
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-002a]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/locales/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    context:
+      - 'docs/ledger/reports/M3-002a.md (Notes, Discovered work)'
+    acceptance:
+      - 'After sign-in the banner follows a real Connection (headless test with a fake hub); the hub field shows saved/refused messages from Fluent strings; saving a different hub while signed in signs out and says why'
+    verify:
+      - 'cargo test -p client-gpui --test shell'

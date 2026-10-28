@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 127/285 (4 dropped) · in-flight M2-008j,M2-003f,M2B-019a,M3-002a · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 122/200
+done 129/286 (4 dropped) · in-flight M2-003f,M3-002a · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 122/200
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 127/285 (4 dropped) · in-flight M2-008j,M2-003f,M2B-019a,M3-002a · blocke
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 62 | 1 |
-| P3 | 30 | 12 | 2 |
-| P4 | 58 | 0 | 1 |
+| P2 | 69 | 63 | 0 |
+| P3 | 31 | 12 | 2 |
+| P4 | 58 | 1 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 17 | 0 | 0 |
@@ -89,7 +89,7 @@ done 127/285 (4 dropped) · in-flight M2-008j,M2-003f,M2B-019a,M3-002a · blocke
 | M2B-014d | worker | rust | done | notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine |
 | M2B-010a | worker | rust | done | hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree |
 | M1B-008e | worker | docs | done | Bench prep for M1B-008c: run-desktop.sh sets GPUI_SPIKE_WORKLOAD=common; the terminal pane loops its fixture output; terminal/approval repaints are logged |
-| M2B-019a | worker | rust | assigned | runner tui: a line typed while a task runs is queued behind it (like a phone prompt at the hub) or the TUI says busy; never dropped silently |
+| M2B-019a | worker | rust | done | runner tui: a line typed while a task runs is queued behind it (like a phone prompt at the hub) or the TUI says busy; never dropped silently |
 
 ## Waiting on the human
 

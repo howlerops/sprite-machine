@@ -264,3 +264,4 @@
 2026-10-28T21:58Z M3-002 verify green → done
 2026-10-28T21:59Z assign M3-002a (haiku, client lane), M2-008j (haiku, P4 rust: the P3 rust queue is empty until M2B-019a lands)
 2026-10-28T22:14Z MVP-000h done (wrangler ready in 15 s with the lock held). M2-003f live test fails (configured bootstrap login gets access_denied) → attempt 2 (sonnet; attempt-1 worktree gone). M2-008j (haiku) and M2B-019a fix (leak + refusal test) merged; merged-tree verify running
+2026-10-28T22:20Z merged-tree verify: sleep_logind release tests flaky (mock's fd closes async) → leader made them wait_for EOF (5/5 pass); e2e rc failed copying current_exe '(deleted)' (MVP-000h strip tool vs shared target) → copy /proc/self/exe on Linux; e2e rc PASS. M2-008j, M2B-019a done. M3-002a back (haiku) → merged; added M3-002c
