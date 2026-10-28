@@ -117,3 +117,6 @@
 2026-10-28T06:06Z M1B-008d assigned→done merged 071a6ef (haiku)
 2026-10-28T06:09Z M2B-004 assigned→done merged 51725de (sonnet; Cargo.toml dep union conflict with M2B-011 resolved by leader); added M2B-004a (durability, high), M2B-004b (wss), M2B-004c (presence/thread_open)
 2026-10-28T06:21Z M1B-004d review→done (leader release build: 41.0 MB stripped, under the 80 MB desktop gate; separate release target deleted after)
+2026-10-28T06:22Z M1B-008b phase P1→P2 (benchmark workload feeds M1B-008c/M1B-009, both P2; not part of the P1 Engine deliverable)
+2026-10-28T06:22Z leader: CI jobs fail in ~3 s with no logs since run 51 (04:47Z), no workflow change → added CI-001 (human: Actions billing/limit). Local verification stands in until it is fixed
+2026-10-28T06:24Z M2-014 blocked (human): permission check refused creating sm-hub D1/R2/queue in the shared Cloudflare account; commands in docs/ops/hub.md; secrets split to M2-014a (human, after M2-015). M0-009 blocked (human) for the same reason (preview deploy)

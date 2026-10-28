@@ -502,6 +502,9 @@ items:
     title: 'Sandbox spike: start/exec/stop on the deployed preview env; cold start + wake timings'
     milestone: M0
     phase: P2
+    status: "blocked"
+    howto: "Needs `wrangler deploy --env preview` of workers/workspace into the shared Cloudflare account; the session permission check refuses creating resources there (seen on M2-014). Allow the leader to run `wrangler deploy --env preview` in workers/workspace (and create/delete sm-spike-* sandboxes), or deploy it yourself and give the leader the Worker URL."
+    blocked_on: "human"
     priority: 1
     owner: leader
     deps: [M0-018, M0-008a]
@@ -1613,7 +1616,7 @@ items:
   - id: M1B-008b
     title: 'gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript'
     milestone: M1b
-    phase: P1
+    phase: "P2"
     lane: client
     size: M
     risk: low
@@ -2214,10 +2217,26 @@ items:
     verify:
       - 'bash scripts/hub-test.sh telemetry'
 
+  - id: CI-001
+    title: 'GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z)'
+    milestone: M0
+    phase: P2
+    owner: human
+    status: "blocked"
+    blocked_on: human
+    deps: []
+    acceptance:
+      - 'A push to v2 runs the rust.yml linux, macos and tracer jobs to completion again'
+    verify: []
+    howto: 'Open https://github.com/howlerops/sprite-machine/actions/runs/40643390008 and read the annotation on any job. The usual cause for jobs that end in seconds with no log is account billing: Actions minutes used up or a spending limit of $0 (macOS minutes count 10x). Fix it under the account or org Settings -> Billing and plans -> Spending limits / payment method. If the annotation says something else, tell the leader. Nothing in the workflow changed between the last green run (50) and the first failed one (51).'
+
   - id: M2-014
     title: 'Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler'
     milestone: M2
     phase: P2
+    status: "blocked"
+    howto: "The session permission check refused `wrangler d1 create` / `r2 bucket create` / `queues create` in the shared Cloudflare account (Modify Shared Resources). Either run the three commands in docs/ops/hub.md yourself (from crates/hub, with the token env set) and tell the leader, or add a Claude Code permission rule allowing `wrangler d1 create sm-hub*`, `wrangler r2 bucket create sm-hub*`, `wrangler queues create sm-hub*` for this repo. Secrets moved to M2-014a (after the first deploy)."
+    blocked_on: "human"
     owner: leader
     deps: [M0-018, M2-001, M2-016]
     paths:
@@ -2232,6 +2251,17 @@ items:
     verify:
       - 'test -s docs/ops/hub.md'
       - 'wrangler d1 list --json | jq -e ''map(.name) | index("sm-hub") != null'''
+
+  - id: M2-014a
+    title: 'Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var'
+    milestone: M2
+    phase: P2
+    owner: human
+    deps: [M2-015]
+    acceptance:
+      - '`wrangler secret list --env production` (crates/hub) lists MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY'
+    verify: []
+    howto: 'Follow docs/ops/hub.md "Secrets". You choose BOOTSTRAP_OWNER_TOKEN and keep it; never paste any secret into chat, commits or the ledger.'
 
   - id: M2-015
     title: 'hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc'

@@ -2,63 +2,62 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 55/214 (3 dropped) · in-flight — · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 50/120
+done 55/216 (3 dropped) · in-flight — · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 50/120
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 38 | 37 | 0 |
-| P2 | 34 | 2 | 0 |
+| P1 | 37 | 37 | 0 |
+| P2 | 37 | 2 | 0 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
 
-## P1 items
+## P2 items
 
 | Item | Owner | Lane | Status | Title |
 | ---- | ----- | ---- | ------ | ----- |
-| MVP-000a | worker | rust | done | Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile |
-| MVP-000c | worker | rust | done | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
-| MVP-000b | worker | rust | done | CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2 |
-| SPEC-001a | leader | docs | done | Spec: settle the open points found by the ACP→TurnEvent mapper (turn-event.md) |
-| SPEC-003 | leader | docs | done | Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage |
-| M0-008a | worker | ts | done | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
-| M0-008b | worker | rust | done | hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests |
-| M1A-001 | worker | rust | done | sidecar (runner-core lib): config, tracing, /healthz server fn |
-| M1A-003 | worker | rust | done | sidecar (runner core): ACP client + session table (concurrency, pending tasks) |
-| M1A-004 | worker | rust | done | sidecar (runner core): ACP client-side fs + terminals (tee to Activity{terminal}) |
-| M1A-006a | worker | rust | done | protocol::mapping ACP→TurnEvent + golden tests |
-| M1A-006b | worker | rust | done | runner bridge: ACP client → mapping → TurnEvents to the tunnel client (EventSink) |
-| M1A-007 | worker | rust | done | Permission / elicitation ⇄ Interrupt, cancel races (TurnEvent terms) |
-| SPEC-002b | leader | docs | done | Spec: tunnel session_config command + client-api POST /v1/threads/{id}/session |
-| SPEC-002a | leader | docs | done | Spec: tunnel approval command carries every interrupt outcome (selected, submitted+data, declined, cancelled) |
-| M1A-009 | worker | rust | done | Durable store (SQLite) + ACP session re-attach after restart |
-| M1A-013 | worker | rust | done | Session config: commands, modes, config options, pending tasks (StateDelta{session}) |
-| M1A-014 | worker | rust | done | Attachments: user FilePart → ACP image/resource blocks |
-| M1A-014a | worker | rust | done | Attachments follow-ups: bridge-level test that a failed fetch never submits; sniff image bytes vs declared MIME |
-| M1B-004b | worker | client | done | gpui spike: diff pane (gpui-kit editor) |
-| M1B-004c | worker | client | done | gpui spike: terminal pane (alacritty_terminal) |
-| M1B-004d | worker | client | done | gpui spike: approval card + build release |
-| M1B-008 | worker | docs | done | Benchmark scripts per gates.yaml |
-| M1B-008a | worker | client | done | gpui spike: bench hooks (fixture feed, BENCH_MARKER, frame and key-to-glyph JSONL) |
+| MVP-000f | worker | rust | todo | Hub wasm: drop the name section (34% of the binary) without strip |
+| M0-009 | leader | rust | blocked | Sandbox spike: start/exec/stop on the deployed preview env; cold start + wake timings |
+| M0-018 | human | rust | done | Provide a Cloudflare account + API token |
+| M1A-004a | worker | rust | done | sidecar terminal/fs hardening: SIGKILL escalation on terminal/kill, openat-style fs I/O (no TOCTOU), cleanup when the waiter thread fails to spawn |
+| M1A-006c | worker | rust | todo | runner bridge robustness: harness restart, byte-faithful raw updates, session snapshot at start, stale approvals, MCP servers on new/resume |
 | M1B-008b | worker | client | todo | gpui spike: common workload (5k-line diff, terminal output, one approval card) alongside the streaming transcript |
-| M1B-008d | worker | docs | done | scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver) |
-| M2-001 | worker | rust | done | hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings |
-| M2-016 | worker | rust | done | hub: D1 schema + migrations (org-wide metadata) |
-| M2-003a | worker | rust | done | hub: session tokens, auth middleware, roles + audit log in D1, bootstrap owner |
-| M2-008 | worker | rust | done | hub: Thread Durable Object (event log, subscriptions, interrupts, pending tasks, cancel) |
-| M2B-001 | worker | rust | done | protocol: tunnel frame types per SPEC-002 (types + tests only) |
-| M2B-001a | worker | rust | done | protocol: strict tunnel frame parsing + unknown command kind helper |
-| M2B-002 | worker | rust | done | hub: Machine Durable Object (tunnel endpoint, presence, offline queue, ack) + agents.kind migration |
-| M2B-003 | worker | rust | done | sidecar: HostMode trait (local | sandbox); sidecar is the runner-core library |
-| M2B-004 | worker | rust | done | runner: tunnel client with reconnect/backoff/resume |
-| M2B-011 | worker | rust | done | runner: local checkpoints as shadow git commits |
-| M3-001 | worker | rust | done | client-core: TurnEvent subscription client, view models, cache, outbound queue |
-| M3-001a | worker | rust | done | client-core: cache raw envelope JSON so unknown event types survive a restart; outbox failures drive the connectivity banner |
+| M1B-008c | leader | docs | todo | Run spikes/bench/run-desktop.sh for real on Linux and commit results/gpui-kit/desktop_linux |
+| M1B-009 | leader | docs | todo | ADR 0001a: desktop client stack (no devices needed) |
+| M2-008b | worker | rust | todo | hub: POST /v1/threads/{id}/session (client-api §5.5a) + acp-mock session/set_mode and set_config_option |
+| M2-008c | worker | rust | todo | hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO |
+| MVP-000d | worker | rust | todo | Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer |
+| M2B-004a | worker | rust | todo | Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight |
+| M2B-004b | worker | rust | todo | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
+| M2B-004c | worker | rust | todo | runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads |
+| M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
+| M2-009 | worker | rust | todo | hub: attachments in R2 + signed URLs |
+| M2-010 | worker | rust | todo | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
+| M2-011 | worker | rust | todo | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
+| CI-001 | human | rust | blocked | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
+| M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
+| M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
+| M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
+| M2B-005 | worker | rust | todo | runner: `sm login` device-code pairing + trusted device + keychain |
+| M2B-006 | worker | rust | todo | runner: local harness discovery + local logins/MCP passthrough |
+| M2B-007 | worker | rust | todo | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
+| M2B-008 | worker | rust | todo | runner: workspace trust prompt + remote-terminal opt-in |
+| M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |
+| M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |
+| M2B-011a | worker | rust | todo | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
+| M2B-012 | worker | rust | todo | Attachments from phone → local files / image blocks |
+| M2B-014 | worker | rust | todo | Presence + reconnect notifications on the phone |
+| M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
+| M2B-020 | human | rust | blocked | Real-device Remote Control check |
+| WEB-001 | worker | rust | todo | web: mobile web page — pairing (QR / device code) + session list with presence |
+| WEB-002 | worker | rust | todo | web: transcript rendering for every TurnEvent variant |
+| WEB-003 | worker | rust | todo | web: composer with attachments + Allow/Deny + Stop |
+| WEB-004 | worker | rust | todo | web: PWA + Web Push |
 
 ## Waiting on the human
 
@@ -68,6 +67,7 @@ done 55/214 (3 dropped) · in-flight — · blocked 8 (human: M0-014, M0-020, M1
 | M0-020 | P4 | Cloudflare dashboard → Secrets Store (account level) → create a store if there is none → Create secret: a name such as ANTHROPIC_API_KEY, the value = your model API key (e.g. Anthropic), scope Workers. Tell the leader only the secret name and the store id. Never paste the key into chat. The Workspace DO outbound handler injects it for api.anthropic.com (plan §4.3); it never enters a sandbox. |
 | M1B-001 | P7 | Provide an Apple Developer account, a physical iPhone, a mid-range Android phone, and a Mac or approval for GitHub macOS runners (iOS cannot build in the Linux container). |
 | M1B-010 | P7 | Build both spikes on a Mac per their READMEs; run spikes/bench on the iPhone and Android; commit results to spikes/bench/results/ with screen recordings for hard gates. |
+| CI-001 | P2 | Open https://github.com/howlerops/sprite-machine/actions/runs/40643390008 and read the annotation on any job. The usual cause for jobs that end in seconds with no log is account billing: Actions minutes used up or a spending limit of $0 (macOS minutes count 10x). Fix it under the account or org Settings -> Billing and plans -> Spending limits / payment method. If the annotation says something else, tell the leader. Nothing in the workflow changed between the last green run (50) and the first failed one (51). |
 | M2B-020 | P2 | After the hub is deployed (M2-015): install `sm` on your laptop, run `sm login` and approve it from your phone, run `sm rc` in a real repo with your own claude login, open the session link in your phone browser (mobile web page; add it to the home screen for push). Follow docs/remote-control-parity.md: start in the terminal, continue on the phone, close the laptop lid, reopen. Note any gaps. Native-app checks come later (M3-016). |
 | M3-016 | P7 | Install the build on both phones; run docs/ux/mobile-checklist.md; commit results. |
 | M6-002 | P7 | Create a Cloudflare API token scoped to the promotion target account (it may be a different account from the hub's): Account → Workers Scripts Edit, Containers Edit (or "Cloudchamber"), Workers R2 Storage Edit and D1 Edit if the promoted service uses them; Zone → Workers Routes Edit only for a custom domain. Enter it in the app's org settings (stored encrypted, M2-002). Record its scopes (no secret) in docs/ops/deploy-tokens.md. Never paste it into chat. |
