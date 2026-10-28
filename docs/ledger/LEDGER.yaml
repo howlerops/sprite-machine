@@ -2780,7 +2780,8 @@ items:
     title: 'Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; verify18: fmt, clippy live+wasm, cargo test -p hub 283/0, live tasks/links/thread_do/authz/subscribe_ticket/smoke PASS, playwright transcript+pairing 18/18"
     assignee: "sonnet"
     attempt: 1
     lane: rust
