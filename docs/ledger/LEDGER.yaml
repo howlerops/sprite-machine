@@ -185,7 +185,8 @@ items:
     title: 'CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2'
     milestone: M0
     phase: P1
-    status: "assigned"
+    status: "review"
+    evidence: "merged 55a802f; awaiting first green tracer job on GitHub"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1

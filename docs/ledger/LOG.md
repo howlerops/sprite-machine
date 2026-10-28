@@ -42,3 +42,4 @@
 2026-10-28T00:28Z M2-001 assigned→done merged bad9ea5 (worker hit disk-full mid-attempt, resumed same attempt; discovered: JSON 405 noted for M2-008; hub size profile = MVP-000a)
 2026-10-28T00:28Z MVP-000b todo→assigned attempt 1 (haiku, CI only)
 2026-10-28T00:28Z M1B-002 resumed (same attempt) after M2-001
+2026-10-28T00:29Z MVP-000b assigned→review merged 55a802f; done when the CI tracer job is green

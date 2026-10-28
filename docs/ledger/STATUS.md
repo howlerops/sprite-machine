@@ -4,7 +4,7 @@ _Rewritten by the leader on every ledger commit._
 
 done 20/191 (3 dropped) · in-flight MVP-000b,M1B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 17/120
 
-Batch 8: M2-001 merged; M1B-002 resumed; MVP-000b assigned.
+MVP-000b merged, waiting for its first CI run; M1B-002 in flight.
 
 ## Per phase
 
