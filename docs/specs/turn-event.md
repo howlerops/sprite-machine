@@ -349,6 +349,7 @@ the Thread DO). Messages from the hub are JSON objects:
 | `{"type":"snapshot","at_seq":K,"states":{...}}` | Current `StateSnapshot` content per scope (`session`, `usage`, `thread`, `flow` when present), as of seq `K`. Not a log event; has no seq. |
 | `{"type":"event","envelope":{...}}`             | One stored envelope.                                                                                                                       |
 | `{"type":"live"}`                               | Catch-up done; everything after this is live.                                                                                              |
+| `{"type":"error","code":C}`                     | Replay failed (`internal`); the hub closes the socket. See step 5.                                                                         |
 
 Catch-up algorithm (Thread DO):
 
@@ -360,6 +361,13 @@ Catch-up algorithm (Thread DO):
    `seq ≥ R` in order, then `live`, then live events.
 3. Clients deduplicate by `seq`: events with `seq ≤` their last applied seq only rebuild
    in-progress state. A client never re-POSTs to catch up.
+4. **State floor** (M2-008a): the hub keeps state history only for the newest 50 runs; older
+   state changes are compacted into one snapshot per scope at the **floor** (the seq before
+   the oldest retained run). A request with `R` below the floor replays from the floor
+   (`hello.replay_from` = floor + 1, snapshot as of the floor). Events below the floor stay in
+   the log; a client that needs them pages the event log (future route), not the subscription.
+5. If the store fails mid-replay, the hub sends `{"type":"error","code":"internal"}` instead of
+   `live` and closes; the client reconnects with its last applied seq.
 
 Clients **send** nothing on the subscription except `{"type":"ping"}` (answered with
 `{"type":"pong"}`); commands (prompts, approvals, cancel) go through the HTTP API with
