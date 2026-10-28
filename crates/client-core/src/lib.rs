@@ -10,7 +10,8 @@
 //! - [`cache`]: SQLite (bundled): the stored log per thread and the persisted outbox.
 //! - [`outbox`]: the outbound queue with idempotency keys, backoff with jitter, and 409
 //!   conflicts surfaced with the resolver.
-//! - [`connectivity`]: online / connecting / offline.
+//! - [`connectivity`]: online / connecting / offline, and [`Connection`], the owner of the
+//!   subscription and the outbox that publishes the one banner state.
 //! - [`tracer`]: the MVP-000 headless client, as an adapter over the above.
 
 pub mod cache;
@@ -23,7 +24,7 @@ pub mod tracer;
 pub mod view;
 
 pub use cache::{Cache, CacheError};
-pub use connectivity::Connectivity;
+pub use connectivity::{Connection, Connectivity};
 pub use outbox::{
     Clock, FlushReport, HttpTransport, Intent, IntentState, ManualClock, Outbox, OutboxError,
     PostRequest, PostResponse, QueuedIntent, Random, RetryPolicy, SystemClock, SystemRandom,

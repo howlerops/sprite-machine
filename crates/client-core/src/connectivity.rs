@@ -1,4 +1,14 @@
 //! Connectivity as the UI shows it: a banner while the client is not live.
+//!
+//! [`Connection`] is the one owner of the two links: the thread subscription and the outbox.
+//! It publishes the combined state on a watch channel after each call that can change either
+//! link, and the channel only sees a change when the banner state changes.
+
+use tokio::sync::watch;
+
+use crate::cache::Cache;
+use crate::outbox::{Clock, FlushReport, Intent, Outbox, OutboxError, Random, Transport};
+use crate::sync::{Applied, Subscription, SubscriptionError};
 
 /// The client's link to the hub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,6 +40,100 @@ impl Connectivity {
             Self::Online => None,
             Self::Offline => Some("Offline: changes will be sent when you reconnect"),
         }
+    }
+}
+
+/// The owner of the hub link for the UI: the subscription and the outbox, one banner state.
+pub struct Connection {
+    subscription: Subscription,
+    outbox: Outbox,
+    combined: watch::Sender<Connectivity>,
+}
+
+impl Connection {
+    /// Takes both links. The published state starts as their combination.
+    pub fn new(subscription: Subscription, outbox: Outbox) -> Self {
+        let state = subscription.connectivity().combine(outbox.connectivity());
+        Self {
+            subscription,
+            outbox,
+            combined: watch::channel(state).0,
+        }
+    }
+
+    pub fn subscription(&self) -> &Subscription {
+        &self.subscription
+    }
+
+    pub fn outbox(&self) -> &Outbox {
+        &self.outbox
+    }
+
+    /// The combined state, as of the last call that changed a link.
+    pub fn connectivity(&self) -> Connectivity {
+        *self.combined.borrow()
+    }
+
+    /// A receiver for the combined state. It sees each change of the banner state, never a
+    /// repeat of the same state.
+    pub fn watch_connectivity(&self) -> watch::Receiver<Connectivity> {
+        self.combined.subscribe()
+    }
+
+    /// [`Subscription::next_persisted`], then the combined state is published.
+    pub async fn next_persisted(
+        &mut self,
+        cache: &mut Cache,
+    ) -> Result<Applied, SubscriptionError> {
+        let applied = self.subscription.next_persisted(cache).await;
+        self.publish();
+        applied
+    }
+
+    /// [`Subscription::reconnect`], then the combined state is published.
+    pub async fn reconnect(&mut self) -> Result<(), SubscriptionError> {
+        let result = self.subscription.reconnect().await;
+        self.publish();
+        result
+    }
+
+    /// Queues an intent. Queuing does not change either link.
+    pub fn enqueue(
+        &mut self,
+        cache: &Cache,
+        intent: Intent,
+        now_ms: u64,
+    ) -> Result<i64, OutboxError> {
+        self.outbox.enqueue(cache, intent, now_ms)
+    }
+
+    /// [`Outbox::flush`], then the combined state is published.
+    pub async fn flush<T: Transport>(
+        &mut self,
+        cache: &Cache,
+        transport: &T,
+        base_url: &str,
+        clock: &dyn Clock,
+        rng: &mut dyn Random,
+    ) -> Result<FlushReport, OutboxError> {
+        let report = self
+            .outbox
+            .flush(cache, transport, base_url, clock, rng)
+            .await;
+        self.publish();
+        report
+    }
+
+    fn publish(&self) {
+        let state = self
+            .subscription
+            .connectivity()
+            .combine(self.outbox.connectivity());
+        self.combined.send_if_modified(|current| {
+            let changed = *current != state;
+            *current = state;
+            changed
+        });
     }
 }
 
