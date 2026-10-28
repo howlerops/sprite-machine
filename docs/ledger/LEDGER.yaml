@@ -5622,6 +5622,9 @@ items:
     title: 'notify: machine_back goes to every subscription of each user (like the other kinds) and its payload carries machine_id; the title names the machine'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low

@@ -230,3 +230,4 @@
 2026-10-28T16:42Z WEB-003 done (playwright 32/32), M3-001j done. M2B-005f merged; verify19 running (workspace, machine_do re-run, devices, presence_notify, smoke, tracer). Added M2-008k (P2, pending DELETE member-level per spec), M2B-014d (P2, machine_back to every subscription + machine_id), M2B-014c, WEB-003a (P4). Assign M2B-010 (sonnet, M), WEB-004 (sonnet), M2-008k (haiku)
 2026-10-28T17:19Z verify19 green (workspace 860/0) → M2B-014, M2B-005f done
 2026-10-28T17:20Z WEB-004 back (sonnet): PWA, sw shell cache (never /v1), VAPID subscribe, click/Allow/Deny actions; push leg tested via decrypting fake service + CDP deliver → merged; full playwright running. Spec fix: vapid-public-key answers {public_key} (as shipped). Added WEB-005, WEB-004a (P4)
+2026-10-28T17:20Z assign M2B-014d (haiku)
