@@ -3613,7 +3613,8 @@ items:
     title: 'E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; on merged tree: cli clippy clean, cargo run -p cli -- e2e rc PASS (116s), playwright rc.spec.js 4/4"
     assignee: "sonnet"
     attempt: 1
     risk: high
