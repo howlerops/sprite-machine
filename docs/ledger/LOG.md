@@ -194,3 +194,4 @@
 2026-10-28T12:54Z WEB-001 → done, M2B-008 → done (verify14: playwright 9, hub+runner 412, tracer)
 2026-10-28T12:54Z M2-008a merged 727012e; full verify (12 live suites + playwright + tracer) running. WEB-002 assigned (haiku)
 2026-10-28T12:55Z M2B-002b assigned (haiku), M2B-012 assigned (haiku, e2e)
+2026-10-28T12:56Z M2B-012 blocked on paths (FilePolicy hardcoded in sidecar bridge runtime) → leader widened paths (sidecar bridge Config file_policy, test-only), worker resumed on the same attempt. Lesson noted: include the call site of any policy the item must change
