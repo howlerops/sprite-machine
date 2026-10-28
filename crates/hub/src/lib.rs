@@ -5,6 +5,7 @@
 //! wasm32 only, so `cargo test -p hub` runs on the host.
 
 pub mod router;
+pub mod threads;
 pub mod tracer;
 
 /// The Worker entries: axum router, `fetch` and `queue`.
