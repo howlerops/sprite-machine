@@ -187,3 +187,4 @@
 2026-10-28T12:18Z M2B-007b back (haiku; one denied self interrupt_session call). M1A-006g blocked on two one-line out-of-path origin fields → leader allowed them; worker finishing. Added M2B-007c (P4 hygiene)
 2026-10-28T12:25Z M2-003c → done (verify12: 774 passed; signin/devices/authz/thread_create/machine_do; tracer). M2B-007b and M1A-006g merged (router.rs auto-merged); verify running
 2026-10-28T12:26Z M2B-008 assigned (haiku), M2-008a assigned (haiku; paths += cli e2e for DEV_FIXTURES var). M2B-012 re-scoped to an end-to-end proof (pieces exist from M1A-014 + M2-009)
+2026-10-28T12:33Z WEB-001 back (sonnet; out-of-path web/.assetsignore accepted). Added M2B-002b (machines list shape per §5.1, live dev-fixtures 404)
