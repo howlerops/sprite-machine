@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 28/194 (3 dropped) · in-flight M1B-004c,M2-016,M2-008 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 26/120
+done 29/194 (3 dropped) · in-flight M1B-004c,M2-016,M2-008 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 27/120
 
 P1 running.
 
@@ -11,7 +11,7 @@ P1 running.
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
-| P1 | 32 | 11 | 3 |
+| P1 | 32 | 12 | 3 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |
@@ -26,7 +26,7 @@ P1 running.
 | MVP-000a | worker | rust | done | Hub build hygiene: crates/hub/.gitignore + a size-optimised wasm release profile |
 | MVP-000c | worker | rust | todo | Hub wasm size: find and cut what makes the hub bundle 3x the spike (412 KB vs 148 KB gzip) |
 | MVP-000b | worker | rust | done | CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2 |
-| SPEC-001a | leader | docs | todo | Spec: settle the open points found by the ACP→TurnEvent mapper (turn-event.md) |
+| SPEC-001a | leader | docs | done | Spec: settle the open points found by the ACP→TurnEvent mapper (turn-event.md) |
 | SPEC-003 | leader | docs | done | Spec: client HTTP API (threads, prompts, interrupt answers, cancel, pending tasks) + who emits UserMessage |
 | M0-008a | worker | ts | done | workers/workspace: TypeScript Workspace DO skeleton (@cloudflare/sandbox 1.0), wrangler config, typed RPC surface, vitest |
 | M0-008b | worker | rust | todo | hub ↔ Workspace DO binding from Rust (DO namespace fetch/RPC), with a fake for native tests |

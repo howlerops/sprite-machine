@@ -64,3 +64,4 @@
 2026-10-28T02:31Z M2-008 paths += tracer/{thread,state,mod}.rs + router.rs (replaces the tracer thread stub; route registration); assigned attempt 1 (sonnet, risk high)
 2026-10-28T02:34Z M1A-006a assigned→done merged a41219c (sonnet); post-merge: 233 workspace tests, tracer PASS; added SPEC-001a (leader) for the mapper's spec issues
 2026-10-28T02:35Z M2-016 todo→assigned attempt 1 (haiku); M2-008 spawned from v2 @307667b (has the sequence validator)
+2026-10-28T02:35Z SPEC-001a todo→done merged 1ecc2b9

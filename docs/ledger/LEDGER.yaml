@@ -232,6 +232,10 @@ items:
     title: 'Spec: settle the open points found by the ACP→TurnEvent mapper (turn-event.md)'
     milestone: M0
     phase: P1
+    status: "done"
+    evidence: "merged 1ecc2b9; turn-event.md §4.9 mapper decisions + module path"
+    assignee: "leader"
+    attempt: 1
     lane: docs
     priority: 2
     owner: leader
