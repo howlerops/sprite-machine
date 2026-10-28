@@ -1,28 +1,25 @@
 //! The `sm` runner: host modes (local, sandbox), tunnel client, TUI, pairing, server mode.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
-use protocol::tunnel::Capabilities;
 use runner::login::flow::normalize_hub;
-use runner::login::{CredentialStore, KeychainCredentials, login, real_sleeper};
-use runner::sleep;
-use runner::tunnel::{Timing, TunnelConfig, tunnel};
-use sidecar::store::Store;
+use runner::login::{CredentialStore, login, real_sleeper};
+use runner::server::{self, Options, RcArgs};
+use runner::tunnel::Timing;
 
 /// Crate name, used by the skeleton smoke test.
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
-const USAGE: &str = "usage: sm login --hub <url>";
-const RUN_USAGE: &str = "usage: sm run --hub <url>";
+const USAGE: &str = "usage: sm login --hub <url> | sm rc [flags]";
+const LOGIN_USAGE: &str = "usage: sm login --hub <url>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("login") => run_login(&args[1..]).await,
-        Some("run") => run_tunnel(&args[1..]).await,
+        Some("rc" | "run") => run_rc(&args[1..]).await,
         Some(other) => bail!("unknown command {other:?}\n{USAGE}"),
         None => {
             println!("{CRATE} {}", env!("CARGO_PKG_VERSION"));
@@ -35,50 +32,46 @@ async fn main() -> Result<()> {
 async fn run_login(args: &[String]) -> Result<()> {
     let hub = match args {
         [flag, url] if flag == "--hub" => url.as_str(),
-        _ => bail!("{USAGE}"),
+        _ => bail!("{LOGIN_USAGE}"),
     };
     let store = CredentialStore::from_env()?;
     login(hub, &store, &mut std::io::stdout(), &real_sleeper()).await?;
     Ok(())
 }
 
-/// `sm run --hub <url>`: keeps this machine's tunnel up until Ctrl-C, with the OS sleep hook.
-/// The hook starts before the tunnel runs, so a sleep that comes early is still hinted.
-async fn run_tunnel(args: &[String]) -> Result<()> {
-    let hub = match args {
-        [flag, url] if flag == "--hub" => url.as_str(),
-        _ => bail!("{RUN_USAGE}"),
-    };
-    let store = CredentialStore::from_env()?;
-    let login = store
+/// `sm rc [flags]` (`sm run` is the same command): the server mode (see `runner::server`). Keeps
+/// this machine's tunnel up and runs the sessions the hub dispatches, until Ctrl-C.
+async fn run_rc(args: &[String]) -> Result<()> {
+    let rc = RcArgs::parse(args)?;
+    let credentials = CredentialStore::from_env()?;
+    let login = credentials
         .load()?
-        .ok_or_else(|| anyhow!("not logged in: run `sm login --hub {hub}`"))?;
-    if normalize_hub(&login.hub)? != normalize_hub(hub)? {
+        .ok_or_else(|| anyhow!("not logged in: run `sm login --hub <url>`"))?;
+    if let Some(hub) = &rc.hub
+        && normalize_hub(&login.hub)? != normalize_hub(hub)?
+    {
         bail!("this machine is logged in to {}, not {hub}", login.hub);
     }
-    let sidecar = Arc::new(Store::open(&state_dir()?).context("open the sidecar store")?);
-    let config = TunnelConfig {
-        hub_ws_base: login.hub.clone(),
-        machine_id: login.machine_id.clone(),
-        runner_version: env!("CARGO_PKG_VERSION").to_owned(),
-        // No harness or spawn mode is advertised yet: the start path only keeps the tunnel up.
-        capabilities: Capabilities {
-            host_mode: "local".to_owned(),
-            harnesses: Vec::new(),
-            max_sessions: 1,
-            spawn: Vec::new(),
-            features: Vec::new(),
-        },
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let options = Options {
+        credentials,
+        state_dir: state_dir()?,
+        cwd: std::env::current_dir().context("current directory")?,
+        home,
+        path_env: std::env::var_os("PATH").unwrap_or_default(),
+        spawn: rc.spawn,
+        capacity: rc.capacity,
+        permission_mode: rc.permission_mode,
+        name_prefix: rc.name_prefix.unwrap_or_else(server::host_prefix),
+        continue_last: rc.continue_last,
         timing: Timing::default(),
     };
-    let (client, _sink, _commands) = tunnel(config, sidecar, KeychainCredentials::new(store));
-    let _sleep_hook = sleep::spawn(client.sleep_hint());
-    client
-        .run(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
-    Ok(())
+    server::run(options, async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await
 }
 
 /// Where the sidecar keeps its state: `SM_STATE_DIR`, else `$XDG_STATE_HOME/sm`, else

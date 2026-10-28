@@ -4,6 +4,7 @@
 pub mod checkpoint;
 pub mod harness;
 pub mod login;
+pub mod server;
 pub mod sleep;
 pub mod tracer;
 pub mod tunnel;
