@@ -1,0 +1,19 @@
+// Local-dev twin of wrangler.jsonc, used by scripts/dev-smoke.sh. Identical bindings, but WITHOUT
+// the `containers` entry: wrangler validates that image path (images/workspace/Dockerfile, built by
+// M0-008c) even with --enable-containers=false, so it can't start until that file exists.
+// Keep this in sync with wrangler.jsonc.
+{
+  "name": "sm-workspace",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
+  "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "sm-workspace-backups" }],
+  "vars": {
+    "BACKUP_PREFIX": "backups/",
+    "DEV_FAKE_SANDBOX": "1"
+  }
+}
