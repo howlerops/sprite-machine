@@ -2721,7 +2721,8 @@ items:
     milestone: M2b
     phase: P2
     status: "assigned"
-    attempts: 1
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
@@ -2744,7 +2745,8 @@ items:
     milestone: M2
     phase: P2
     status: "assigned"
-    attempts: 1
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
