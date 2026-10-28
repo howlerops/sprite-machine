@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::wasm;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use protocol::turn_event::{Envelope, Event, InterruptKind, RunOutcome, RunReason};
 use serde_json::json;
@@ -122,6 +123,9 @@ async fn tracer(work: &TempDir) -> Result<()> {
         bail!("worker-build failed: {status}");
     }
     println!("built in {:.1}s", build_started.elapsed().as_secs_f64());
+    // The same step as the second command of the wrangler [build] command (MVP-000f).
+    let (before, after) = wasm::strip_file(&hub_dir.join("build/index_bg.wasm"))?;
+    println!("strip-names: index_bg.wasm {before} -> {after} bytes");
     report_bundle(&hub_dir)?;
 
     println!("== d1 migrations (local)");
