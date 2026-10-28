@@ -279,3 +279,4 @@
 2026-10-28T23:23Z M3-008a first dispatch stopped at 1.3 GB free (no work). Freed to 4.5 GB (stale test exes, aarch64-apple-darwin target, stray logs in the target dir); re-dispatched M3-008a (same attempt)
 2026-10-28T23:24Z verify green → M3-008, M2B-019c done
 2026-10-28T23:25Z assign M2B-019d (sonnet, high: tunnel spec + hub + runner). Two workers only while disk stays near 4.5 GB
+2026-10-28T23:47Z disk hit 100% again (M3-008a's final clippy died with a linker Bus error; M2B-019d's commit and live runs failed). Freed to 7 GB: stale test exes plus target/debug/deps files untouched for 90 min (4 GB; up to 43 copies of one crate from many worktrees). M3-008a back (sonnet): all 32 examples render, expandable bodies, TUI arms → merged together with M3-001m; leader running the missing clippy. M2B-019d resumed to commit and finish verify
