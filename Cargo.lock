@@ -6485,10 +6485,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures-util",
+ "jsonschema",
  "protocol",
  "reqwest",
  "serde_json",
  "sidecar",
+ "tempfile",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
