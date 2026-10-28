@@ -266,3 +266,4 @@
 2026-10-28T22:14Z MVP-000h done (wrangler ready in 15 s with the lock held). M2-003f live test fails (configured bootstrap login gets access_denied) → attempt 2 (sonnet; attempt-1 worktree gone). M2-008j (haiku) and M2B-019a fix (leak + refusal test) merged; merged-tree verify running
 2026-10-28T22:20Z merged-tree verify: sleep_logind release tests flaky (mock's fd closes async) → leader made them wait_for EOF (5/5 pass); e2e rc failed copying current_exe '(deleted)' (MVP-000h strip tool vs shared target) → copy /proc/self/exe on Linux; e2e rc PASS. M2-008j, M2B-019a done. M3-002a back (haiku) → merged; added M3-002c
 2026-10-28T22:21Z assign M2B-019c (sonnet), M2-008i (haiku)
+2026-10-28T22:21Z M3-002a verify green → done

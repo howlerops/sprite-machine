@@ -6131,7 +6131,8 @@ items:
     title: 'client (desktop): a runnable app — bin target calling shell::run, editable hub address in settings, AppShell connectivity fed from client_core::Connection'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; client-gpui clippy clean, bins build, 39 tests passed on merged tree"
     assignee: "haiku"
     attempt: 1
     lane: client
