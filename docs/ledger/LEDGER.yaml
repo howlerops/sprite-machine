@@ -2303,6 +2303,27 @@ items:
       - 'cargo test -p sidecar'
       - 'cargo run -p cli -- e2e tracer'
 
+  - id: M2-009a
+    title: 'hub attachments: idempotency record in D1 (unique (org,user,key)) instead of R2; sweep of attachments never uploaded after 24 h'
+    milestone: M2
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-009]
+    paths:
+      - 'crates/hub/src/attachments/**'
+      - 'crates/hub/migrations/*attachments*'
+      - 'crates/hub/tests/attachments.rs'
+    context:
+      - 'docs/ledger/reports/M2-009.md (Spec issues 2, 6; Discovered work)'
+    acceptance:
+      - 'Two concurrent POST /v1/attachments with the same Idempotency-Key produce one attachment (D1 unique constraint); replay and 422 unchanged'
+      - 'A Cron-driven sweep removes attachment records and blobs with no upload 24 h after creation (native test with injected clock)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh attachments'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2

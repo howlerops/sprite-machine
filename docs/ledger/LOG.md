@@ -139,3 +139,5 @@
 2026-10-28T08:06Z leader: SPEC-004 amended 65e63e4 (harness exit uses the resume run like cancel/expiry). Added M1A-006f (tracer spawn_with, mapper N interrupts, remove fail_stale_interrupts)
 2026-10-28T08:06Z leader: disk — deleted a worker's private target in the scratchpad (4.3 GB) and the stale /root/.cargo-target-shared (3.9 GB); 14 GB free
 2026-10-28T08:14Z M2-008c → done (verify green). M2-008d assigned (sonnet, high)
+2026-10-28T08:15Z M2-009 merged (haiku) + leader e676b37: removed the in-source dev signing key fallback; hub-test.sh passes a random per-run ATTACHMENT_SIGNING_KEY. Added M2-009a (D1 idempotency, sweep). Verify running
+2026-10-28T08:15Z M1A-006e merged (haiku); criterion 1 (tracer spawn_with) blocked by paths → M1A-006f
