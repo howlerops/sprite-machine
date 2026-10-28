@@ -464,6 +464,7 @@ fn payload_is_ids_a_generic_title_and_approval_actions() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     };
@@ -482,6 +483,7 @@ fn topic_is_the_task_id_or_a_32_character_hash() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     };
@@ -511,6 +513,7 @@ fn a_batch_sends_only_the_last_job_per_task() {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     };
@@ -560,6 +563,7 @@ fn job_for(thread: &str, kind: Kind) -> NotifyJob {
         interrupt_id: None,
         allow_option_id: None,
         deny_option_id: None,
+        machine_id: None,
         subscriptions: None,
         attempt: 0,
     }
@@ -756,6 +760,60 @@ fn a_partly_failed_job_is_followed_up_for_its_failed_subscriptions_only() {
         job = next;
     }
     assert_eq!(job.attempt, MAX_ATTEMPTS - 1);
+}
+
+#[test]
+fn a_machine_back_goes_to_every_subscription_and_names_the_machine() {
+    let db = subscribed_world();
+    // Ada has a second device (a second endpoint); the machine is one of the org's.
+    let ada = principal("ada", "org_a", Role::Owner);
+    let (status, _) = subscribe_as(
+        &db,
+        &ada,
+        &Browser::new(5),
+        "https://push.example.net/ada-2",
+    )
+    .expect("subscribe");
+    assert_eq!(status, 201);
+    let hash = "a".repeat(64);
+    db.exec(&format!(
+        "INSERT INTO machines (id, org_id, name, kind, credential_hash) \
+         VALUES ('m_1', 'org_a', 'Garage Mac', 'local', '{hash}')"
+    ));
+    let job = NotifyJob {
+        task_id: None,
+        machine_id: Some("m_1".into()),
+        ..job_for("th_1", Kind::MachineBack)
+    };
+
+    let web = Recording::new(Delivery::Delivered);
+    let report = run(&db, &web, &job, NOON);
+    // Both of Ada's subscriptions, Bob and Vic (this class has no role check); not Eve.
+    assert_eq!(users(&web), ["u_ada", "u_ada", "u_bob", "u_vic"]);
+    assert_eq!(report.delivered, 4);
+    for (_, payload) in web.sent.borrow().iter() {
+        assert_eq!(
+            *payload,
+            json!({
+                "kind": "machine_back", "title": "Garage Mac is back online",
+                "thread_id": "th_1", "task_id": null, "machine_id": "m_1",
+            })
+        );
+    }
+
+    // An unknown machine (a dev machine has no row) keeps the generic title.
+    let web = Recording::new(Delivery::Delivered);
+    let unknown = NotifyJob {
+        machine_id: Some("m_gone".into()),
+        ..job
+    };
+    run(&db, &web, &unknown, NOON);
+    let sent = web.sent.borrow();
+    assert!(!sent.is_empty());
+    for (_, payload) in sent.iter() {
+        assert_eq!(payload["title"], "Machine back online");
+        assert_eq!(payload["machine_id"], "m_gone");
+    }
 }
 
 #[test]

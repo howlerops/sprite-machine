@@ -450,7 +450,7 @@ impl Machine {
             worker::console_log!("machine {machine_id}: debounce write failed: {error}");
             return;
         }
-        queues_notify::enqueue(&self.env, &[machine_back_job(&thread)]).await;
+        queues_notify::enqueue(&self.env, &[machine_back_job(&thread, &machine_id)]).await;
     }
 
     /// A socket closed or failed: presence, if it was the current connection.

@@ -76,6 +76,10 @@ pub struct NotifyJob {
     /// The id of the interrupt's first reject option.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny_option_id: Option<String>,
+    /// The machine that came back (`machine_back` only). An id, like the thread: the name is
+    /// looked up when the job is sent, and only for the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<String>,
     /// The subscriptions still to send, when this job re-queues the failed part of an earlier
     /// send. `None` sends to every subscription of the thread's org.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,6 +130,7 @@ pub fn jobs_for(appended: &[Envelope]) -> Vec<NotifyJob> {
             interrupt_id: None,
             allow_option_id: None,
             deny_option_id: None,
+            machine_id: None,
             subscriptions: None,
             attempt: 0,
         };
@@ -195,11 +200,30 @@ pub const TTL_SECS: u32 = 24 * 60 * 60;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
     pub job: NotifyJob,
+    /// The name of the machine that came back, for the `machine_back` title. `None` when the
+    /// machine is unknown (a dev machine has no row), and then the generic title is sent.
+    pub machine_name: Option<String>,
 }
 
 impl Notification {
     pub fn new(job: NotifyJob) -> Self {
-        Self { job }
+        Self {
+            job,
+            machine_name: None,
+        }
+    }
+
+    pub fn with_machine_name(mut self, name: Option<String>) -> Self {
+        self.machine_name = name;
+        self
+    }
+
+    /// The title: "<machine name> is back online" for a named machine, else the generic title.
+    pub fn title(&self) -> String {
+        match (self.job.kind, &self.machine_name) {
+            (Kind::MachineBack, Some(name)) => format!("{name} is back online"),
+            (kind, _) => kind.title().to_owned(),
+        }
     }
 
     pub fn urgency(&self) -> Urgency {
@@ -226,7 +250,8 @@ impl Notification {
         }
     }
 
-    /// The push payload (JSON): ids, the kind, a generic title and, for an approval, the actions.
+    /// The push payload (JSON): ids, the kind, a title and, for an approval, the actions. A
+    /// `machine_back` also carries the machine id.
     ///
     /// ```json
     /// { "kind": "approval_needed", "title": "Approval needed",
@@ -238,10 +263,13 @@ impl Notification {
         let job = &self.job;
         let mut body = json!({
             "kind": job.kind.as_str(),
-            "title": job.kind.title(),
+            "title": self.title(),
             "thread_id": job.thread_id,
         });
         body["task_id"] = json!(job.task_id);
+        if let Some(machine_id) = &job.machine_id {
+            body["machine_id"] = json!(machine_id);
+        }
         if let Some(interrupt_id) = &job.interrupt_id {
             body["interrupt_id"] = json!(interrupt_id);
             if job.kind == Kind::ApprovalNeeded

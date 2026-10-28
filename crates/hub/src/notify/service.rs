@@ -1,7 +1,7 @@
 //! The notification logic over the [`Db`] trait, so it runs natively in the unit tests: the
 //! subscription and prefs endpoints, and the queue consumer's per-job work ([`process_job`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::{Value, json};
 
@@ -231,8 +231,6 @@ where
     };
     let mut to_send = Vec::new();
     let mut prefs_by_user: HashMap<String, Prefs> = HashMap::new();
-    // A machine back is announced to each user once, whatever the number of their devices.
-    let mut announced: HashSet<String> = HashSet::new();
     for target in store::targets(db, &org_id).await? {
         let subscription = &target.subscription;
         // A follow-up job sends to its pending subscriptions only.
@@ -257,14 +255,17 @@ where
             report.skipped += 1;
             continue;
         }
-        if job.kind == Kind::MachineBack && !announced.insert(subscription.user_id.clone()) {
-            report.skipped += 1;
-            continue;
-        }
         to_send.push(target.subscription);
     }
 
-    let notification = Notification::new(job.clone());
+    // The machine's name is read only for the title of a machine back that has someone to send to.
+    let machine_name = match (job.kind, &job.machine_id) {
+        (Kind::MachineBack, Some(machine_id)) if !to_send.is_empty() => {
+            store::machine_name(db, &org_id, machine_id).await?
+        }
+        _ => None,
+    };
+    let notification = Notification::new(job.clone()).with_machine_name(machine_name);
     for subscription in to_send {
         match providers
             .send(&subscription, &notification, now_ms / 1000)
