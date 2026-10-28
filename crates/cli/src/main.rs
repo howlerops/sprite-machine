@@ -13,7 +13,7 @@ use anyhow::{Result, bail};
 pub const CRATE: &str = env!("CARGO_PKG_NAME");
 
 const USAGE: &str =
-    "usage: cli e2e tracer | cli e2e attachments | cli wasm strip-names <file.wasm>";
+    "usage: cli e2e tracer | cli e2e attachments | cli e2e app | cli wasm strip-names <file.wasm>";
 
 #[tokio::main]
 async fn main() -> Result<()> {

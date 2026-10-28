@@ -42,7 +42,7 @@ const BUNDLE_LIMIT_GZIP: u64 = 1024 * 1024;
 
 /// The acp-mock script: one prompt turn with text, a tool call that needs permission (the
 /// client must answer an allow option), the tool call completing, more text, `end_turn`.
-fn script() -> serde_json::Value {
+pub(super) fn script() -> serde_json::Value {
     json!({
         "turns": [{
             "steps": [
@@ -299,7 +299,7 @@ pub(super) fn migrate(hub_dir: &Path, work: &TempDir) -> Result<()> {
     Ok(())
 }
 
-fn task_ended(
+pub(super) fn task_ended(
     name: &str,
     result: std::result::Result<Result<()>, tokio::task::JoinError>,
 ) -> anyhow::Error {
@@ -311,7 +311,7 @@ fn task_ended(
 }
 
 /// One-line description of an envelope for the printed sequence.
-fn describe(envelope: &Envelope) -> String {
+pub(super) fn describe(envelope: &Envelope) -> String {
     let detail = match &envelope.event {
         Event::UserMessage(m) => format!("{} parts", m.parts.len()),
         Event::RunStarted(r) => format!(
@@ -344,7 +344,7 @@ fn describe(envelope: &Envelope) -> String {
 
 /// Checks the observed stream against turn-event.md §5 (rule 6 for the interrupt round trip)
 /// for the tracer script.
-fn check_sequence(envelopes: &[Envelope]) -> Result<()> {
+pub(super) fn check_sequence(envelopes: &[Envelope]) -> Result<()> {
     for pair in envelopes.windows(2) {
         ensure!(
             pair[1].seq == pair[0].seq + 1,
