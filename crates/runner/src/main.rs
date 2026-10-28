@@ -109,7 +109,8 @@ async fn run_rc(args: &[String]) -> Result<()> {
     // The trust question needs a terminal to ask at; a machine run without one refuses an
     // untrusted directory.
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
-    let asker = terminal.then(trust::terminal_asker);
+    let prompt = qr::Prompt::default();
+    let asker = terminal.then(|| trust::terminal_asker(prompt.clone()));
     // On a terminal the spacebar shows the QR of the latest session. The raw mode lasts until this
     // returns, errors included.
     let _raw = qr::keys::RawMode::enable(terminal)?;
@@ -118,7 +119,12 @@ async fn run_rc(args: &[String]) -> Result<()> {
         let latest = latest.clone();
         // Detached: a read blocked on stdin does not hold the process up at exit.
         std::thread::spawn(move || {
-            let _ = qr::keys::pump(std::io::stdin().lock(), &latest, &mut std::io::stdout());
+            let _ = qr::keys::pump(
+                std::io::stdin().lock(),
+                &latest,
+                &prompt,
+                &mut std::io::stdout(),
+            );
         });
     }
     let session_latest = latest;

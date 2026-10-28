@@ -1,7 +1,7 @@
 //! The session link, the terminal QR, the spacebar toggle and the `autoConnect` setting (M2B-009,
 //! PLAN-v2-ade.md §4.10). All pure: no hub, no terminal.
 
-use runner::qr::keys::{Latest, RawMode, pump};
+use runner::qr::keys::{Latest, Prompt, RawMode, pump};
 use runner::qr::{QrToggle, block, mobile_url, render, session_url};
 use runner::settings::{self, Settings};
 use tempfile::TempDir;
@@ -161,7 +161,7 @@ fn latest_at(url: &str) -> Latest {
 /// The keys in `input` through the key reader; what it wrote.
 fn keys(input: &[u8], latest: &Latest) -> String {
     let mut out = Vec::new();
-    pump(input, latest, &mut out).unwrap();
+    pump(input, latest, &Prompt::default(), &mut out).unwrap();
     String::from_utf8(out).unwrap()
 }
 
@@ -196,4 +196,101 @@ fn other_keys_and_a_space_before_any_session_print_nothing() {
 fn raw_mode_is_not_turned_on_without_a_terminal() {
     // No terminal: nothing is changed and there is no guard to restore anything.
     assert!(RawMode::enable(false).unwrap().is_none());
+}
+
+/// A reader that hands out its chunks one per read, and only after `gate` says the question is
+/// being asked, so the answer arrives while the question is pending.
+struct Typed {
+    chunks: Vec<Vec<u8>>,
+    asked: std::sync::mpsc::Receiver<()>,
+}
+
+impl std::io::Read for Typed {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if self.chunks.is_empty() {
+            return Ok(0);
+        }
+        let _ = self.asked.recv();
+        let chunk = self.chunks.remove(0);
+        out[..chunk.len()].copy_from_slice(&chunk);
+        Ok(chunk.len())
+    }
+}
+
+#[test]
+fn a_trust_question_asked_while_the_key_reader_runs_gets_its_answer() {
+    use runner::trust::terminal_asker;
+    let url = session_url("https://hub.example", THREAD).unwrap();
+    let latest = latest_at(&url);
+    let prompt = Prompt::default();
+    let (asked_tx, asked_rx) = std::sync::mpsc::channel();
+    // A space and a typo first, then the answer with a space inside it ("y es", fixed with
+    // backspace to "yes"), then a space after the answer, which is a key again.
+    let input = Typed {
+        chunks: vec![b"yx\x7f es\n".to_vec(), b" ".to_vec()],
+        asked: asked_rx,
+    };
+    let asker = terminal_asker(prompt.clone());
+    let reader = {
+        let (latest, prompt) = (latest.clone(), prompt.clone());
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            pump(input, &latest, &prompt, &mut out).unwrap();
+            String::from_utf8(out).unwrap()
+        })
+    };
+    // The question is listening before the first chunk is released.
+    let dir = std::path::Path::new("/work");
+    let asking = std::thread::spawn(move || asker(dir));
+    while !prompt.pending() {
+        std::thread::yield_now();
+    }
+    asked_tx.send(()).unwrap();
+    // "y es" is not yes: the space went to the answer, so the answer is a no, and the space did
+    // not toggle the QR. The second chunk is a lone space with no question pending.
+    assert!(!asking.join().unwrap());
+    asked_tx.send(()).unwrap();
+    let out = reader.join().unwrap();
+    assert!(
+        out.starts_with("yx\x08 \x08 es\r\n"),
+        "answer echoed: {out:?}"
+    );
+    assert_eq!(out.matches(&url).count(), 1, "only the later space toggled");
+}
+
+#[test]
+fn a_typed_yes_is_a_yes_and_backspace_edits() {
+    use runner::trust::terminal_asker;
+    let latest = Latest::default();
+    let prompt = Prompt::default();
+    let (asked_tx, asked_rx) = std::sync::mpsc::channel();
+    let input = Typed {
+        chunks: vec![b"ny\x7f\x7fyes\r".to_vec()],
+        asked: asked_rx,
+    };
+    let asker = terminal_asker(prompt.clone());
+    let reader = {
+        let prompt = prompt.clone();
+        std::thread::spawn(move || pump(input, &latest, &prompt, &mut Vec::new()).unwrap())
+    };
+    let asking = std::thread::spawn(move || asker(std::path::Path::new("/work")));
+    while !prompt.pending() {
+        std::thread::yield_now();
+    }
+    asked_tx.send(()).unwrap();
+    assert!(asking.join().unwrap());
+    reader.join().unwrap();
+}
+
+#[test]
+fn a_question_pending_when_the_input_ends_is_a_no() {
+    use runner::trust::terminal_asker;
+    let prompt = Prompt::default();
+    let asker = terminal_asker(prompt.clone());
+    let asking = std::thread::spawn(move || asker(std::path::Path::new("/work")));
+    while !prompt.pending() {
+        std::thread::yield_now();
+    }
+    pump(&b""[..], &Latest::default(), &prompt, &mut Vec::new()).unwrap();
+    assert!(!asking.join().unwrap());
 }

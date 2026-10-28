@@ -17,7 +17,7 @@ use protocol::turn_event::is_valid_id;
 use crate::login::flow::normalize_hub;
 
 pub use crate::login::flow::qr_text as render;
-pub use keys::Latest;
+pub use keys::{Latest, Prompt};
 
 /// The deep link of a session: `https://<hub>/t/<id>`. The hub is checked the way `sm login` checks
 /// it (https, or http on loopback); the id must be a valid thread id.
