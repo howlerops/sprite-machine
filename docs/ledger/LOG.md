@@ -123,3 +123,4 @@
 2026-10-28T07:13Z P1 phase review written (docs/ledger/reviews/P1.md): clean rebuild, 506 tests 0 failed, live hub tests + tracer green; CI not evidence (CI-001). Continuing into P2 per the user's go
 2026-10-28T07:13Z M2B-004a assigned (sonnet, high), M1A-006c assigned (sonnet, high), M2-008c assigned (haiku; paths += machines/internal.rs event_id pass-through)
 2026-10-28T07:29Z M2B-004a assigned→done merged 906be80 (sonnet). Leader review: bridge on_incoming still commits on receipt, so the end-to-end crash window remains with a shared Store → added M1A-006d (deps M1A-006c, which owns bridge files now)
+2026-10-28T07:30Z M2B-004b assigned (haiku)

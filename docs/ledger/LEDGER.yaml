@@ -2076,6 +2076,9 @@ items:
     title: 'runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite)'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: medium

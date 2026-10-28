@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 56/217 (3 dropped) · in-flight M1A-006c,M2-008c · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 53/120
+done 56/217 (3 dropped) · in-flight M1A-006c,M2-008c,M2B-004b · blocked 11 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 54/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 56/217 (3 dropped) · in-flight M1A-006c,M2-008c · blocked 11 (human: M0-0
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 38 | 3 | 2 |
+| P2 | 38 | 3 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 33 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -33,7 +33,7 @@ done 56/217 (3 dropped) · in-flight M1A-006c,M2-008c · blocked 11 (human: M0-0
 | M2-008c | worker | rust | assigned | hub: Thread DO dedupes event_id (24 h) on the internal events route; POST /v1/threads + dispatch call the Thread DO init hook and queue on the Machine DO |
 | MVP-000d | worker | rust | todo | Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer |
 | M2B-004a | worker | rust | done | Tunnel durability: commit down commands on processed (not on receive), atomic restart_outbound_stream + outbound_since, honour welcome.max_inflight |
-| M2B-004b | worker | rust | todo | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
+| M2B-004b | worker | rust | assigned | runner: wss:// tunnel (rustls + webpki roots on tokio-tungstenite) |
 | M2B-004c | worker | rust | todo | runner: presence{asleep} before OS sleep and TunnelSink::thread_open for locally started threads |
 | M1A-006d | worker | rust | todo | Bridge: the tunnel client is the only down-commit owner (bridge stops calling commit_down_frame on receipt); processed() carries the idempotency key |
 | M2-008a | worker | rust | todo | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
