@@ -3698,7 +3698,8 @@ items:
     title: 'web: composer with attachments + Allow/Deny + Stop'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; playwright composer+transcript+pairing 32/32 on merged tree"
     assignee: "sonnet"
     attempt: 1
     deps: [WEB-002, M2-009]
@@ -5561,6 +5562,10 @@ items:
     title: 'client-core: ThreadView::apply is transactional (last_seq and state unchanged when apply fails); next_persisted validates against the view before appending, so the cache never holds an event the view refused'
     milestone: M3
     phase: P3
+    status: "done"
+    evidence: "merged; client-core clippy clean, 37 passed on merged tree"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
