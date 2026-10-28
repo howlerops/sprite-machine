@@ -304,7 +304,10 @@ where
         match validate_envelope(core, envelope)? {
             Err((code, message)) => refusal = Some(nack(seq, code, message)),
             Ok((host_kind, thread_id)) => {
-                match host.append(host_kind, &thread_id, Some(event_id), envelope).await {
+                match host
+                    .append(host_kind, &thread_id, Some(event_id), envelope)
+                    .await
+                {
                     Ok(()) => {}
                     Err(HostError::Rejected { code, message }) => {
                         refusal = Some(nack(seq, code, message));
@@ -544,7 +547,10 @@ where
     );
     for envelope in [started, errored] {
         let value = serde_json::to_value(&envelope).unwrap_or(Value::Null);
-        match host.append(record.host, &record.thread_id, None, &value).await {
+        match host
+            .append(record.host, &record.thread_id, None, &value)
+            .await
+        {
             Ok(()) => {}
             // The thread cannot take it (task already ended, no such run state): nothing to do.
             Err(HostError::Rejected { .. }) => return Ok(()),
