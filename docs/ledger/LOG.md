@@ -38,3 +38,4 @@
 2026-10-28T00:05Z M2-001 paths += crates/hub/src/tracer/worker.rs (must move the tracer's #[event(fetch)] into the real router)
 2026-10-28T00:05Z M1B-002 todo→assigned attempt 1 (haiku, last P0 worker item)
 2026-10-28T00:05Z M2-001 todo→assigned attempt 1 (haiku)
+2026-10-28T00:17Z leader: disk full (session allowance) stopped M2-001 + M1B-002 mid-attempt; freed ~8 GB (incremental cache, spike/review/scratch targets, gpui clone); ledger env CARGO_INCREMENTAL=0; workers resumed one at a time on the same attempt

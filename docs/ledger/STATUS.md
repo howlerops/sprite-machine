@@ -4,7 +4,7 @@ _Rewritten by the leader on every ledger commit._
 
 done 19/191 (3 dropped) · in-flight M1B-002,M2-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 16/120
 
-Batch 7: M1B-002 + M2-001 assigned. Tracer bullet green.
+Disk incident handled; M2-001 resumed, M1B-002 resumes after it.
 
 ## Per phase
 

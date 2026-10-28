@@ -14,6 +14,7 @@ env:
   CARGO_TARGET_DIR: /home/user/.cargo-target-shared
   CARGO_BUILD_JOBS: '2'
   RUSTFLAGS: '-C link-arg=-fuse-ld=lld'
+  CARGO_INCREMENTAL: '0' # disk: the session's disk allowance is ~40 GB; incremental caches filled it (2026-10-28)
 phase_order: [P0, P1, P2, P3, P4, P5, P6, P7]
 milestone_order: [M0, M1a, M1b, M2, M2b, M3, M4, M5, M5c, M5b, M6]
 items:
