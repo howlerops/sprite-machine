@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 89/247 (3 dropped) · in-flight M2B-002b,M2-008h,M2-008a,M2B-012 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 86/120
+done 89/248 (3 dropped) · in-flight M2B-005c,M2-011a,M2B-002b,M2-008h,M2-008a,M2B-012 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 86/120
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 89/247 (3 dropped) · in-flight M2B-002b,M2-008h,M2-008a,M2B-012 · blocked
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 62 | 36 | 4 |
+| P2 | 62 | 36 | 6 |
 | P3 | 20 | 1 | 0 |
-| P4 | 39 | 0 | 0 |
+| P4 | 40 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
@@ -54,8 +54,8 @@ done 89/247 (3 dropped) · in-flight M2B-002b,M2-008h,M2-008a,M2B-012 · blocked
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
 | M2-003c | worker | rust | done | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
 | M2B-007b | worker | rust | done | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
-| M2B-005c | worker | rust | todo | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
-| M2-011a | worker | rust | todo | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
+| M2B-005c | worker | rust | assigned | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
+| M2-011a | worker | rust | assigned | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
 | M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
 | M2B-002b | worker | rust | assigned | hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES |
 | SPEC-006 | leader | docs | done | Spec: browser-usable auth for the thread subscription (single-use subscribe ticket) |

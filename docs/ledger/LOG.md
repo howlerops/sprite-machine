@@ -199,3 +199,4 @@
 2026-10-28T13:09Z M2-008h assigned (sonnet, priority 1)
 2026-10-28T13:21Z M2B-002b back (haiku; tests/devices.rs:415 reads machines[].id → leader fixes on merge). verify15 (M2-008a): first workspace test pass 709/1 failed under 4 concurrent workers, second pass no failures (flaky under load; not a code failure)
 2026-10-28T13:26Z M2B-012 back (haiku, same attempt after path widening): cli e2e attachments PASS. Added M1A-014b (P4: private FilePolicy fields, sha256 end to end)
+- 13:28 assign M2-011a (haiku), M2B-005c (sonnet, security)

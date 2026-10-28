@@ -2720,6 +2720,8 @@ items:
     title: 'hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempts: 1
     lane: rust
     size: S
     risk: medium
@@ -2741,6 +2743,8 @@ items:
     title: 'Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure)'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempts: 1
     lane: rust
     size: S
     risk: low
