@@ -176,3 +176,4 @@
 2026-10-28T10:38Z SPEC-005 done 1c2c2b0 (leader): browser sign-in (runner QR link + browser device code). Added M2-003c (priority 1, hub routes + sm rc QR); WEB-001 deps += M2-003c, pairing criterion follows §5.7
 2026-10-28T10:50Z M2B-007a assigned→done merged (sonnet; one-line out-of-path main.rs change accepted); added M2B-007b
 2026-10-28T10:50Z M2-011 assigned (sonnet; crypto: RFC 8291/8292 with RFC test vectors)
+2026-10-28T10:56Z M2B-005a merged d99e1af (sonnet; out-of-path main.rs --yes plumbing accepted, auto-merged with M2B-007a). Full verify running. Added M2B-005c (close live untrusted tunnels on policy flip; token per-IP limit)

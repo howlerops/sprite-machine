@@ -2703,6 +2703,27 @@ items:
       - 'cargo test -p runner --test server_mode'
       - 'cargo test -p acp-mock'
 
+  - id: M2B-005c
+    title: 'hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token'
+    milestone: M2b
+    phase: P2
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-005a]
+    paths:
+      - 'crates/hub/src/devices/**'
+      - 'crates/hub/src/machines/**'
+      - 'crates/hub/tests/devices.rs'
+    context:
+      - 'docs/ledger/reports/M2B-005a.md (Discovered work)'
+    acceptance:
+      - 'PUT /v1/devices/policy turning the setting on tells each untrusted machine''s Machine DO to close its tunnel with auth_revoked-style close (or a new code per tunnel.md); live test: an open untrusted tunnel is closed when the policy flips'
+      - 'POST /v1/devices/token is limited per CF-Connecting-IP (e.g. 60/min) when the header is present (native test)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh devices'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
