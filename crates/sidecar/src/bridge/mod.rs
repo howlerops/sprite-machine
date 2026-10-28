@@ -30,11 +30,11 @@
 //! bridge emit it for the tracer hub, which does not.
 //!
 //! **Harness restart.** When the agent process exits, every running task ends with
-//! `RunError{error, code:"harness_exited"}`, [`Reattacher::connection_lost`] marks the stored
-//! sessions detached, and the next `prompt` respawns the agent (when the bridge was built with
+//! `InterruptResolved{cancelled}` for each open interrupt and then `RunError{error,
+//! code:"harness_exited"}` (SPEC-004). [`Reattacher::connection_lost`] marks the stored sessions
+//! detached, and the next `prompt` respawns the agent (when the bridge was built with
 //! [`Bridge::connect_with`] or [`Bridge::spawn_with`]) and resumes the thread's session. At
-//! startup the interrupts an earlier process left open are ended at once: the ACP request they
-//! wait on died with the old agent.
+//! startup the interrupts an earlier process left open end the same way (see `stale`).
 //!
 //! **Raw updates.** The ACP client hands `session/update` over as the JSON the agent sent, so
 //! `raw.payload` keeps unknown fields and an update this build cannot parse becomes a `Raw`
@@ -45,6 +45,7 @@
 //! line, so before the bridge acts on a request it drains the update channel first, and the
 //! events keep the order the agent produced them in.
 
+mod applied;
 mod elicitation;
 pub mod files;
 mod handler;
@@ -53,8 +54,9 @@ mod io;
 mod permission;
 mod runtime;
 mod session_config;
+mod stale;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,6 +69,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
+use self::applied::AppliedKeys;
 use self::handler::{BridgeHandler, Internal};
 use self::ids::SharedIds;
 pub use self::ids::{IdGenerator, SequentialGenerator, UlidIds};
@@ -207,9 +210,8 @@ pub struct Bridge<S: EventSink, C: CommandSource> {
     /// ACP session id → thread id.
     by_session: HashMap<String, String>,
     approvals: HashMap<String, PendingApproval>,
-    /// Keys applied by this process. The command source commits a key to the store only after
-    /// `processed`, so this catches a repeat in between.
-    applied: HashSet<String>,
+    /// Keys applied by this process and not yet recorded by the store (see [`AppliedKeys`]).
+    applied: AppliedKeys,
 }
 
 /// The channels between the bridge loop and the ACP client's handler.
@@ -351,7 +353,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             threads: HashMap::new(),
             by_session: HashMap::new(),
             approvals: HashMap::new(),
-            applied: HashSet::new(),
+            applied: AppliedKeys::default(),
         }
     }
 }

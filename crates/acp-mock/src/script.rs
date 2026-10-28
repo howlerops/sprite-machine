@@ -7,7 +7,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use protocol::acp::{
-    CreateElicitationRequest, RequestPermissionRequest, SessionUpdate, StopReason,
+    CreateElicitationRequest, RequestPermissionRequest, SessionConfigOption, SessionModeState,
+    SessionUpdate, StopReason,
 };
 use serde_json::{Map, Value, json};
 
@@ -22,6 +23,8 @@ const PLACEHOLDER_SESSION: &str = "sess_placeholder";
 #[derive(Debug, Clone)]
 pub struct Script {
     turns: Vec<Turn>,
+    modes: Option<SessionModeState>,
+    config_options: Option<Vec<SessionConfigOption>>,
 }
 
 /// One prompt turn: steps executed in order.
@@ -71,7 +74,7 @@ impl Script {
         let object = value
             .as_object()
             .ok_or_else(|| anyhow!("script must be a JSON object"))?;
-        reject_unknown_keys(object, &["turns"], "script")?;
+        reject_unknown_keys(object, &["turns", "modes", "config_options"], "script")?;
         let turns = object
             .get("turns")
             .and_then(Value::as_array)
@@ -81,12 +84,41 @@ impl Script {
             .enumerate()
             .map(|(index, turn)| Turn::from_value(turn).with_context(|| format!("turn {index}")))
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self { turns })
+        let modes = object
+            .get("modes")
+            .map(|modes| {
+                serde_json::from_value(modes.clone()).context("\"modes\" is not an ACP mode state")
+            })
+            .transpose()?;
+        let config_options = object
+            .get("config_options")
+            .map(|options| {
+                serde_json::from_value(options.clone())
+                    .context("\"config_options\" is not an ACP config option list")
+            })
+            .transpose()?;
+        Ok(Self {
+            turns,
+            modes,
+            config_options,
+        })
     }
 
     /// The turns, in prompt order.
     pub fn turns(&self) -> &[Turn] {
         &self.turns
+    }
+
+    /// The modes every session starts, resumes or loads with (`session/new`, `session/resume`,
+    /// `session/load`). `None` when the script advertises none.
+    pub fn modes(&self) -> Option<&SessionModeState> {
+        self.modes.as_ref()
+    }
+
+    /// The config options every session starts, resumes or loads with. `None` when the script
+    /// advertises none.
+    pub fn config_options(&self) -> Option<&[SessionConfigOption]> {
+        self.config_options.as_deref()
     }
 }
 

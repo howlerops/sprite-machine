@@ -123,13 +123,22 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         outcome: Outcome,
     ) -> Result<(), BridgeError> {
         if !self.threads.contains_key(thread_id) {
-            return self
-                .reject(
-                    key,
+            // A thread this process has not loaded. When the store knows it, the interrupt is one
+            // an earlier process left (already ended at startup): not open, so `unknown_interrupt`.
+            let (code, message) = if self.store.thread(thread_id)?.is_some() {
+                (
+                    CommandErrorCode::UnknownInterrupt,
+                    format!(
+                        "no open interrupt {interrupt_id} in thread {thread_id} (not loaded here)"
+                    ),
+                )
+            } else {
+                (
                     CommandErrorCode::UnknownThread,
                     format!("unknown thread {thread_id}"),
                 )
-                .await;
+            };
+            return self.reject(key, code, message).await;
         }
         let open = self
             .approvals

@@ -1,22 +1,26 @@
-//! Runner bridge robustness: harness restart, byte-faithful raw updates, the session snapshot and
-//! MCP servers at session start, and interrupts left open by an earlier process.
+//! Runner bridge robustness: harness restart (the agent is started again by a `Connector` or by
+//! `spawn_with`), raw updates, the session snapshot and MCP servers at session start, and
+//! interrupts left open by an earlier process (ended `harness_exited`, approvals for them answer
+//! `unknown_interrupt`).
 //!
-//! An in-process acp-mock (behind a tee that records what the bridge sent it) or a hand-played
-//! agent sits on one side, in-memory `CommandSource` and `EventSink` on the other. The store runs
-//! on a manual clock and ids are sequential.
+//! acp-mock runs in process behind a [`Recorder`] (what the bridge sent it), or as a subprocess
+//! started by `spawn_with`. A hand-played agent sends the updates acp-mock's typed script cannot
+//! express. The store runs on a manual clock and ids are sequential.
 
 use std::collections::VecDeque;
 use std::path::Path;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use protocol::tunnel::{Actor, ActorKind, Command, ContentPart};
+use acp_mock::Recorder;
+use protocol::tunnel::{Actor, ActorKind, Command, CommandErrorCode, ContentPart, Outcome};
 use protocol::turn_event::{Envelope, Event, ResolvedOutcome, RunErrorReason, StateScope};
 use serde_json::{Value, json};
 use sidecar::acp::client::{ClientError, Transport};
 use sidecar::bridge::{
-    Bridge, BridgeError, CommandFeed, Config, Connector, MemoryCommands, MemorySink,
-    SequentialGenerator, SinkItem,
+    Bridge, BridgeError, CommandFailure, CommandFeed, Config, Connector, MemoryCommands,
+    MemorySink, SequentialGenerator, SinkItem,
 };
 use sidecar::store::{InterruptKind, ManualClock, PendingInterrupt, SessionState, Store};
 use tempfile::TempDir;
@@ -27,6 +31,11 @@ use tokio::time::timeout;
 
 const STEP: Duration = Duration::from_secs(20);
 const T0: u64 = 1_700_000_000_000;
+/// Set by [`a_subprocess_agent_started_by_spawn_with_is_started_again_after_it_is_killed`] for
+/// the agent process it starts: the script to serve.
+const CHILD_SCRIPT_ENV: &str = "SIDECAR_BRIDGE_ROBUST_SCRIPT";
+/// The file the agent process writes its pid to.
+const CHILD_PID_ENV: &str = "SIDECAR_BRIDGE_ROBUST_PID";
 
 fn user() -> Actor {
     Actor {
@@ -39,104 +48,57 @@ fn user() -> Actor {
 
 // ---- agents -------------------------------------------------------------------------------------
 
-/// Every JSON message the bridge sent an agent.
-type Received = Arc<Mutex<Vec<Value>>>;
-
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The requests (with an id) the agent received for `method`.
-fn requests(received: &Received, method: &str) -> Vec<Value> {
-    lock(received)
-        .iter()
+/// The messages the agent received with `method`.
+fn requests(recorder: &Recorder, method: &str) -> Vec<Value> {
+    recorder
+        .messages()
+        .into_iter()
         .filter(|message| message["method"] == method)
-        .cloned()
         .collect()
 }
 
-/// An acp-mock behind a tee, so the test sees what the bridge sent, and can kill the agent.
+/// An acp-mock running in process, with the log of what the bridge sent it. `kill` ends it the
+/// way a dead agent process ends: the bridge's reader sees the end of the stream.
 struct MockAgent {
-    received: Received,
-    tasks: Vec<JoinHandle<()>>,
+    recorder: Recorder,
+    task: JoinHandle<()>,
 }
 
 impl MockAgent {
     fn start(script: &Value) -> (Transport, Self) {
         let script = acp_mock::Script::from_value(script).expect("script");
-        let (client_io, proxy_client) = tokio::io::duplex(1 << 16);
-        let (proxy_agent, agent_io) = tokio::io::duplex(1 << 16);
+        let recorder = Recorder::new();
+        let (client_io, agent_io) = tokio::io::duplex(1 << 16);
         let (agent_r, agent_w) = tokio::io::split(agent_io);
-        let mock = tokio::spawn(async move {
-            let _ = acp_mock::run(script, agent_r, agent_w).await;
-        });
-        let (client_up, mut to_client) = tokio::io::split(proxy_client);
-        let (mut from_agent, mut to_agent) = tokio::io::split(proxy_agent);
-        let received = Received::default();
-        let record = Arc::clone(&received);
-        let up = tokio::spawn(async move {
-            let mut lines = BufReader::new(client_up).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if let Ok(message) = serde_json::from_str::<Value>(&line) {
-                    lock(&record).push(message);
-                }
-                if to_agent
-                    .write_all(format!("{line}\n").as_bytes())
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
+        let task = tokio::spawn({
+            let recorder = recorder.clone();
+            async move {
+                let _ = acp_mock::run_recorded(script, recorder, agent_r, agent_w).await;
             }
         });
-        let down = tokio::spawn(async move {
-            let _ = tokio::io::copy(&mut from_agent, &mut to_client).await;
-        });
         let (client_r, client_w) = tokio::io::split(client_io);
-        (
-            Transport::new(client_r, client_w),
-            Self {
-                received,
-                tasks: vec![mock, up, down],
-            },
-        )
+        (Transport::new(client_r, client_w), Self { recorder, task })
     }
 
-    /// The agent process dies: the bridge's reader sees the end of the stream.
     fn kill(&self) {
-        for task in &self.tasks {
-            task.abort();
-        }
+        self.task.abort();
     }
 }
 
-/// What a hand-played agent says.
-struct Play {
-    /// The mode `session/new` and `session/resume` answer with.
-    mode: &'static str,
-    /// `session/update` params (without `sessionId`) sent during each prompt.
-    updates: Vec<Value>,
-}
-
-/// An agent played by hand: it answers with a mode and sends the given updates.
-fn play(spec: Play) -> (Transport, Received) {
+/// A hand-played agent: it sends `updates` (params without `sessionId`) during each prompt.
+/// acp-mock cannot send an update its typed script rejects, so the raw-update test needs this.
+fn play(updates: Vec<Value>) -> Transport {
     let (client_io, agent_io) = tokio::io::duplex(1 << 16);
     let (agent_r, mut agent_w) = tokio::io::split(agent_io);
-    let received = Received::default();
-    let record = Arc::clone(&received);
     tokio::spawn(async move {
-        let modes = json!({
-            "currentModeId": spec.mode,
-            "availableModes": [
-                { "id": "code", "name": "Code" },
-                { "id": "plan", "name": "Plan" }
-            ]
-        });
         let mut next_session = 0;
         let mut lines = BufReader::new(agent_r).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let message: Value = serde_json::from_str(&line).expect("client sends JSON");
-            lock(&record).push(message.clone());
             let (Some(method), Some(id)) = (message["method"].as_str(), message.get("id")) else {
                 continue;
             };
@@ -144,11 +106,10 @@ fn play(spec: Play) -> (Transport, Received) {
                 "initialize" => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
                 "session/new" => {
                     next_session += 1;
-                    json!({ "sessionId": format!("s{next_session}"), "modes": modes })
+                    json!({ "sessionId": format!("s{next_session}") })
                 }
-                "session/resume" => json!({ "modes": modes }),
                 "session/prompt" => {
-                    for update in &spec.updates {
+                    for update in &updates {
                         let mut params = update.clone();
                         params["sessionId"] = message["params"]["sessionId"].clone();
                         let notification = json!({ "jsonrpc": "2.0", "method": "session/update", "params": params });
@@ -169,7 +130,28 @@ fn play(spec: Play) -> (Transport, Received) {
         }
     });
     let (client_r, client_w) = tokio::io::split(client_io);
-    (Transport::new(client_r, client_w), received)
+    Transport::new(client_r, client_w)
+}
+
+/// A connector that hands out `transport` once.
+fn once(transport: Transport) -> Connector {
+    let mut transport = Some(transport);
+    Box::new(move || transport.take().ok_or(ClientError::Closed))
+}
+
+/// A connector that starts the mock agents of `scripts` one after the other and keeps their
+/// handles.
+fn mock_connector(scripts: Vec<Value>) -> (Connector, Arc<Mutex<Vec<MockAgent>>>) {
+    let agents = Arc::new(Mutex::new(Vec::new()));
+    let started = Arc::clone(&agents);
+    let mut scripts: VecDeque<Value> = scripts.into();
+    let connector: Connector = Box::new(move || {
+        let script = scripts.pop_front().ok_or(ClientError::Closed)?;
+        let (transport, agent) = MockAgent::start(&script);
+        lock(&started).push(agent);
+        Ok(transport)
+    });
+    (connector, agents)
 }
 
 // ---- rig ----------------------------------------------------------------------------------------
@@ -183,26 +165,64 @@ struct Rig {
 }
 
 impl Rig {
+    /// A bridge that starts its agent with `connector` and again when a prompt needs it.
     fn start(
         store: Arc<Store>,
         workdir: &Path,
         connector: Connector,
         tune: impl FnOnce(&mut Config),
     ) -> Self {
+        Self::build(store, workdir, tune, |config, store, sink, commands| {
+            Bridge::connect_with(
+                config,
+                connector,
+                store,
+                Arc::new(SequentialGenerator::new()),
+                sink,
+                commands,
+            )
+            .expect("the agent starts")
+        })
+    }
+
+    /// A bridge that spawns its agent with `command` and spawns it again when a prompt needs it:
+    /// the construction the runner uses for a real agent process.
+    fn spawn(
+        store: Arc<Store>,
+        workdir: &Path,
+        command: impl FnMut() -> tokio::process::Command + Send + 'static,
+        tune: impl FnOnce(&mut Config),
+    ) -> Self {
+        Self::build(store, workdir, tune, |config, store, sink, commands| {
+            Bridge::spawn_with(
+                config,
+                command,
+                store,
+                Arc::new(SequentialGenerator::new()),
+                sink,
+                commands,
+            )
+            .expect("the agent starts")
+        })
+    }
+
+    fn build(
+        store: Arc<Store>,
+        workdir: &Path,
+        tune: impl FnOnce(&mut Config),
+        make: impl FnOnce(
+            Config,
+            Arc<Store>,
+            MemorySink,
+            MemoryCommands,
+        ) -> Bridge<MemorySink, MemoryCommands>,
+    ) -> Self {
         let mut config = Config::new("mch_1", "agt_mock", workdir);
         config.expiry_check_interval = Duration::from_millis(20);
         tune(&mut config);
         let (sink, events) = MemorySink::new();
         let (commands, feed) = MemoryCommands::new();
-        let bridge = Bridge::connect_with(
-            config,
-            connector,
-            store,
-            Arc::new(SequentialGenerator::new()),
-            sink,
-            commands,
-        )
-        .expect("the agent starts");
+        let bridge = make(config, store, sink, commands);
         Self {
             feed,
             events,
@@ -233,6 +253,18 @@ impl Rig {
                 Ok(Some(SinkItem::Failure(failure))) => panic!("command failed: {failure:?}"),
                 Ok(None) => panic!("the bridge stopped; log so far: {:#?}", self.log),
                 Err(_) => panic!("timed out; log so far: {:#?}", self.log),
+            }
+        }
+    }
+
+    /// The next command failure. Events received before it are kept for `until`.
+    async fn failure(&mut self) -> CommandFailure {
+        loop {
+            match timeout(STEP, self.events.recv()).await {
+                Ok(Some(SinkItem::Failure(failure))) => return failure,
+                Ok(Some(SinkItem::Events(envelopes))) => self.pending.extend(envelopes),
+                Ok(None) => panic!("the bridge stopped"),
+                Err(_) => panic!("no command failure within {STEP:?}"),
             }
         }
     }
@@ -299,21 +331,6 @@ fn run_error_code(envelope: &Envelope) -> Option<String> {
     }
 }
 
-/// A connector that starts the mock agents of `scripts` one after the other and keeps their
-/// handles.
-fn mock_connector(scripts: Vec<Value>) -> (Connector, Arc<Mutex<Vec<MockAgent>>>) {
-    let agents = Arc::new(Mutex::new(Vec::new()));
-    let started = Arc::clone(&agents);
-    let mut scripts: VecDeque<Value> = scripts.into();
-    let connector: Connector = Box::new(move || {
-        let script = scripts.pop_front().ok_or(ClientError::Closed)?;
-        let (transport, agent) = MockAgent::start(&script);
-        lock(&started).push(agent);
-        Ok(transport)
-    });
-    (connector, agents)
-}
-
 fn session_snapshot_mode(log: &[Envelope]) -> Vec<String> {
     log.iter()
         .filter_map(|e| match &e.event {
@@ -327,6 +344,54 @@ fn session_snapshot_mode(log: &[Envelope]) -> Vec<String> {
         .collect()
 }
 
+/// The agent's script for an approval it waits on, then a second turn that answers.
+fn stops_on_an_approval() -> Value {
+    json!({ "turns": [{ "steps": [
+        { "text": "one" },
+        { "request_permission": {
+            "toolCall": { "toolCallId": "call_1", "title": "Run tests", "kind": "execute" },
+            "options": [{ "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }] },
+          "expect": "any" }
+    ]}]})
+}
+
+/// Waits until the thread's stored session is detached (its agent went away).
+async fn wait_for_detached(store: &Store) {
+    let detached = async {
+        loop {
+            let row = store.session_for_thread("th_1").expect("read");
+            if row.is_some_and(|row| row.state == SessionState::Detached) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    timeout(STEP, detached).await.expect("session detached");
+}
+
+/// What an earlier process left in the store: a paused task with an approval 10 minutes from
+/// its expiry.
+fn earlier_process_paused(store: &Store, workdir: &Path) {
+    store
+        .upsert_thread("th_1", "agt_mock", &workdir.to_string_lossy())
+        .expect("thread");
+    store.upsert_task("tk_1", "th_1", "paused").expect("task");
+    store
+        .save_interrupt(&PendingInterrupt {
+            interrupt_id: "int_old".to_owned(),
+            thread_id: "th_1".to_owned(),
+            task_id: "tk_1".to_owned(),
+            kind: InterruptKind::Approval,
+            request: json!({
+                "sessionId": "s1",
+                "toolCall": { "toolCallId": "call_1", "title": "Run tests", "kind": "execute" },
+                "options": [{ "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }]
+            }),
+            expires_at_ms: T0 + 600_000,
+        })
+        .expect("interrupt");
+}
+
 // ---- tests --------------------------------------------------------------------------------------
 
 #[tokio::test]
@@ -334,16 +399,8 @@ async fn a_dead_agent_fails_running_tasks_and_the_next_prompt_respawns_and_resum
     let state = TempDir::new().expect("state dir");
     let work = TempDir::new().expect("work dir");
     let store = Rig::open_store(state.path());
-    // The first agent stops in the middle of its turn, on an approval nobody answers.
-    let first = json!({ "turns": [{ "steps": [
-        { "text": "one" },
-        { "request_permission": {
-            "toolCall": { "toolCallId": "call_1", "title": "Run tests", "kind": "execute" },
-            "options": [{ "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }] },
-          "expect": "any" }
-    ]}]});
     let second = json!({ "turns": [{ "steps": [{ "text": "two" }] }] });
-    let (connector, agents) = mock_connector(vec![first, second]);
+    let (connector, agents) = mock_connector(vec![stops_on_an_approval(), second]);
     let mut rig = Rig::start(Arc::clone(&store), work.path(), connector, |_| {});
 
     rig.prompt("th_1", "tk_1");
@@ -359,19 +416,21 @@ async fn a_dead_agent_fails_running_tasks_and_the_next_prompt_respawns_and_resum
     assert_eq!(run_error.reason, RunErrorReason::Error);
     assert_eq!(run_error.code.as_deref(), Some("harness_exited"));
     assert_eq!(error.task_id.as_deref(), Some("tk_1"));
+    // SPEC-004: the open approval is cancelled, not expired.
+    assert!(
+        rest.iter().any(|e| matches!(&e.event,
+            Event::InterruptResolved(r) if r.outcome == ResolvedOutcome::Cancelled)),
+        "{rest:#?}"
+    );
+    assert!(
+        !rest.iter().any(|e| matches!(&e.event,
+            Event::InterruptResolved(r) if r.outcome == ResolvedOutcome::Expired)),
+        "{rest:#?}"
+    );
 
     // `Reattacher::connection_lost`: the stored session is detached, nothing waits on the
     // dead agent's approval.
-    let detached = async {
-        loop {
-            let row = store.session_for_thread("th_1").expect("read");
-            if row.is_some_and(|row| row.state == SessionState::Detached) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    };
-    timeout(STEP, detached).await.expect("session detached");
+    wait_for_detached(&store).await;
     assert!(store.open_interrupts().expect("read").is_empty());
     assert_eq!(
         store.task("tk_1").expect("read").expect("task").state,
@@ -391,8 +450,8 @@ async fn a_dead_agent_fails_running_tasks_and_the_next_prompt_respawns_and_resum
         let agents = lock(&agents);
         assert_eq!(agents.len(), 2, "one respawn");
         (
-            requests(&agents[1].received, "session/resume"),
-            requests(&agents[1].received, "session/new"),
+            requests(&agents[1].recorder, "session/resume"),
+            requests(&agents[1].recorder, "session/new"),
         )
     };
     assert_eq!(resumes.len(), 1, "the session is resumed");
@@ -403,6 +462,95 @@ async fn a_dead_agent_fails_running_tasks_and_the_next_prompt_respawns_and_resum
         "completed"
     );
     rig.finish().await;
+}
+
+#[tokio::test]
+async fn a_subprocess_agent_started_by_spawn_with_is_started_again_after_it_is_killed() {
+    let state = TempDir::new().expect("state dir");
+    let work = TempDir::new().expect("work dir");
+    let store = Rig::open_store(state.path());
+    let pid_file = work.path().join("agent.pid");
+    let mut scripts: VecDeque<Value> = VecDeque::from(vec![
+        stops_on_an_approval(),
+        json!({ "turns": [{ "steps": [{ "text": "two" }] }] }),
+    ]);
+    let child_pid_file = pid_file.clone();
+    // Each spawn runs this test binary again as the agent (see `subprocess_acp_mock_child`).
+    let command = move || {
+        let script = scripts
+            .pop_front()
+            .unwrap_or_else(|| json!({ "turns": [] }));
+        let mut command =
+            tokio::process::Command::new(std::env::current_exe().expect("test binary"));
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "subprocess_acp_mock_child",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_SCRIPT_ENV, script.to_string())
+            .env(CHILD_PID_ENV, &child_pid_file)
+            .stderr(Stdio::null());
+        command
+    };
+    let mut rig = Rig::spawn(Arc::clone(&store), work.path(), command, |_| {});
+
+    rig.prompt("th_1", "tk_1");
+    rig.until(is_paused).await;
+    let first_pid = read_pid(&pid_file);
+    let killed = std::process::Command::new("kill")
+        .args(["-KILL", &first_pid.to_string()])
+        .status()
+        .expect("kill");
+    assert!(killed.success(), "the agent process was killed");
+
+    let rest = rig.until(is_run_error).await;
+    assert_eq!(
+        run_error_code(rest.last().expect("RunError")).as_deref(),
+        Some("harness_exited")
+    );
+    wait_for_detached(&store).await;
+
+    rig.prompt("th_1", "tk_2");
+    let stream = rig.until(is_success).await;
+    assert!(
+        stream
+            .iter()
+            .any(|e| matches!(&e.event, Event::TextMessageContent(c) if c.delta == "two")),
+        "the new agent process answered: {stream:#?}"
+    );
+    assert_ne!(read_pid(&pid_file), first_pid, "a new agent process");
+    rig.finish().await;
+}
+
+fn read_pid(path: &Path) -> u32 {
+    std::fs::read_to_string(path)
+        .expect("the agent wrote its pid")
+        .trim()
+        .parse()
+        .expect("a pid")
+}
+
+/// The agent for [`a_subprocess_agent_started_by_spawn_with_is_started_again_after_it_is_killed`].
+/// It is not a test: it runs only when the parent re-runs this binary with the script in
+/// `CHILD_SCRIPT_ENV`.
+#[tokio::test]
+#[ignore = "run by a_subprocess_agent_started_by_spawn_with_is_started_again_after_it_is_killed"]
+async fn subprocess_acp_mock_child() {
+    let Ok(script) = std::env::var(CHILD_SCRIPT_ENV) else {
+        return;
+    };
+    let pid_file = std::env::var(CHILD_PID_ENV).expect("the parent names the pid file");
+    std::fs::write(pid_file, std::process::id().to_string()).expect("write the pid");
+    let script = acp_mock::Script::from_json(&script).expect("valid script");
+    // The test harness has printed a line without its newline. End that line so the first
+    // JSON message starts on its own line.
+    println!();
+    acp_mock::run(script, tokio::io::stdin(), tokio::io::stdout())
+        .await
+        .expect("agent serves until stdin closes");
 }
 
 #[tokio::test]
@@ -427,15 +575,11 @@ async fn updates_reach_the_log_as_the_agent_sent_them_and_unparseable_ones_becom
         .is_err(),
         "the typed schema rejects the update"
     );
-    let (transport, _received) = play(Play {
-        mode: "code",
-        updates: vec![json!({ "update": chunk }), json!({ "update": future })],
-    });
-    let connector: Connector = {
-        let mut transport = Some(transport);
-        Box::new(move || transport.take().ok_or(ClientError::Closed))
-    };
-    let mut rig = Rig::start(store, work.path(), connector, |_| {});
+    let transport = play(vec![
+        json!({ "update": chunk }),
+        json!({ "update": future }),
+    ]);
+    let mut rig = Rig::start(store, work.path(), once(transport), |_| {});
     rig.prompt("th_1", "tk_1");
     rig.until(is_success).await;
     let log = rig.finish().await;
@@ -483,16 +627,19 @@ async fn new_and_resumed_sessions_get_the_snapshot_and_the_threads_mcp_servers()
             vec![serde_json::from_value(server("only_th_2")).expect("server")],
         );
     };
+    // acp-mock advertises the session's modes on session/new, session/resume and session/load.
+    let script = |mode: &str| {
+        json!({
+            "modes": {
+                "currentModeId": mode,
+                "availableModes": [{ "id": "code", "name": "Code" }, { "id": "plan", "name": "Plan" }]
+            },
+            "turns": [{ "steps": [] }]
+        })
+    };
 
     // First process: two threads, two `session/new`.
-    let (transport, received) = play(Play {
-        mode: "code",
-        updates: Vec::new(),
-    });
-    let connector: Connector = {
-        let mut transport = Some(transport);
-        Box::new(move || transport.take().ok_or(ClientError::Closed))
-    };
+    let (connector, agents) = mock_connector(vec![script("code")]);
     let mut rig = Rig::start(Rig::open_store(state.path()), work.path(), connector, tune);
     rig.prompt("th_1", "tk_1");
     rig.until(is_success).await;
@@ -500,7 +647,8 @@ async fn new_and_resumed_sessions_get_the_snapshot_and_the_threads_mcp_servers()
     rig.until(is_success).await;
     let log = rig.finish().await;
 
-    let news = requests(&received, "session/new");
+    let first = lock(&agents)[0].recorder.clone();
+    let news = requests(&first, "session/new");
     assert_eq!(news.len(), 2);
     assert_eq!(news[0]["params"]["mcpServers"], json!([wire("shared")]));
     assert_eq!(news[1]["params"]["mcpServers"], json!([wire("only_th_2")]));
@@ -518,26 +666,20 @@ async fn new_and_resumed_sessions_get_the_snapshot_and_the_threads_mcp_servers()
 
     // Second process, same state: the thread's session is resumed with the same servers, and
     // the resume response is snapshotted.
-    let (transport, received) = play(Play {
-        mode: "plan",
-        updates: Vec::new(),
-    });
-    let connector: Connector = {
-        let mut transport = Some(transport);
-        Box::new(move || transport.take().ok_or(ClientError::Closed))
-    };
+    let (connector, agents) = mock_connector(vec![script("plan")]);
     let mut rig = Rig::start(Rig::open_store(state.path()), work.path(), connector, tune);
     rig.prompt("th_2", "tk_3");
     rig.until(is_success).await;
     let log = rig.finish().await;
-    let resumes = requests(&received, "session/resume");
+    let second = lock(&agents)[0].recorder.clone();
+    let resumes = requests(&second, "session/resume");
     assert_eq!(resumes.len(), 1);
-    assert_eq!(resumes[0]["params"]["sessionId"], "s2");
+    assert_eq!(resumes[0]["params"]["sessionId"], "sess_mock_2");
     assert_eq!(
         resumes[0]["params"]["mcpServers"],
         json!([wire("only_th_2")])
     );
-    assert!(requests(&received, "session/new").is_empty());
+    assert!(requests(&second, "session/new").is_empty());
     assert_eq!(session_snapshot_mode(&log), ["plan"]);
 }
 
@@ -546,28 +688,10 @@ async fn interrupts_stored_by_a_previous_process_fail_their_task_at_startup() {
     let state = TempDir::new().expect("state dir");
     let work = TempDir::new().expect("work dir");
     let store = Rig::open_store(state.path());
-    // What the previous process left: a paused task with an approval 10 minutes from expiry.
-    store
-        .upsert_thread("th_1", "agt_mock", &work.path().to_string_lossy())
-        .expect("thread");
-    store.upsert_task("tk_1", "th_1", "paused").expect("task");
-    store
-        .save_interrupt(&PendingInterrupt {
-            interrupt_id: "int_old".to_owned(),
-            thread_id: "th_1".to_owned(),
-            task_id: "tk_1".to_owned(),
-            kind: InterruptKind::Approval,
-            request: json!({
-                "sessionId": "s1",
-                "toolCall": { "toolCallId": "call_1", "title": "Run tests", "kind": "execute" },
-                "options": [{ "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }]
-            }),
-            expires_at_ms: T0 + 600_000,
-        })
-        .expect("interrupt");
+    earlier_process_paused(&store, work.path());
 
-    // The clock never moves, so only the startup check can end the task.
-    let (connector, _agents) = mock_connector(vec![json!({ "turns": [{ "steps": [] }] })]);
+    // The clock never moves, so the TTL cannot end the task: only the startup check can.
+    let (connector, _agents) = mock_connector(vec![json!({ "turns": [] })]);
     let mut rig = Rig::start(Arc::clone(&store), work.path(), connector, |_| {});
     let ended = rig.until(is_run_error).await;
     let resolved = ended
@@ -578,10 +702,10 @@ async fn interrupts_stored_by_a_previous_process_fail_their_task_at_startup() {
         })
         .expect("InterruptResolved");
     assert_eq!(resolved.interrupt_id, "int_old");
-    assert_eq!(resolved.outcome, ResolvedOutcome::Expired);
+    assert_eq!(resolved.outcome, ResolvedOutcome::Cancelled);
     assert_eq!(
         run_error_code(ended.last().expect("RunError")).as_deref(),
-        Some("expired")
+        Some("harness_exited")
     );
     assert!(ended.iter().all(|e| e.task_id.as_deref() == Some("tk_1")));
     assert!(store.open_interrupts().expect("read").is_empty());
@@ -589,5 +713,55 @@ async fn interrupts_stored_by_a_previous_process_fail_their_task_at_startup() {
         store.task("tk_1").expect("read").expect("task").state,
         "failed"
     );
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn an_approval_for_an_interrupt_an_earlier_process_stored_answers_unknown_interrupt() {
+    let state = TempDir::new().expect("state dir");
+    let work = TempDir::new().expect("work dir");
+    let store = Rig::open_store(state.path());
+    earlier_process_paused(&store, work.path());
+
+    let (connector, _agents) = mock_connector(vec![json!({ "turns": [] })]);
+    let mut rig = Rig::start(Arc::clone(&store), work.path(), connector, |_| {});
+    // Startup ends the task; this process has not loaded the thread.
+    rig.until(is_run_error).await;
+    rig.feed.send(Command::Approval {
+        thread_id: "th_1".into(),
+        task_id: "tk_1".into(),
+        interrupt_id: "int_old".into(),
+        outcome: Outcome::Selected {
+            option_id: "allow_once".into(),
+        },
+        resolved_by: user(),
+    });
+    let failure = rig.failure().await;
+    assert_eq!(failure.code, CommandErrorCode::UnknownInterrupt);
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn an_approval_for_a_thread_no_process_has_stored_answers_unknown_thread() {
+    let state = TempDir::new().expect("state dir");
+    let work = TempDir::new().expect("work dir");
+    let (connector, _agents) = mock_connector(vec![json!({ "turns": [] })]);
+    let mut rig = Rig::start(
+        Rig::open_store(state.path()),
+        work.path(),
+        connector,
+        |_| {},
+    );
+    rig.feed.send(Command::Approval {
+        thread_id: "th_9".into(),
+        task_id: "tk_9".into(),
+        interrupt_id: "int_9".into(),
+        outcome: Outcome::Selected {
+            option_id: "allow_once".into(),
+        },
+        resolved_by: user(),
+    });
+    let failure = rig.failure().await;
+    assert_eq!(failure.code, CommandErrorCode::UnknownThread);
     rig.finish().await;
 }

@@ -12,10 +12,15 @@
 //! `session/prompt` of a session runs `turns[N-1]`. A prompt past the end of the script
 //! fails with a JSON-RPC error, so a test notices a script that is too short.
 //!
+//! [`run_recorded`] keeps every message the agent received in a [`Recorder`], so a test can
+//! check what the client sent (for example `mcpServers` on `session/new`).
+//!
 //! # Script format
 //!
 //! ```json
 //! {
+//!   "modes": { "currentModeId": "code", "availableModes": [{ "id": "code", "name": "Code" }] },
+//!   "config_options": [],
 //!   "turns": [
 //!     {
 //!       "steps": [
@@ -50,6 +55,9 @@
 //!   ]
 //! }
 //! ```
+//!
+//! `modes` and `config_options` are optional. They are the ACP `SessionModeState` and the list of
+//! `SessionConfigOption`, returned by `session/new`, `session/resume` and `session/load`.
 //!
 //! Each step has exactly one step key, plus an optional `expect` on the two client
 //! requests. Payloads are ACP v1 JSON, checked against the `protocol::acp` types when the
@@ -87,7 +95,7 @@
 mod agent;
 mod script;
 
-pub use agent::run;
+pub use agent::{Recorder, run, run_recorded};
 pub use script::{FAKE_API_KEY, Script, Step, Turn};
 
 /// Crate name, used by the skeleton smoke test.
