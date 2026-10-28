@@ -954,6 +954,51 @@ fn membership_is_required_for_org_routes_and_removal_ends_the_session() {
 
 /// M2-003e: the unauthenticated start is limited per `CF-Connecting-IP`; other IPs and the rest of
 /// the suite (which sends no such header) are not affected.
+/// The bootstrap owner (the one `owner()` made) is the only owner in the org: no test issues one.
+#[test]
+fn the_bootstrap_owner_signs_in_with_the_configured_github_login_and_no_other_login_can() {
+    let listed = http("GET", "/v1/members", Some(owner()), None).json();
+    let owner_id = listed["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .find(|m| m["role"] == json!("owner"))
+        .expect("the bootstrap owner")["user_id"]
+        .clone();
+    let login = env("BOOTSTRAP_OWNER_GITHUB_LOGIN");
+
+    // Another GitHub account, with no invite, is refused and linked to nothing.
+    let (_, challenge) = pkce();
+    let landing = browse(
+        &loopback(),
+        &challenge,
+        &unique("appstate"),
+        &unique("mallory"),
+        next_id(),
+    );
+    assert_eq!(landing.param("error").as_deref(), Some("access_denied"));
+
+    // The configured login signs in as the owner, whatever the age of the owner's account.
+    let reply = desktop_sign_in(&login, next_id());
+    token_of(&reply);
+    let body = reply.json();
+    assert_eq!(body["role"], json!("owner"), "{body}");
+    assert_eq!(body["user"]["id"], owner_id, "{body}");
+
+    // Again, the same account (found by its GitHub id now).
+    let again = desktop_sign_in(&login, next_id());
+    token_of(&again);
+    assert_eq!(again.json()["user"]["id"], owner_id);
+
+    // The link is audited, and says it came from the bootstrap login.
+    assert!(
+        audit_actions()
+            .iter()
+            .any(|(action, row)| action == "auth.github.link"
+                && row.contains("bootstrap_owner_login"))
+    );
+}
+
 #[test]
 fn authorize_is_rate_limited_per_connecting_ip() {
     let (_, challenge) = pkce();

@@ -31,5 +31,7 @@ wrangler secret put BOOTSTRAP_OWNER_TOKEN --env production # you choose it; used
 wrangler secret put VAPID_PRIVATE_KEY --env production     # Web Push; the public key goes in [env.production.vars]
 ```
 
+Var `BOOTSTRAP_OWNER_GITHUB_LOGIN` (optional, M2-003f): set it to the GitHub login of the first owner in `[env.production.vars]`; that owner's first GitHub sign-in then makes them the owner, however old their account is. Once they have signed in, the var does nothing more.
+
 Generate the master key with `openssl rand -base64 32`. Never paste any of these into chat,
 a commit, a log or the ledger.

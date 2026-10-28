@@ -106,10 +106,15 @@ fn hub_origin(env: &Env, headers: &HeaderMap) -> String {
 
 fn config(env: &Env, headers: &HeaderMap) -> Result<GithubConfig, ApiError> {
     let client_id = var(env, "GITHUB_CLIENT_ID").ok_or_else(not_configured)?;
+    // An invalid login is ignored (it then links nothing), never guessed at.
+    let bootstrap_login = var(env, "BOOTSTRAP_OWNER_GITHUB_LOGIN")
+        .map(|login| login.to_ascii_lowercase())
+        .filter(|login| github::is_valid_login(login));
     Ok(GithubConfig {
         client_id,
         api_base: var(env, "GITHUB_API_BASE").map(|base| base.trim_end_matches('/').to_owned()),
         hub_origin: hub_origin(env, headers),
+        bootstrap_login,
     })
 }
 

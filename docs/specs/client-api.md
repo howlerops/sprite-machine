@@ -260,7 +260,8 @@ before it stores the token.
 ### 5.9 GitHub sign-in, members and invites
 
 > M2-003b. OAuth authorization code + PKCE (RFC 7636, S256 only) for the desktop app (RFC 8252) and
-> the web page. The hub is the authorization server for the client and the confidential client of
+> the web page. M2-003f: the var `BOOTSTRAP_OWNER_GITHUB_LOGIN` (optional) names the GitHub login of the
+> bootstrap owner; its first sign-in links that owner (whatever the account's age, only while it has no GitHub id). The hub is the authorization server for the client and the confidential client of
 > GitHub (it holds `GITHUB_CLIENT_SECRET`; the client never sees it). The result is an ordinary
 > session token (§2) with the user's role in the org.
 

@@ -157,7 +157,24 @@ fn config() -> GithubConfig {
         client_id: "test-client-id".to_owned(),
         api_base: Some("http://mock.invalid".to_owned()),
         hub_origin: HUB.to_owned(),
+        bootstrap_login: None,
     }
+}
+
+/// `config()` with `BOOTSTRAP_OWNER_GITHUB_LOGIN` set to `login` (lowercase, as the routes make it).
+fn config_with_bootstrap(login: &str) -> GithubConfig {
+    GithubConfig {
+        bootstrap_login: Some(login.to_owned()),
+        ..config()
+    }
+}
+
+/// Makes `usr_boot` the bootstrap owner of `org_id`: the `auth.bootstrap` audit row names it.
+fn audit_bootstrap(db: &Fake, org_id: &str, owner_id: &str) {
+    db.exec(&format!(
+        "INSERT INTO audit_log (id, org_id, action, detail_json) \
+         VALUES ('aud_boot', '{org_id}', 'auth.bootstrap', '{{\"user_id\":\"{owner_id}\"}}')"
+    ));
 }
 
 fn query(redirect_uri: &str) -> Vec<(String, String)> {
@@ -808,6 +825,133 @@ fn a_pre_created_user_is_linked_by_login_only_in_the_first_seven_days_and_the_li
     age_user(&db, "usr_edge", T0 + 10, 7 * DAY_MS + 10);
     let edge = sign_in(&db, &alice(5003, "edge"), LOOPBACK, T0 + 10);
     assert_eq!(param_of(&edge, "error").as_deref(), Some("access_denied"));
+}
+
+// ---- the bootstrap owner's login (BOOTSTRAP_OWNER_GITHUB_LOGIN) --------------------------------
+
+/// [`sign_in`] with the given config (the bootstrap login is a config value, not a seed).
+fn sign_in_with(
+    db: &Fake,
+    config: &GithubConfig,
+    user: &GithubUser,
+    redirect_uri: &str,
+    now: i64,
+) -> String {
+    let url = start(db, &query(redirect_uri), now).expect("authorize");
+    let pending = consume(db, &url, now).expect("pending");
+    block_on(finish_callback(db, config, &pending, user, now)).expect("finish")
+}
+
+#[test]
+fn the_bootstrap_owner_is_linked_by_the_configured_login_whatever_its_age_and_only_once() {
+    let db = Fake::new();
+    seed_org(&db, "org_a", "usr_boot");
+    audit_bootstrap(&db, "org_a", "usr_boot");
+    // Far past the 7-day rule: only the operator-set login can link this owner.
+    age_user(&db, "usr_boot", T0, 30 * DAY_MS);
+    let config = config_with_bootstrap("boss");
+
+    let location = sign_in_with(&db, &config, &alice(9001, "Boss"), LOOPBACK, T0);
+    let code = param_of(&location, "code").expect("the bootstrap owner is linked");
+    let granted = token(&db, &code, VERIFIER, LOOPBACK, T0).expect("token");
+    assert_eq!(granted["user"]["id"], json!("usr_boot"));
+    assert_eq!(granted["role"], json!("owner"));
+    assert_eq!(
+        db.rows("SELECT github_id FROM users WHERE id = 'usr_boot'")[0]["github_id"],
+        json!(9001)
+    );
+    // Audited as a link, and by which rule.
+    let audited = db.rows("SELECT detail_json FROM audit_log WHERE action = 'auth.github.link'");
+    assert_eq!(audited.len(), 1);
+    assert!(
+        audited[0]["detail_json"]
+            .as_str()
+            .expect("detail")
+            .contains("bootstrap_owner_login")
+    );
+
+    // Once: the same account signs in as the owner by its GitHub id, with no second link.
+    let again = sign_in_with(&db, &config, &alice(9001, "boss"), LOOPBACK, T0 + 1);
+    let code = param_of(&again, "code").expect("the owner signs in again");
+    assert_eq!(
+        token(&db, &code, VERIFIER, LOOPBACK, T0 + 1).expect("token")["user"]["id"],
+        json!("usr_boot")
+    );
+    assert_eq!(
+        db.count("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'auth.github.link'"),
+        1
+    );
+    // Another GitHub account with the same login gets nothing: the owner already has an id.
+    let other = sign_in_with(&db, &config, &alice(9002, "boss"), LOOPBACK, T0 + 2);
+    assert_eq!(param_of(&other, "error").as_deref(), Some("access_denied"));
+    assert_eq!(
+        db.count("SELECT COUNT(*) AS n FROM users WHERE github_id = 9002"),
+        0
+    );
+}
+
+#[test]
+fn no_other_login_can_use_the_bootstrap_owner_link() {
+    let db = Fake::new();
+    seed_org(&db, "org_a", "usr_boot");
+    audit_bootstrap(&db, "org_a", "usr_boot");
+    // Another admin-made user, old enough to be refused by the 7-day rule anyway.
+    db.exec(
+        "INSERT INTO users (id, display_name, github_login) VALUES ('usr_pal', 'Pal', 'Pal');
+         INSERT INTO members (org_id, user_id, role) VALUES ('org_a', 'usr_pal', 'admin');",
+    );
+    age_user(&db, "usr_pal", T0, 30 * DAY_MS);
+    age_user(&db, "usr_boot", T0, 30 * DAY_MS);
+    let config = config_with_bootstrap("boss");
+
+    // A login that is not the configured one, and the configured one of a non-owner user.
+    for (id, login) in [(9101, "mallory"), (9102, "pal")] {
+        let location = sign_in_with(&db, &config, &alice(id, login), LOOPBACK, T0);
+        assert_eq!(
+            param_of(&location, "error").as_deref(),
+            Some("access_denied"),
+            "{login}"
+        );
+    }
+    // With no BOOTSTRAP_OWNER_GITHUB_LOGIN at all, the configured login means nothing either.
+    let unset = sign_in(&db, &alice(9103, "boss"), LOOPBACK, T0);
+    assert_eq!(param_of(&unset, "error").as_deref(), Some("access_denied"));
+
+    assert!(db.rows("SELECT github_id FROM users WHERE id = 'usr_boot'")[0]["github_id"].is_null());
+    assert!(db.rows("SELECT github_id FROM users WHERE id = 'usr_pal'")[0]["github_id"].is_null());
+    assert_eq!(
+        db.count("SELECT COUNT(*) AS n FROM users WHERE github_id IN (9101, 9102, 9103)"),
+        0
+    );
+}
+
+#[test]
+fn the_bootstrap_link_needs_the_bootstrap_audit_row_and_an_owner_without_a_github_id() {
+    let db = Fake::new();
+    // A login-named user in an org that was never bootstrapped by this owner: no audit row.
+    seed_org(&db, "org_a", "usr_plain");
+    db.exec("UPDATE users SET github_login = 'boss' WHERE id = 'usr_plain'");
+    age_user(&db, "usr_plain", T0, 30 * DAY_MS);
+    let config = config_with_bootstrap("boss");
+    let refused = sign_in_with(&db, &config, &alice(9201, "boss"), LOOPBACK, T0);
+    assert_eq!(
+        param_of(&refused, "error").as_deref(),
+        Some("access_denied")
+    );
+    assert!(
+        db.rows("SELECT github_id FROM users WHERE id = 'usr_plain'")[0]["github_id"].is_null()
+    );
+
+    // The bootstrap owner, but already holding a GitHub id: nothing is relinked.
+    seed_org(&db, "org_b", "usr_boot");
+    audit_bootstrap(&db, "org_b", "usr_boot");
+    db.exec("UPDATE users SET github_id = 4444 WHERE id = 'usr_boot'");
+    let held = sign_in_with(&db, &config, &alice(9202, "boss"), LOOPBACK, T0);
+    assert_eq!(param_of(&held, "error").as_deref(), Some("access_denied"));
+    assert_eq!(
+        db.rows("SELECT github_id FROM users WHERE id = 'usr_boot'")[0]["github_id"],
+        json!(4444)
+    );
 }
 
 // ---- GitHub replies --------------------------------------------------------------------------
