@@ -14,13 +14,16 @@ use base64::engine::general_purpose::STANDARD;
 use protocol::tunnel::ContentPart;
 use sidecar::acp::fs::Workspace;
 use sidecar::bridge::files::{
-    AttachmentError, DEFAULT_MAX_BYTES, FilePolicy, is_public, prompt_blocks, sanitize_name,
-    sha256_hex,
+    AttachmentError, DEFAULT_MAX_BYTES, FilePolicy, has_image_magic, is_public, prompt_blocks,
+    sanitize_name, sha256_hex,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfake-image-bytes";
+const JPEG: &[u8] = b"\xff\xd8\xff\xe0fake-jpeg-bytes";
+const GIF: &[u8] = b"GIF89afake-gif-bytes";
+const WEBP: &[u8] = b"RIFF\x10\x00\x00\x00WEBPVP8 fake-webp";
 const NOTES: &str = "hello attachments";
 
 // ---- a local HTTP server -----------------------------------------------------------------------
@@ -50,6 +53,14 @@ fn reply_for(path: &str) -> Reply {
     match path {
         "/image.png" => ok("image/png", PNG),
         "/notes.txt" => ok("text/plain", NOTES),
+        "/image.jpg" => ok("image/jpeg", JPEG),
+        "/image.gif" => ok("image/gif", GIF),
+        "/image.webp" => ok("image/webp", WEBP),
+        // Declared as an image, but the bytes are something else.
+        "/png-as-jpeg.jpg" => ok("image/jpeg", PNG),
+        "/text-as-png.png" => ok("image/png", NOTES),
+        "/gif-as-png.png" => ok("image/png", GIF),
+        "/wav-as-webp.webp" => ok("image/webp", b"RIFF\x24\x00\x00\x00WAVEfmt "),
         "/big" => ok("application/octet-stream", vec![7u8; 100]),
         "/big-chunked" => Reply {
             chunked: true,
@@ -183,6 +194,70 @@ async fn image_file_becomes_an_image_block() {
     assert_eq!(value["data"], STANDARD.encode(PNG));
     // Images are not written to the workspace.
     assert!(!attachments_dir(dir.path()).exists());
+}
+
+#[tokio::test]
+async fn each_image_type_with_matching_bytes_becomes_an_image_block() {
+    let addr = serve().await;
+    let (dir, ws) = workspace();
+    for (name, mime, path, bytes) in [
+        ("pic.png", "image/png", "/image.png", PNG),
+        ("pic.jpg", "image/jpeg", "/image.jpg", JPEG),
+        ("pic.gif", "image/gif", "/image.gif", GIF),
+        ("pic.webp", "image/webp", "/image.webp", WEBP),
+    ] {
+        let parts = [file(name, mime, format!("http://{addr}{path}"))];
+        let blocks = prompt_blocks(&parts, &ws, &test_policy())
+            .await
+            .unwrap_or_else(|error| panic!("{mime}: {error}"));
+        let value = serde_json::to_value(&blocks[0]).expect("json");
+        assert_eq!(value["type"], "image", "{mime}");
+        assert_eq!(value["mimeType"], mime);
+        assert_eq!(value["data"], STANDARD.encode(bytes), "{mime}");
+    }
+    assert!(!attachments_dir(dir.path()).exists());
+}
+
+#[tokio::test]
+async fn image_bytes_that_do_not_match_the_declared_type_fail_with_the_attachment_code() {
+    let addr = serve().await;
+    let (dir, ws) = workspace();
+    // Text declared as PNG, a GIF declared as PNG, a PNG declared as JPEG, a RIFF/WAVE file
+    // declared as WebP.
+    for (name, mime, path) in [
+        ("a.png", "image/png", "/text-as-png.png"),
+        ("a.png", "image/png", "/gif-as-png.png"),
+        ("a.jpg", "image/jpeg", "/png-as-jpeg.jpg"),
+        ("a.webp", "image/webp", "/wav-as-webp.webp"),
+    ] {
+        let parts = [file(name, mime, format!("http://{addr}{path}"))];
+        let error = prompt_blocks(&parts, &ws, &test_policy())
+            .await
+            .expect_err(path);
+        assert!(
+            matches!(error, AttachmentError::ImageMismatch { .. }),
+            "{path}: {error}"
+        );
+        assert_eq!(error.code(), "attachment");
+        assert!(!error.to_string().contains(&addr.to_string()));
+    }
+    assert!(!attachments_dir(dir.path()).exists());
+}
+
+#[test]
+fn image_magic_is_checked_per_type() {
+    assert!(has_image_magic("image/png", PNG));
+    assert!(has_image_magic("image/jpeg", JPEG));
+    assert!(has_image_magic("image/gif", GIF));
+    assert!(has_image_magic("image/gif", b"GIF87a"));
+    assert!(has_image_magic("image/webp", WEBP));
+    // A type's magic is not accepted for another type, and short input is refused.
+    assert!(!has_image_magic("image/png", JPEG));
+    assert!(!has_image_magic("image/jpeg", PNG));
+    assert!(!has_image_magic("image/gif", PNG));
+    assert!(!has_image_magic("image/webp", b"RIFF"));
+    assert!(!has_image_magic("image/webp", b"RIFF\x00\x00\x00\x00WAVE"));
+    assert!(!has_image_magic("image/png", b""));
 }
 
 #[tokio::test]

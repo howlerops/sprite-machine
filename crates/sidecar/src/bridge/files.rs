@@ -4,7 +4,8 @@
 //! fetches each one and turns it into ACP content:
 //!
 //! - an image (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) becomes an ACP `image`
-//!   block with the bytes base64-encoded;
+//!   block with the bytes base64-encoded, once its magic bytes match the declared type
+//!   ([`AttachmentError::ImageMismatch`] otherwise);
 //! - any other file is written to `<workspace>/.sm/attachments/<sanitized name>` and the
 //!   prompt carries an `@.sm/attachments/<name>` reference, relative to the workspace.
 //!
@@ -106,6 +107,8 @@ pub enum AttachmentError {
     Status { name: String, status: u16 },
     #[error("attachment {name}: sha256 does not match")]
     Sha256Mismatch { name: String },
+    #[error("attachment {name}: bytes do not match the declared image type")]
+    ImageMismatch { name: String },
     #[error("attachment {name}: could not be stored: {message}")]
     Store { name: String, message: String },
     #[error("prompt content could not be encoded: {0}")]
@@ -183,6 +186,12 @@ async fn file_block(
         });
     }
     if let Some(image) = image_mime(mime_type) {
+        // The declared type is what the harness is told; the bytes must agree with it.
+        if !has_image_magic(image, &bytes) {
+            return Err(AttachmentError::ImageMismatch {
+                name: name.to_owned(),
+            });
+        }
         return Ok(json!({
             "type": "image",
             "data": STANDARD.encode(&bytes),
@@ -203,6 +212,18 @@ pub fn image_mime(mime_type: &str) -> Option<&'static str> {
         "image/gif" => Some("image/gif"),
         "image/webp" => Some("image/webp"),
         _ => None,
+    }
+}
+
+/// Whether `bytes` start with the magic number of the image type `mime` (one of the four
+/// [`image_mime`] types). WebP is a RIFF container, so its `WEBP` form tag is checked too.
+pub fn has_image_magic(mime: &str, bytes: &[u8]) -> bool {
+    match mime {
+        "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "image/webp" => bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        _ => false,
     }
 }
 
