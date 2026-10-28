@@ -1645,6 +1645,9 @@ items:
     title: 'scripts/setup-dev.sh: install xdotool (run-desktop.sh input driver)'
     milestone: M1b
     phase: P1
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: docs
     size: S
     risk: low
