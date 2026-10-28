@@ -8,23 +8,31 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::State;
+use axum::extract::ws::{Message as WsMessage, WebSocketUpgrade};
 use axum::http::StatusCode;
-use axum::routing::post;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use client_core::Connectivity;
+use client_core::outbox::{
+    FixedRandom, ManualClock, PostRequest, PostResponse, Transport, TransportError,
+};
+use client_core::{
+    Applied, Cache, Connection, Connectivity, Intent, Outbox, RetryPolicy, Subscription, ThreadSync,
+};
 use client_gpui::shell::auth::{LoginFailure, SessionGrant, api_url};
 use client_gpui::shell::browser::{Browser, RecordingBrowser};
 use client_gpui::shell::i18n::{self, Catalog};
 use client_gpui::shell::login::{LoginEvent, LoginMethod, LoginModel, LoginStage};
-use client_gpui::shell::model::{Screen, ShellModel};
+use client_gpui::shell::model::{Screen, ShellModel, parse_hub};
 use client_gpui::shell::nav::{NavModel, Section};
 use client_gpui::shell::pairing::{self, DeviceCode, PollOutcome, PollSchedule, QrMatrix};
 use client_gpui::shell::pkce::{self, Callback, GithubSignIn, LoopbackListener, Pkce};
 use client_gpui::shell::prefs::{Appearance, Preferences, ThemeChoice};
 use client_gpui::shell::session::{FileStore, MemoryStore, Session, SessionStore};
 use client_gpui::shell::{AppConfig, AppShell};
+use gpui_kit::Focusable as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
@@ -165,6 +173,62 @@ fn hub_with(script: Vec<&'static str>, expires_in: u64) -> (Arc<HubState>, Strin
     });
     let url = spawn_hub(state.clone());
     (state, url)
+}
+
+/// A fake hub for the subscription: while `up` is false the upgrade is refused (503), as an
+/// unreachable or failing hub would answer. When it is up, the socket sends `live` and stays open.
+async fn subscribe(State(up): State<Arc<AtomicBool>>, upgrade: WebSocketUpgrade) -> Response {
+    if !up.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    upgrade.on_upgrade(|mut socket| async move {
+        let _ = socket
+            .send(WsMessage::Text(r#"{"type":"live"}"#.into()))
+            .await;
+        while let Some(Ok(_)) = socket.recv().await {}
+    })
+}
+
+fn spawn_socket_hub(up: Arc<AtomicBool>) -> String {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("socket hub runtime");
+        runtime.block_on(async move {
+            let app = Router::new()
+                .route("/threads/{thread_id}/subscribe", get(subscribe))
+                .with_state(up);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind socket hub");
+            sender
+                .send(listener.local_addr().expect("addr").port())
+                .expect("send port");
+            axum::serve(listener, app).await.expect("serve");
+        });
+    });
+    format!(
+        "http://127.0.0.1:{}",
+        receiver.recv().expect("socket hub port")
+    )
+}
+
+/// Answers every POST with 200, so the outbox's link comes up.
+struct Answering;
+
+impl Transport for Answering {
+    fn post(
+        &self,
+        _request: PostRequest,
+    ) -> impl std::future::Future<Output = Result<PostResponse, TransportError>> + Send {
+        std::future::ready(Ok(PostResponse {
+            status: 200,
+            body: serde_json::json!({}),
+        }))
+    }
 }
 
 async fn instant(_: Duration) {}
@@ -852,7 +916,13 @@ fn focus_order_is_stable_labelled_and_unique_on_every_screen() {
     check(&shell, &nav_refs);
     shell.nav.select(Section::Settings);
     let mut with_settings = nav_refs.clone();
-    with_settings.extend(["theme-system", "theme-light", "theme-dark", "sign-out"]);
+    with_settings.extend([
+        "theme-system",
+        "theme-light",
+        "theme-dark",
+        "hub-address",
+        "sign-out",
+    ]);
     check(&shell, &with_settings);
 }
 
@@ -863,6 +933,16 @@ fn open_shell(
     hub: &str,
     store: Arc<dyn SessionStore>,
     browser: Arc<dyn Browser>,
+) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
+    open_shell_at(cx, hub, store, browser, None)
+}
+
+fn open_shell_at(
+    cx: &mut TestAppContext,
+    hub: &str,
+    store: Arc<dyn SessionStore>,
+    browser: Arc<dyn Browser>,
+    prefs_path: Option<std::path::PathBuf>,
 ) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -888,7 +968,7 @@ fn open_shell(
                             browser,
                             store,
                             prefs: Preferences::default(),
-                            prefs_path: None,
+                            prefs_path,
                             poll_speedup: 200,
                         },
                         window,
@@ -1204,6 +1284,136 @@ fn navigation_buttons_and_shortcuts_change_the_page(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_hub_address_is_edited_in_settings_and_saved_on_enter(cx: &mut TestAppContext) {
+    let dir = unique_dir("hub-settings");
+    let prefs = dir.join("preferences.json");
+    // The signed-in session's hub is the one in use at launch (no saved preference yet).
+    let (window, view) = open_shell_at(
+        cx,
+        "https://hub.test",
+        signed_in_store(),
+        Arc::new(RecordingBrowser::new()),
+        Some(prefs.clone()),
+    );
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("hub-address").label(), Some("Hub address"));
+        let field = view.read(cx).hub_input().clone();
+        assert_eq!(field.read(cx).value().as_ref(), "https://hub.test");
+        let focus = field.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        // A refused address.
+        field.update(cx, |input, cx| input.set_value("not a hub", window, cx));
+        window.press("enter", cx);
+    })
+    .expect("window");
+    // Events are delivered when the window update ends, so the outcome is checked after it.
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let field = view.read(cx).hub_input().clone();
+        // The hub in use stays, and the field shows it again.
+        assert_eq!(view.read(cx).model().hub(), "https://hub.test");
+        assert_eq!(field.read(cx).value().as_ref(), "https://hub.test");
+        assert!(!prefs.exists(), "a refused address is not saved");
+
+        // An accepted address takes effect.
+        field.update(cx, |input, cx| {
+            input.set_value("http://127.0.0.1:8787", window, cx)
+        });
+        window.press("enter", cx);
+    })
+    .expect("window");
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(view.read(cx).model().hub(), "http://127.0.0.1:8787");
+    })
+    .expect("window");
+    assert_eq!(Preferences::load(&prefs).hub_url, "http://127.0.0.1:8787");
+}
+
+#[gpui_kit::test]
+fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
+    // Offline: the hub refuses the socket. Then it comes up, the subscription goes live, and
+    // the outbox's first answer brings the whole connection online.
+    let up = Arc::new(AtomicBool::new(false));
+    let hub = spawn_socket_hub(up.clone());
+    let runtime = tokio::runtime::Runtime::new().expect("client runtime");
+    let mut cache = Cache::open_in_memory().expect("cache");
+    let outbox = Outbox::load(&cache, RetryPolicy::default()).expect("outbox");
+    let subscription = runtime
+        .block_on(Subscription::connect_or_offline(
+            &hub,
+            ThreadSync::new("th_1"),
+            None,
+        ))
+        .expect("an unreachable hub is not an error");
+    let mut connection = Connection::new(subscription, outbox);
+    assert_eq!(connection.connectivity(), Connectivity::Offline);
+
+    let (window, view) = open_shell(
+        cx,
+        &hub,
+        signed_in_store(),
+        Arc::new(RecordingBrowser::new()),
+    );
+    let feed = connection.watch_connectivity();
+    cx.update(|cx| view.update(cx, |shell, cx| shell.follow_connectivity(feed, cx)));
+    let banner = |cx: &mut TestAppContext| -> Option<String> {
+        cx.run_until_parked();
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            window
+                .try_find("connectivity-banner")
+                .and_then(|found| found.label().map(str::to_owned))
+        })
+        .expect("window")
+    };
+    assert_eq!(
+        banner(cx).as_deref(),
+        Some("You are offline. Changes will be sent when the connection returns.")
+    );
+
+    up.store(true, Ordering::SeqCst);
+    runtime
+        .block_on(connection.reconnect())
+        .expect("the hub accepts the socket");
+    assert_eq!(connection.connectivity(), Connectivity::Connecting);
+    assert_eq!(banner(cx).as_deref(), Some("Reconnecting..."));
+
+    let applied = runtime
+        .block_on(connection.next_persisted(&mut cache))
+        .expect("the live frame is read");
+    assert_eq!(applied, Applied::Live);
+    // The outbox has not answered yet, so the connection is still not online.
+    assert_eq!(banner(cx).as_deref(), Some("Reconnecting..."));
+
+    connection
+        .enqueue(
+            &cache,
+            Intent::Cancel {
+                thread_id: "th_1".to_owned(),
+                task_id: "tk_1".to_owned(),
+            },
+            0,
+        )
+        .expect("queues");
+    let report = runtime
+        .block_on(connection.flush(
+            &cache,
+            &Answering,
+            &hub,
+            &ManualClock::new(0),
+            &mut FixedRandom(0),
+        ))
+        .expect("flushes");
+    assert_eq!(report.done, 1);
+    assert_eq!(connection.connectivity(), Connectivity::Online);
+    assert_eq!(banner(cx), None);
+}
+
+#[gpui_kit::test]
 fn the_offline_banner_is_announced_as_a_status(cx: &mut TestAppContext) {
     let (window, view) = open_shell(
         cx,
@@ -1231,6 +1441,48 @@ fn the_offline_banner_is_announced_as_a_status(cx: &mut TestAppContext) {
         assert!(window.try_find("connectivity-banner").is_none());
     })
     .expect("window");
+}
+
+#[test]
+fn a_hub_address_must_be_an_absolute_http_or_https_url() {
+    assert_eq!(
+        parse_hub("  https://hub.example.com  ").as_deref(),
+        Some("https://hub.example.com")
+    );
+    assert_eq!(
+        parse_hub("http://127.0.0.1:8787").as_deref(),
+        Some("http://127.0.0.1:8787")
+    );
+    for bad in [
+        "",
+        "hub.example.com",
+        "ftp://hub.example.com",
+        "https://",
+        "not a url",
+    ] {
+        assert_eq!(parse_hub(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn a_hub_address_is_saved_and_used_at_the_next_launch() {
+    let dir = unique_dir("hub-prefs");
+    let prefs = dir.join("preferences.json");
+    let mut shell = model(Arc::new(MemoryStore::default()), Some(prefs.clone()));
+    assert_eq!(shell.hub(), "https://hub.test");
+    shell.set_hub("http://127.0.0.1:8787/").expect("saves");
+    assert!(shell.set_hub("ftp://hub.example.com").is_err());
+    assert!(shell.set_hub("hub.example.com").is_err());
+    // A refused address changes nothing, in memory or on disk.
+    assert_eq!(shell.hub(), "http://127.0.0.1:8787/");
+    assert_eq!(Preferences::load(&prefs).hub_url, "http://127.0.0.1:8787/");
+    let relaunched = ShellModel::new(
+        Arc::new(MemoryStore::default()),
+        Preferences::load(&prefs),
+        Some(prefs),
+        "https://hub.test",
+    );
+    assert_eq!(relaunched.hub(), "http://127.0.0.1:8787/");
 }
 
 #[test]

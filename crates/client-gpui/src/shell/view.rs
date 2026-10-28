@@ -8,10 +8,12 @@ use std::time::Duration;
 use client_core::Connectivity;
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Theme, ThemeMode, *};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use gpui_kit::{black, white};
+use gpui_kit::{Task, black, white};
+use tokio::sync::watch;
 
 use super::browser::Browser;
 use super::i18n::{tr, tr_args};
@@ -55,7 +57,10 @@ pub struct AppShell {
     model: ShellModel,
     driver: LoginDriver,
     focus: FocusHandle,
+    hub_input: Entity<InputState>,
     _appearance: Subscription,
+    _hub_input_events: Subscription,
+    connectivity_task: Option<Task<()>>,
 }
 
 impl AppShell {
@@ -67,11 +72,17 @@ impl AppShell {
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             this.apply_theme(window, cx);
         });
+        let hub = model.hub().to_string();
+        let hub_input = cx.new(|cx| InputState::new(window, cx).default_value(hub));
+        let hub_input_events = cx.subscribe_in(&hub_input, window, Self::on_hub_event);
         let shell = Self {
             model,
             driver,
             focus,
+            hub_input,
             _appearance: appearance,
+            _hub_input_events: hub_input_events,
+            connectivity_task: None,
         };
         shell.apply_theme(window, cx);
         shell
@@ -83,6 +94,11 @@ impl AppShell {
 
     pub fn driver(&self) -> &LoginDriver {
         &self.driver
+    }
+
+    /// The settings field that edits the hub address.
+    pub fn hub_input(&self) -> &Entity<InputState> {
+        &self.hub_input
     }
 
     /// Apply the chosen theme (or the system's) to every window.
@@ -109,6 +125,53 @@ impl AppShell {
 
     pub fn set_connectivity(&mut self, connectivity: Connectivity, cx: &mut Context<Self>) {
         self.model.set_connectivity(connectivity);
+        cx.notify();
+    }
+
+    /// Drive the banner from a client-core connection: its state now, then every change of the
+    /// banner state (see `Connection::watch_connectivity`). Replaces any earlier feed.
+    pub fn follow_connectivity(
+        &mut self,
+        mut feed: watch::Receiver<Connectivity>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = *feed.borrow_and_update();
+        self.set_connectivity(current, cx);
+        self.connectivity_task = Some(cx.spawn(async move |this, cx| {
+            while feed.changed().await.is_ok() {
+                let state = *feed.borrow_and_update();
+                if this
+                    .update(cx, |this, cx| this.set_connectivity(state, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn on_hub_event(
+        &mut self,
+        _input: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let InputEvent::PressEnter { .. } = event {
+            self.commit_hub(window, cx);
+        }
+    }
+
+    /// Enter in the hub field saves the address. A refused address changes nothing, so the field
+    /// goes back to the hub in use.
+    fn commit_hub(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let typed = self.hub_input.read(cx).value().to_string();
+        // Errors are a refused address or a failed save; either way the hub in use is the answer.
+        let _ = self.model.set_hub(&typed);
+        self.driver.set_hub(self.model.hub());
+        let hub = self.model.hub().to_string();
+        self.hub_input
+            .update(cx, |input, cx| input.set_value(hub, window, cx));
         cx.notify();
     }
 
@@ -352,7 +415,18 @@ impl AppShell {
                 tr("settings-language"),
                 tr("settings-language-en")
             )))
-            .child(div().child(format!("{}: {}", tr("settings-hub"), self.model.hub())))
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(div().child(tr("settings-hub")))
+                    .child(
+                        div()
+                            .id("hub-address")
+                            .test_support()
+                            .aria_label(tr("settings-hub"))
+                            .child(Input::new(&self.hub_input)),
+                    ),
+            )
             .child(
                 div()
                     .id("account")
@@ -424,7 +498,8 @@ fn pairing_panel(stage: &LoginStage) -> Option<impl IntoElement + use<>> {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.focus.is_focused(window) {
+        // The shell takes focus only when nothing has it, so a field the user is typing in keeps it.
+        if window.focused(cx).is_none() {
             window.focus(&self.focus, cx);
         }
         let slots = self.model.focus_order();
