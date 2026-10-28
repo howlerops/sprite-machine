@@ -1,8 +1,10 @@
 //! The app shell: a title bar area, a left sidebar placeholder, the transcript pane and the
-//! composer under it.
+//! composer under it. In the common workload (M1B-008b) a column beside the transcript holds the
+//! diff pane, the terminal pane and the approval card.
 
+use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, SystemTime};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
@@ -10,9 +12,13 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use protocol::turn_event::Envelope;
 
+use crate::approval_pane::ApprovalCard;
 use crate::bench::{BenchLog, print_marker, unix_micros};
+use crate::common_workload::{CardClock, CommonInputs};
 use crate::composer::Composer;
+use crate::diff_pane::DiffPane;
 use crate::feed::drain;
+use crate::terminal_pane::TerminalPane;
 use crate::transcript_model::{Row, build_rows};
 use crate::transcript_pane::TranscriptPane;
 
@@ -22,38 +28,91 @@ pub const TITLE: &str = "Sprite Machine — transcript spike";
 pub const WINDOW_TITLE: &str = "gpui-spike";
 /// Thread id the fixture log is generated for.
 pub const FIXTURE_THREAD: &str = "th_spike";
-/// How often the UI thread drains the fixture feed.
+/// How often the UI thread drains the fixture feed and moves the approval card's clock.
 const FEED_POLL: Duration = Duration::from_millis(16);
+/// Width of the column of common-workload panes beside the transcript.
+pub const COMMON_COLUMN_WIDTH: f32 = 480.;
+/// Height of the terminal pane in the common workload.
+const TERMINAL_HEIGHT: f32 = 220.;
+/// Pause between two terminal output chunks; the `terminal` fixture streams over a few seconds.
+const TERMINAL_CHUNK_INTERVAL: Duration = Duration::from_millis(200);
+
+/// The panes of the common workload, beside the transcript.
+pub struct CommonPanes {
+    diff: Entity<DiffPane>,
+    terminal: Entity<TerminalPane>,
+    approval: Entity<ApprovalCard>,
+    /// Keys typed in the terminal pane. The spike has no child process to send them to; keeping
+    /// the receiver alive means the pane's sends succeed and queue here.
+    _keys: Receiver<Vec<u8>>,
+}
 
 pub struct AppShell {
     pane: Entity<TranscriptPane>,
     composer: Entity<Composer>,
     bench: Option<Rc<BenchLog>>,
     marker_printed: bool,
+    common: Option<CommonPanes>,
 }
 
 impl AppShell {
     /// `feed`, when given, appends the envelopes it carries to the transcript as they arrive;
-    /// the pane starts from `rows` (empty for a feed).
+    /// the pane starts from `rows` (empty for a feed). `common`, when given, adds the common
+    /// workload's panes beside the transcript.
     pub fn new(
         rows: Vec<Row>,
         feed: Option<Receiver<Envelope>>,
         bench: Option<Rc<BenchLog>>,
+        common: Option<CommonInputs>,
         cx: &mut Context<Self>,
     ) -> Self {
         let pane = cx.new(|_| TranscriptPane::new(rows, bench.clone()));
         let composer = cx.new(|cx| Composer::new(bench.clone(), cx));
-        if let Some(feed) = feed {
+        let mut card_clock = None;
+        let common = common.map(|inputs| {
+            let CommonInputs {
+                diff_files,
+                terminal_output,
+                approval,
+                sink,
+                approval_clock_start_ms,
+            } = inputs;
+            let (keys, keys_received) = mpsc::channel();
+            let diff = cx.new(|cx| DiffPane::new(diff_files, cx));
+            let terminal = cx.new(|cx| TerminalPane::new(Vec::<Vec<u8>>::new(), keys, cx));
+            let approval = cx.new(|_| ApprovalCard::new(approval, sink, approval_clock_start_ms));
+            stream_terminal(terminal.clone(), terminal_output, cx);
+            card_clock = Some((approval.clone(), CardClock::new(approval_clock_start_ms)));
+            CommonPanes {
+                diff,
+                terminal,
+                approval,
+                _keys: keys_received,
+            }
+        });
+        if feed.is_some() || card_clock.is_some() {
             let pane = pane.clone();
+            let mut feed = feed;
             cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor().timer(FEED_POLL).await;
-                    let (batch, ended) = drain(&feed);
-                    if !batch.is_empty() {
-                        pane.update(cx, |pane, cx| pane.apply(&batch, cx));
+                    if let Some(receiver) = &feed {
+                        let (batch, ended) = drain(receiver);
+                        if !batch.is_empty() {
+                            pane.update(cx, |pane, cx| pane.apply(&batch, cx));
+                        }
+                        if ended {
+                            feed = None;
+                        }
                     }
-                    // Stop once the window (and so this shell) is gone, or the feed has ended.
-                    if ended || this.upgrade().is_none() {
+                    if let Some((card, clock)) = card_clock.as_mut()
+                        && let Some(now) = clock.changed()
+                    {
+                        card.update(cx, |card, cx| card.set_now(now, cx));
+                    }
+                    // Stop once the window (and so this shell) is gone, or nothing is left to
+                    // drive: the feed has ended and there is no approval clock.
+                    if this.upgrade().is_none() || (feed.is_none() && card_clock.is_none()) {
                         return;
                     }
                 }
@@ -65,6 +124,7 @@ impl AppShell {
             composer,
             bench,
             marker_printed: false,
+            common,
         }
     }
 
@@ -75,6 +135,44 @@ impl AppShell {
     pub fn composer(&self) -> &Entity<Composer> {
         &self.composer
     }
+
+    /// The common workload's panes, when the window has them.
+    pub fn common(&self) -> Option<&CommonPanes> {
+        self.common.as_ref()
+    }
+}
+
+impl CommonPanes {
+    pub fn diff(&self) -> &Entity<DiffPane> {
+        &self.diff
+    }
+
+    pub fn terminal(&self) -> &Entity<TerminalPane> {
+        &self.terminal
+    }
+
+    pub fn approval(&self) -> &Entity<ApprovalCard> {
+        &self.approval
+    }
+}
+
+/// Feeds the terminal's output chunks one by one, [`TERMINAL_CHUNK_INTERVAL`] apart, so the pane
+/// receives output while the window is open.
+fn stream_terminal(
+    terminal: Entity<TerminalPane>,
+    output: Vec<Vec<u8>>,
+    cx: &mut Context<AppShell>,
+) {
+    let mut output: VecDeque<Vec<u8>> = output.into();
+    cx.spawn(async move |_, cx| {
+        while let Some(chunk) = output.pop_front() {
+            cx.background_executor()
+                .timer(TERMINAL_CHUNK_INTERVAL)
+                .await;
+            terminal.update(cx, |pane, cx| pane.feed(&chunk, cx));
+        }
+    })
+    .detach();
 }
 
 /// The rows of the whole `transcript-10k` fixture log, generated in memory.
@@ -118,8 +216,20 @@ pub fn open_shell_with(
     bench: Option<Rc<BenchLog>>,
     cx: &mut App,
 ) -> Result<(AnyWindowHandle, Entity<AppShell>)> {
+    open_shell_in(options, rows, feed, bench, None, cx)
+}
+
+/// [`open_shell_with`] plus the common workload's panes when `common` is given.
+pub fn open_shell_in(
+    options: WindowOptions,
+    rows: Vec<Row>,
+    feed: Option<Receiver<Envelope>>,
+    bench: Option<Rc<BenchLog>>,
+    common: Option<CommonInputs>,
+    cx: &mut App,
+) -> Result<(AnyWindowHandle, Entity<AppShell>)> {
     gpui_kit::open_window(options, cx, |window, cx| {
-        let shell = cx.new(|cx| AppShell::new(rows, feed, bench, cx));
+        let shell = cx.new(|cx| AppShell::new(rows, feed, bench, common, cx));
         let focus = shell.read(cx).composer().read(cx).focus_handle().clone();
         window.focus(&focus, cx);
         shell
@@ -137,6 +247,38 @@ impl Render for AppShell {
             window.on_next_frame(|_, _| print_marker(unix_micros(SystemTime::now())));
         }
         let theme = cx.theme();
+        let transcript = div().flex_1().min_h_0().w_full().child(self.pane.clone());
+        let body = match &self.common {
+            None => transcript.into_any_element(),
+            Some(common) => h_flex()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(transcript.min_w_0().h_full())
+                .child(
+                    v_flex()
+                        .id("common-column")
+                        .w(px(COMMON_COLUMN_WIDTH))
+                        .flex_none()
+                        .h_full()
+                        .min_h_0()
+                        .gap_2()
+                        .p_2()
+                        .border_l_1()
+                        .border_color(theme.border)
+                        .child(div().flex_1().min_h_0().w_full().child(common.diff.clone()))
+                        .child(
+                            div()
+                                .flex_none()
+                                .h(px(TERMINAL_HEIGHT))
+                                .w_full()
+                                .overflow_hidden()
+                                .child(common.terminal.clone()),
+                        )
+                        .child(div().flex_none().w_full().child(common.approval.clone())),
+                )
+                .into_any_element(),
+        };
         v_flex()
             .id("app-shell")
             .size_full()
@@ -185,7 +327,7 @@ impl Render for AppShell {
                             .flex_1()
                             .h_full()
                             .min_w_0()
-                            .child(div().flex_1().min_h_0().w_full().child(self.pane.clone()))
+                            .child(body)
                             .child(div().flex_none().p_2().child(self.composer.clone())),
                     ),
             )

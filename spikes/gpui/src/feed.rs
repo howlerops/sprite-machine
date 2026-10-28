@@ -55,8 +55,12 @@ pub fn drain(receiver: &Receiver<Envelope>) -> (Vec<Envelope>, bool) {
 /// Starts the feed for `addr` on a background thread and returns the envelope channel. The
 /// channel disconnects when the socket closes or fails (the reason goes to stderr).
 pub fn spawn_feed(addr: &str) -> Receiver<Envelope> {
+    spawn_feed_url(subscribe_url(addr))
+}
+
+/// [`spawn_feed`] for a subscription URL of any thread (`ws://<addr>/threads/<id>/subscribe`).
+pub fn spawn_feed_url(url: String) -> Receiver<Envelope> {
     let (sender, receiver) = mpsc::channel();
-    let url = subscribe_url(addr);
     thread::Builder::new()
         .name("fixture-feed".to_owned())
         .spawn(move || {

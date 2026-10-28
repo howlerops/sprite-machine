@@ -6,11 +6,14 @@
 //! fixture).
 //! M1B-008a spike: bench hooks (fixture feed over WebSocket, `BENCH_MARKER`, frame and
 //! key-to-glyph JSON lines) and the composer.
+//! M1B-008b spike: the common workload (`GPUI_SPIKE_WORKLOAD=common`): the transcript beside the
+//! diff, the terminal and one approval card in one window.
 
 pub mod approval_model;
 pub mod approval_pane;
 pub mod approval_sink;
 pub mod bench;
+pub mod common_workload;
 pub mod composer;
 pub mod diff_model;
 pub mod diff_pane;
@@ -21,3 +24,4 @@ pub mod terminal_pane;
 pub mod transcript_model;
 pub mod transcript_pane;
 pub mod transcript_shell;
+pub mod workload;
