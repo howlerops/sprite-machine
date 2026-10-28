@@ -150,3 +150,5 @@
 2026-10-28T08:51Z SECURITY (leader review): authorize_thread never checks that a thread belongs to the caller's org; with a valid session, any member can subscribe/prompt/answer/cancel on another org's thread if they know its id. Not deployed, so no exposure. Added M2-008e (priority 1, high, after MVP-000d)
 2026-10-28T08:52Z MVP-000d back (sonnet, all verify green per worker); added M1A-006g (explicit local-prompt flag instead of the "local:" key prefix; stale tracer wording). Merge after the M2-008b verify finishes
 2026-10-28T08:59Z M2-008b → done (verify: 323 passed, thread_session/authz/thread_do live, tracer). MVP-000d merged bd4e526 (sonnet), full verify running
+2026-10-28T09:20Z MVP-000d → done (clean verify: 590 passed, 7 live hub suites, tracer on /v1). Disk: stale test executables cleared, 11 GB free
+2026-10-28T09:20Z M2-008e assigned (sonnet, priority 1 security). M1A-006f assigned (haiku)

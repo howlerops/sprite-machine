@@ -2008,7 +2008,8 @@ items:
     title: 'Tracer onto the real routes: client side on /v1/threads (Thread DO), sidecar bridge stops emitting UserMessage, delete crates/hub/src/tracer'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged bd4e526; clean verify on merged tree: workspace 590 passed 0 failed, clippy native/live/wasm clean, no tokio runtime, crates/hub/src/tracer gone, hub-test smoke/thread_do/thread_create/thread_session/machine_do/authz/attachments all PASS, tracer PASS on /v1 routes (seq 1..=17, hub emits UserMessage)"
     attempt: 1
     assignee: "worker:sonnet"
     lane: rust
@@ -2298,6 +2299,9 @@ items:
     title: 'Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts'
     milestone: M1a
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: M
     risk: medium
@@ -2371,6 +2375,9 @@ items:
     title: 'hub authz (security): every thread route checks the thread belongs to the caller''s org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     priority: 1
     lane: rust
     size: M
