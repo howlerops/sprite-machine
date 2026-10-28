@@ -3784,7 +3784,8 @@ items:
     title: 'client-core: persist live events as raw frame text; one connectivity banner state (subscription + outbox)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; cargo test -p client-core 34 passed on merged tree; append-before-apply with failure-injection test"
     assignee: "haiku"
     attempt: 1
     priority: 3
@@ -5554,3 +5555,23 @@ items:
     verify:
       - 'cargo run -p cli -- e2e tracer'
       - 'cargo run -p cli -- e2e app'
+
+  - id: M3-001j
+    title: 'client-core: ThreadView::apply is transactional (last_seq and state unchanged when apply fails); next_persisted validates against the view before appending, so the cache never holds an event the view refused'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-001b]
+    paths:
+      - 'crates/client-core/src/view*'
+      - 'crates/client-core/src/sync*'
+      - 'crates/client-core/tests/sync.rs'
+      - 'crates/client-core/tests/view_models.rs'
+    context:
+      - 'docs/ledger/reports/M3-001b.md (Discovered work M3-001j)'
+    acceptance:
+      - 'A delta before its snapshot (or a bad patch) leaves last_seq and the view unchanged; next_persisted does not append it to the cache; tests for both'
+    verify:
+      - 'cargo test -p client-core'
