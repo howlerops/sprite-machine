@@ -5532,6 +5532,9 @@ items:
     title: 'client-core: public create-thread helper (POST /v1/threads with the first prompt and attachments); cli e2e app and attachments use it instead of raw reqwest'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
@@ -5728,6 +5731,9 @@ items:
     title: 'hub+tunnel: an interrupt answer typed in the sm TUI is arbitrated by the Thread DO (first answer wins against the phone), so the hub log and the agent agree'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: M
     risk: high
