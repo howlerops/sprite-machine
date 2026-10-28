@@ -1,6 +1,6 @@
 //! `ThreadCore`: the runtime-agnostic logic of one thread (M2-008). No worker types, no IO, no
 //! clock (callers pass `now_ms`); storage sits behind [`ThreadStore`]. The Thread Durable Object
-//! (`do/thread.rs`) and the tracer hub both run this code, and native unit tests drive it with a
+//! (`do/thread.rs`) runs this code, and native unit tests drive it with a
 //! [`MemoryStore`](super::MemoryStore).
 //!
 //! What it owns:
@@ -1496,8 +1496,12 @@ pub fn request_hash(method: &str, path: &str, body: &Value) -> String {
 }
 
 /// `true` when an `Idempotency-Key` header value is valid (client-api.md §3).
+///
+/// A key starting with `local:` is refused. Older runners read that prefix as "a prompt typed
+/// locally" (client-api.md §6), so a client must not be able to send one.
 pub fn valid_idempotency_key(key: &str) -> bool {
     (1..=128).contains(&key.len())
+        && !key.starts_with("local:")
         && key
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'.' | b'-'))

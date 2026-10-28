@@ -103,7 +103,7 @@ impl Random for FixedRandom {
 
 /// A write the user asked for.
 ///
-/// `machine_id`, `author` and `resolved_by` are set only by the MVP-000 tracer hub, whose
+/// `machine_id`, `author` and `resolved_by` are set only by the MVP-000 hub, whose
 /// routes require them in the body. The production hub derives the actor from the token
 /// (client-api.md §1), so clients leave these `None` and they are not sent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -154,7 +154,7 @@ impl Intent {
         }
     }
 
-    /// The JSON body (client-api.md §5.3 to §5.5, plus the tracer-hub fields when set).
+    /// The JSON body (client-api.md §5.3 to §5.5, plus the MVP-000 fields when set).
     pub fn body(&self) -> Value {
         match self {
             Self::Prompt {

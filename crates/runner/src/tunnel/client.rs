@@ -16,7 +16,7 @@ use protocol::tunnel::{
 use protocol::turn_event::{Envelope, Event, RunError, RunErrorReason, format_timestamp};
 use rustls::{ClientConfig, RootCertStore};
 use serde_json::{Value, json};
-use sidecar::bridge::IncomingCommand;
+use sidecar::bridge::{IncomingCommand, Origin};
 use sidecar::store::{OutboxState, Store, StoreError};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
@@ -370,6 +370,7 @@ impl<C: CredentialSource> TunnelClient<C> {
                 seq,
                 idempotency_key: key,
                 command,
+                origin: Origin::Hub,
             });
             if fed.is_err() {
                 tracing::warn!(seq, "the bridge stopped taking commands");

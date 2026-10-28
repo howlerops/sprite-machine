@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::files::{self, FilePolicy};
 use super::handler::{Internal, Resources};
 use super::ids::SharedIds;
-use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand};
+use super::io::{CommandFailure, CommandSource, EventSink, IncomingCommand, Origin};
 use super::stale::{end_interrupts_of_earlier_process, stale_mapper};
 use super::{ActiveTask, Bridge, BridgeError, Start, ThreadState};
 use crate::acp::client::{AcpClient, ClientError};
@@ -84,6 +84,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
             seq,
             idempotency_key,
             command,
+            origin,
         } = incoming;
         // The command source owns the down-stream commit (`last_down_seq` + key): it commits
         // when told `processed` below. The bridge only reads, so a crash before then leaves the
@@ -92,7 +93,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         if self.store.seen_key(&idempotency_key)? || !self.applied.insert(&idempotency_key) {
             tracing::debug!(%idempotency_key, "duplicate command ignored");
         } else {
-            self.apply(&idempotency_key, command).await?;
+            self.apply(&idempotency_key, origin, command).await?;
         }
         self.commands.processed(seq, &idempotency_key).await;
         // The source has committed the key by now: the store answers for it from here on.
@@ -118,7 +119,12 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
         Ok(())
     }
 
-    async fn apply(&mut self, key: &str, command: Command) -> Result<(), BridgeError> {
+    async fn apply(
+        &mut self,
+        key: &str,
+        origin: Origin,
+        command: Command,
+    ) -> Result<(), BridgeError> {
         match command {
             Command::Prompt {
                 thread_id,
@@ -133,7 +139,7 @@ impl<S: EventSink, C: CommandSource> Bridge<S, C> {
                     message_id,
                     parts,
                     author,
-                    local: key.starts_with(super::LOCAL_KEY_PREFIX),
+                    local: origin == Origin::Local,
                     harness: None,
                     cwd: None,
                 };

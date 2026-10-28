@@ -125,6 +125,7 @@ impl CommandSource for ChannelCommands {
             seq: self.next,
             idempotency_key: format!("tracer-{}", self.next),
             command,
+            origin: crate::bridge::Origin::Hub,
         })
     }
 }

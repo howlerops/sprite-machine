@@ -1,5 +1,5 @@
 //! The persistence interface of one thread ([`ThreadStore`]) and an in-memory implementation
-//! ([`MemoryStore`]) for native tests and the tracer. The Durable Object implements the same
+//! ([`MemoryStore`]) for native tests. The Durable Object implements the same
 //! trait over its SQLite database (`sqlite.rs`, wasm32 only).
 //!
 //! The trait is deliberately dumb: no business rules, only the reads and writes the

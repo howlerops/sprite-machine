@@ -28,7 +28,8 @@
 //!
 //! `UserMessage` is the hub's (client-api.md §6): a `prompt` or `dispatch` command starts with
 //! `RunStarted{prompt}`. The bridge emits it only for a prompt typed locally (a command whose
-//! idempotency key starts with [`LOCAL_KEY_PREFIX`]), which the hub never saw.
+//! [`Origin`] is [`Origin::Local`]), which the hub never saw. The origin is set by the command
+//! source, never by the key, so a hub key cannot make a prompt look local.
 //!
 //! **Harness restart.** When the agent process exits, every running task ends with
 //! `InterruptResolved{cancelled}` for each open interrupt and then `RunError{error,
@@ -76,16 +77,11 @@ use self::ids::SharedIds;
 pub use self::ids::{IdGenerator, SequentialGenerator, UlidIds};
 pub use self::io::{
     CommandFailure, CommandFeed, CommandSource, EventSink, IncomingCommand, MemoryCommands,
-    MemorySink, SinkError, SinkItem,
+    MemorySink, Origin, SinkError, SinkItem,
 };
 use crate::acp::client::{AcpClient, ClientError, Transport};
 use crate::acp::reattach::Reattacher;
 use crate::store::{Store, StoreError};
-
-/// Idempotency keys of prompts typed on the runner itself start with this. The hub never saw
-/// such a prompt, so the bridge emits its `UserMessage` (client-api.md §6). A key from the
-/// hub must not start with it.
-pub const LOCAL_KEY_PREFIX: &str = "local:";
 
 /// Default approval TTL (PLAN-v2 §4.1): 10 minutes.
 pub const DEFAULT_APPROVAL_TTL: Duration = Duration::from_secs(10 * 60);
@@ -214,7 +210,7 @@ struct Start {
     message_id: String,
     parts: Vec<ContentPart>,
     author: Actor,
-    /// A prompt typed locally: the bridge emits its `UserMessage`.
+    /// A prompt typed locally ([`Origin::Local`]): the bridge emits its `UserMessage`.
     local: bool,
     /// `dispatch` names the harness and the directory; `prompt` uses the thread's.
     harness: Option<String>,

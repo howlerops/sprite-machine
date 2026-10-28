@@ -456,6 +456,43 @@ async fn a_prompt_typed_locally_makes_the_bridge_emit_user_message() {
 }
 
 #[tokio::test]
+async fn a_hub_prompt_with_a_local_looking_key_gets_no_user_message() {
+    // The origin comes from the command source, not the key: a hub prompt whose key starts with
+    // "local:" is still the hub's, so the bridge must not emit a UserMessage for it.
+    let script = json!({ "turns": [{ "steps": [{ "text": "hi" }] }] });
+    let mut h = Harness::start(script, |_| {}).await;
+    // The hub appends the prompt's UserMessage itself, then sends the command.
+    h.hub_event(
+        "th_1",
+        "tk_1",
+        UserMessage {
+            message_id: "msg_u1".into(),
+            parts: vec![ContentPart::Text { text: "go".into() }],
+            author: user(),
+        },
+    );
+    h.feed.send_with_key(
+        "local:spoofed",
+        Command::Prompt {
+            thread_id: "th_1".into(),
+            task_id: "tk_1".into(),
+            message_id: "msg_u1".into(),
+            parts: vec![ContentPart::Text { text: "go".into() }],
+            author: user(),
+        },
+    );
+    let stream = h.until(is_success).await;
+    assert_eq!(types(&stream)[0], "RunStarted", "{:?}", types(&stream));
+    let log = h.finish().await;
+    let user_messages = log
+        .iter()
+        .filter(|e| matches!(e.event, Event::UserMessage(_)))
+        .count();
+    assert_eq!(user_messages, 1, "only the hub's UserMessage: {log:#?}");
+    assert_valid_log(&log);
+}
+
+#[tokio::test]
 async fn approval_for_an_unknown_interrupt_yields_command_result() {
     let script =
         json!({ "turns": [{ "steps": [permission_step("call_1", "allow"), { "text": "ok" }] }] });
