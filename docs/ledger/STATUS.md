@@ -2,16 +2,16 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 19/191 (3 dropped) · in-flight M1B-002,M2-001 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 16/120
+done 20/191 (3 dropped) · in-flight MVP-000b,M1B-002 · blocked 8 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006) · attempts 17/120
 
-Disk incident handled; M2-001 resumed, M1B-002 resumes after it.
+Batch 8: M2-001 merged; M1B-002 resumed; MVP-000b assigned.
 
 ## Per phase
 
 | Phase | Items | Done | In flight |
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 10 | 1 |
-| P1 | 29 | 4 | 1 |
+| P1 | 29 | 5 | 1 |
 | P2 | 22 | 1 | 0 |
 | P3 | 19 | 1 | 0 |
 | P4 | 32 | 0 | 0 |

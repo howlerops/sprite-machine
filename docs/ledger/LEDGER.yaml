@@ -185,6 +185,9 @@ items:
     title: 'CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2'
     milestone: M0
     phase: P1
+    status: "assigned"
+    assignee: "worker:haiku"
+    attempt: 1
     priority: 1
     deps: [MVP-000]
     paths:
@@ -1352,7 +1355,8 @@ items:
     title: 'hub Worker skeleton (workers-rs + axum http feature), routing, wrangler.toml with DO/D1/R2/Queue bindings'
     milestone: M2
     phase: P1
-    status: "assigned"
+    status: "done"
+    evidence: "merged bad9ea5; verify: wasm32 + no tokio runtime, hub-test smoke 3/3 live (3/3 fail without HUB_URL), e2e tracer PASS, hub 16 tests, clippy clean, no workerd left"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
