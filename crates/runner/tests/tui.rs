@@ -817,6 +817,47 @@ fn a_line_typed_while_a_task_runs_is_queued_behind_it() {
     assert_eq!(text, "third");
 }
 
+/// In a shared session a task ends with a local line queued and a phone prompt the hub had
+/// queued: the local line is held for the settle window, the hub's prompt runs first, and the
+/// local line goes after it. (Without the hold the local line was sent at once and the bridge
+/// refused whichever of the two came second.)
+#[test]
+fn a_shared_session_lets_the_hubs_queued_prompt_go_before_the_local_line() {
+    let mut app = new_app(true);
+    app.start();
+    app.registered(Ok(URL.to_owned()));
+    let mut hub = Hub::new();
+    let actions = send_line(&mut app, "first");
+    let [Action::Prompt { task_id, .. }] = actions.as_slice() else {
+        panic!("a prompt");
+    };
+    let first = task_id.clone();
+    feed(&mut app, hub.prompt(&first, "first", &terminal_actor()));
+    assert!(send_line(&mut app, "local next").is_empty());
+
+    // The task ends: the local line waits for the hub.
+    let actions = app.incoming(hub.finish(&first));
+    assert!(actions.is_empty(), "held for the hub: {actions:?}");
+    assert!(app.settling());
+    assert!(screen(&app).contains("pending: local next"));
+
+    // The hub's queued prompt arrives inside the window and runs; the line still waits.
+    for message in hub.prompt("tk_phone1", "phone next", &phone_actor()) {
+        assert!(app.incoming(message).is_empty());
+    }
+    assert!(!app.settling());
+    assert!(app.settled().is_empty(), "a task runs, nothing is sent");
+
+    // It ends: the hub has nothing else, so the window passes and the local line runs.
+    assert!(app.incoming(hub.finish("tk_phone1")).is_empty());
+    assert!(app.settling());
+    let actions = app.settled();
+    let [Action::Prompt { text, .. }] = actions.as_slice() else {
+        panic!("the local line is sent after the hub's prompt, got {actions:?}");
+    };
+    assert_eq!(text, "local next");
+}
+
 /// A prompt the bridge refuses (a task was running) is queued again, with a notice, and is sent
 /// when the running task has ended; it is never lost.
 #[test]
@@ -1625,12 +1666,28 @@ mod session {
         /// Shows what the session reports until `done` holds.
         async fn until(&mut self, what: &str, done: impl Fn(&App) -> bool) {
             while !done(&self.app) {
+                if self.app.settling() {
+                    let window = self.app.settle_window();
+                    let Ok(feed) = timeout(window, self.session.next()).await else {
+                        let actions = self.app.settled();
+                        assert!(execute(actions, &mut self.app, &mut self.session).await);
+                        continue;
+                    };
+                    self.apply(feed.expect("the session ended")).await;
+                    continue;
+                }
                 let feed = timeout(STEP, self.session.next())
                     .await
                     .unwrap_or_else(|_| {
                         panic!("timed out waiting for {what}\n{}", screen(&self.app))
                     })
                     .expect("the session ended");
+                self.apply(feed).await;
+            }
+        }
+
+        async fn apply(&mut self, feed: Feed) {
+            {
                 match feed {
                     Feed::Thread(incoming) => {
                         let actions = self.app.incoming(incoming);
@@ -1832,6 +1889,65 @@ mod session {
         let shown = screen_sized(&rig.app, 60, 16);
         assert!(shown.contains("terminal> and then this"), "{shown}");
         assert!(!shown.contains("pending:"), "{shown}");
+    }
+
+    /// A task ends with a local line queued here and a phone prompt queued at the hub (which sends
+    /// it as soon as it sees the task end): the bridge refuses neither, and both run once, the
+    /// hub's prompt first and the local line after it.
+    #[tokio::test]
+    async fn a_local_line_and_a_hub_queued_prompt_at_task_end_both_run_once() {
+        let mut rig = rig(
+            vec![
+                permission_turn("Running.", "All green."),
+                plain_turn("Phone done."),
+                plain_turn("Local done."),
+            ],
+            true,
+        )
+        .await;
+        rig.app.set_settle_window(Duration::from_millis(400));
+        rig.start().await;
+        rig.until("the session to be shared", |app| {
+            matches!(app.remote(), runner::tui::Remote::On { .. })
+        })
+        .await;
+        rig.say("run the tests").await;
+        rig.until("the approval", open_approval).await;
+        rig.say("local line").await;
+        let first = rig.app.view().tasks()[0].task_id.clone();
+
+        *rig.hub.verdict.lock().expect("lock") = Some(Ok(HubVerdict::Accepted));
+        *rig.hub.approve_with.lock().expect("lock") = Some((rig.handle.clone(), 7));
+        rig.press(Key::Enter).await;
+        rig.until("the first task to end", |app| rig_done(app, &first))
+            .await;
+        // The hub sends its queued prompt once it has seen the task end.
+        rig.handle
+            .hub_command(hub_prompt(1, "tk_phone", "phone line"))
+            .await;
+        rig.until("both to finish", |app| {
+            app.view()
+                .tasks()
+                .iter()
+                .filter(|t| t.status() == client_core::TaskStatus::Succeeded)
+                .count()
+                == 3
+        })
+        .await;
+
+        let shown = screen_sized(&rig.app, 60, 24);
+        let at = |needle: &str| {
+            shown
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle}\n{shown}"))
+        };
+        assert_eq!(shown.matches("phone line").count(), 1, "{shown}");
+        assert_eq!(shown.matches("local line").count(), 1, "{shown}");
+        assert!(at("phone> phone line") < at("agent> Phone done."));
+        assert!(at("agent> Phone done.") < at("terminal> local line"));
+        assert!(at("terminal> local line") < at("agent> Local done."));
+        assert!(!shown.contains("waiting for the running task"), "{shown}");
+        assert_eq!(rig.handle.tracked_prompts().await, 0);
     }
 
     /// A phone's prompt and its answer arrive as hub commands: the screen shows them once, in
