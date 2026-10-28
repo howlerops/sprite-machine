@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 86/244 (3 dropped) · in-flight M2-008a,M2B-008,WEB-001 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 82/120
+done 88/245 (3 dropped) · in-flight M2-008a,WEB-002 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 83/120
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 86/244 (3 dropped) · in-flight M2-008a,M2B-008,WEB-001 · blocked 12 (huma
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 60 | 33 | 3 |
+| P2 | 60 | 35 | 2 |
 | P3 | 20 | 1 | 0 |
-| P4 | 38 | 0 | 0 |
+| P4 | 39 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 16 | 0 | 0 |
@@ -69,7 +69,7 @@ done 86/244 (3 dropped) · in-flight M2-008a,M2B-008,WEB-001 · blocked 12 (huma
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | done | runner: local harness discovery + local logins/MCP passthrough |
 | M2B-007 | worker | rust | done | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |
-| M2B-008 | worker | rust | assigned | runner: workspace trust prompt + remote-terminal opt-in |
+| M2B-008 | worker | rust | done | runner: workspace trust prompt + remote-terminal opt-in |
 | M2B-009 | worker | rust | todo | runner: session URL, QR code, `sm mobile`, auto-connect setting |
 | M2B-010 | worker | rust | todo | runner: interactive TUI shared with remote devices (`sm --rc`) |
 | M2B-011a | worker | rust | done | runner checkpoint: encode thread ids that git refnames reject (protocol ids allow ":") |
@@ -77,8 +77,8 @@ done 86/244 (3 dropped) · in-flight M2-008a,M2B-008,WEB-001 · blocked 12 (huma
 | M2B-014 | worker | rust | todo | Presence + reconnect notifications on the phone |
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
-| WEB-001 | worker | rust | assigned | web: mobile web page — pairing (QR / device code) + session list with presence |
-| WEB-002 | worker | rust | todo | web: transcript rendering for every TurnEvent variant |
+| WEB-001 | worker | rust | done | web: mobile web page — pairing (QR / device code) + session list with presence |
+| WEB-002 | worker | rust | assigned | web: transcript rendering for every TurnEvent variant |
 | WEB-003 | worker | rust | todo | web: composer with attachments + Allow/Deny + Stop |
 | WEB-004 | worker | rust | todo | web: PWA + Web Push |
 

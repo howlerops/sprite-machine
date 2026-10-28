@@ -191,3 +191,5 @@
 2026-10-28T12:44Z M2B-007b → done, M1A-006g → done (verify13 + leader fix ac9179c for a tunnel_client test race; authz flaked under load, passed alone)
 2026-10-28T12:44Z WEB-001 and M2B-008 merged; .gitignore for web test output. M2B-008 criterion 2 corrected by leader (remote terminal = phone raw shell, not the agent terminal tool). Added M2B-008c (P4 spec decision). Verify running
 2026-10-28T12:51Z M2-008a back (haiku; mutation-checked redaction). Leader: turn-event §6 amended d47050c (state floor at 50 runs, replay error message). Added M2-008g (P4: redact stored prompt parts)
+2026-10-28T12:54Z WEB-001 → done, M2B-008 → done (verify14: playwright 9, hub+runner 412, tracer)
+2026-10-28T12:54Z M2-008a merged 727012e; full verify (12 live suites + playwright + tracer) running. WEB-002 assigned (haiku)

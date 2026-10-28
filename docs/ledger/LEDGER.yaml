@@ -3299,7 +3299,8 @@ items:
     title: 'runner: workspace trust prompt + remote-terminal opt-in'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 3c20d5a; trust 12 tests (prompt+persist, home/root never stored, workspace_untrusted dispatch starts no agent, canonical paths, sm trust/untrust), runner tests in the 412, clippy clean, tracer PASS"
     attempt: 1
     assignee: "worker:haiku"
     deps: [M2B-007]
@@ -3522,7 +3523,8 @@ items:
     title: 'web: mobile web page — pairing (QR / device code) + session list with presence'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged 185badb; leader verify: playwright pairing.spec 9 passed (QR redeem + confirm, decline revokes, device code, slow_down, 401, sign-out, list with presence, live update) at 390x844 against wrangler dev; hub+runner 412 passed; smoke; tracer PASS"
     attempt: 1
     assignee: "worker:sonnet"
     deps:
@@ -3557,11 +3559,19 @@ items:
     title: 'web: transcript rendering for every TurnEvent variant'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [WEB-001, M2-008]
     paths:
-      - 'web/src/transcript*'
-      - 'web/src/render*'
-      - 'web/tests/transcript.spec.js'
+      - "web/src/transcript*"
+      - "web/src/render*"
+      - "web/src/app.js"
+      - "web/index.html"
+      - "web/styles.css"
+      - "web/tests/transcript.spec.js"
+      - "web/tests/helpers*"
+      - "crates/hub/src/dev_fixtures*"
     context:
       - 'docs/PLAN-v2-ade.md §3 (Phone before native mobile), §4.4 (Interim mobile web page)'
       - 'docs/specs/turn-event.md'
