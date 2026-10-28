@@ -38,6 +38,7 @@ use crate::auth::service::parse_body;
 use crate::auth::{authenticate, bearer_token, dev_fixtures_enabled};
 use crate::db::d1::D1;
 use crate::db::queries;
+use crate::devices::trust::{self, Verdict};
 use crate::router::{REQUEST_ID_HEADER, request_id};
 use crate::threads::ApiError;
 use crate::worker::AppState;
@@ -189,7 +190,10 @@ async fn revoke(
 }
 
 /// `GET /v1/machines/{id}/tunnel`: the upgrade goes to the Machine DO unchanged; the DO checks
-/// the subprotocol and the credential.
+/// the subprotocol and the credential. Before that (M2B-005a) the org's `require_trusted_devices`
+/// setting applies (`devices::trust`): a machine that is not vouched for is refused with `401`
+/// (the status of a missing credential, tunnel.md §2; there is no socket yet to close). A
+/// revoked machine still reaches the DO, which closes it with `auth_revoked`.
 #[worker::send]
 async fn tunnel(
     State(env): State<AppState>,
@@ -199,6 +203,15 @@ async fn tunnel(
     let result: Result<Response, ApiError> = async {
         let machine_id = valid_machine_id(&machine_id)?;
         let internal = |error: worker::Error| ApiError::internal(error.to_string());
+        let database = database(&env)?;
+        let verdict = trust::tunnel_verdict(&D1::new(&database), machine_id, dev_fixtures(&env))
+            .await
+            .map_err(|error| ApiError::internal(format!("machines: {error}")))?;
+        if verdict == Verdict::Untrusted {
+            return Err(ApiError::unauthorized(
+                "this machine is not a trusted device of an org that requires trusted devices",
+            ));
+        }
         let namespace = env.durable_object(MACHINE_BINDING).map_err(internal)?;
         let stub = namespace
             .id_from_name(machine_id)

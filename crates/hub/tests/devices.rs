@@ -13,8 +13,8 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -27,10 +27,20 @@ const INTERVAL: Duration = Duration::from_millis(5_300);
 
 struct Reply {
     status: u16,
+    head: String,
     body: String,
 }
 
 impl Reply {
+    /// A response header's value (name in any case).
+    fn header(&self, name: &str) -> Option<String> {
+        self.head.split("\r\n").skip(1).find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_owned())
+        })
+    }
+
     fn json(&self) -> Value {
         serde_json::from_str(&self.body)
             .unwrap_or_else(|error| panic!("body is not JSON ({error}): {:?}", self.body))
@@ -110,7 +120,11 @@ fn parse_reply(text: &str) -> Reply {
     } else {
         body.to_owned()
     };
-    Reply { status, body }
+    Reply {
+        status,
+        head: head.to_owned(),
+        body,
+    }
 }
 
 fn dechunk(mut rest: &str) -> String {
@@ -203,7 +217,12 @@ fn poll(device_code: &str) -> Reply {
     )
 }
 
+/// Failed user-code attempts are limited per org (5 a minute); the one test that exhausts the
+/// limit takes the write lock, every approve takes the read lock, so they never overlap.
+static APPROVE_LIMIT: RwLock<()> = RwLock::new(());
+
 fn approve(token: Option<&str>, user_code: &str, name: &str) -> Reply {
+    let _shared = APPROVE_LIMIT.read().unwrap_or_else(|e| e.into_inner());
     http(
         "POST",
         "/v1/devices/approve",
@@ -221,6 +240,12 @@ struct Ws {
 
 impl Ws {
     fn open_tunnel(machine: &str, credential: &str) -> Self {
+        Self::try_open_tunnel(machine, credential)
+            .unwrap_or_else(|head| panic!("tunnel refused: {head}"))
+    }
+
+    /// The upgrade, or the response head when it was refused.
+    fn try_open_tunnel(machine: &str, credential: &str) -> Result<Self, String> {
         let mut stream = connect();
         let request = format!(
             "GET /v1/machines/{machine}/tunnel HTTP/1.1\r\nHost: {}\r\nUpgrade: websocket\r\n\
@@ -239,11 +264,13 @@ impl Ws {
             }
         }
         let head = String::from_utf8_lossy(&head).into_owned();
-        assert!(head.starts_with("HTTP/1.1 101"), "tunnel refused: {head}");
-        Self {
+        if !head.starts_with("HTTP/1.1 101") {
+            return Err(head);
+        }
+        Ok(Self {
             stream,
             buf: Vec::new(),
-        }
+        })
     }
 
     fn send_text(&mut self, text: &str) {
@@ -564,4 +591,161 @@ fn the_trusted_devices_setting_is_admin_only_and_keeps_admin_machines_allowed() 
         Some(&json!({ "require_trusted_devices": false })),
     );
     assert_eq!(off.status, 200, "{}", off.body);
+}
+
+#[test]
+fn the_tunnel_refuses_a_machine_that_is_not_vouched_for_when_the_org_requires_trusted_devices() {
+    // A machine the dev credential route provisions has a Machine DO but no machines row, so no
+    // approved pairing or admin vouches for it. Its org is the dev org (`Bearer dev`).
+    let machine = unique("unvouched");
+    let created = http(
+        "POST",
+        &format!("/v1/dev/machines/{machine}/credential"),
+        Some("dev"),
+        None,
+    );
+    assert_eq!(created.status, 201, "{}", created.body);
+    let credential = created.json()["credential"]
+        .as_str()
+        .expect("credential")
+        .to_owned();
+    let policy = |on: bool| {
+        let reply = http(
+            "PUT",
+            "/v1/devices/policy",
+            Some("dev"),
+            Some(&json!({ "require_trusted_devices": on })),
+        );
+        assert_eq!(reply.status, 200, "{}", reply.body);
+    };
+
+    // Setting off: it connects.
+    policy(false);
+    drop(Ws::open_tunnel(&machine, &credential));
+
+    // Setting on: refused before the upgrade, the status of a missing credential (tunnel.md §2).
+    policy(true);
+    let refused = Ws::try_open_tunnel(&machine, &credential)
+        .err()
+        .expect("an unvouched machine must be refused");
+    assert!(refused.starts_with("HTTP/1.1 401"), "{refused}");
+
+    // Admin-issued and device-paired machines of an org with the setting on still connect.
+    let admin = http(
+        "POST",
+        "/v1/machines",
+        Some("dev"),
+        Some(&json!({ "name": unique("ci") })),
+    );
+    assert_eq!(admin.status, 201, "{}", admin.body);
+    let admin = admin.json();
+    let admin_id = admin["machine"]["id"].as_str().expect("id").to_owned();
+    let admin_credential = admin["credential"].as_str().expect("credential").to_owned();
+    let mut ws = Ws::open_tunnel(&admin_id, &admin_credential);
+    ws.send_text(&hello(&admin_id).to_string());
+    assert_eq!(ws.json()["t"], "welcome");
+
+    let pairing = start();
+    let approved = approve(Some("dev"), &pairing.user_code, &unique("trusted"));
+    assert_eq!(approved.status, 200, "{}", approved.body);
+    let granted = poll(&pairing.device_code).json();
+    let device_id = granted["machine_id"].as_str().expect("id").to_owned();
+    let device_credential = granted["credential"].as_str().expect("credential");
+    let mut ws = Ws::open_tunnel(&device_id, device_credential);
+    ws.send_text(&hello(&device_id).to_string());
+    assert_eq!(ws.json()["t"], "welcome");
+
+    policy(false);
+    drop(Ws::open_tunnel(&machine, &credential));
+}
+
+#[test]
+fn guessing_user_codes_is_limited_per_user_and_org_with_retry_after() {
+    // Exclusive: the org's counter is shared with every other test's approvals.
+    let _exclusive = APPROVE_LIMIT.write().unwrap_or_else(|e| e.into_inner());
+    let member = session("member");
+    let miss = |token: &str| {
+        http(
+            "POST",
+            "/v1/devices/approve",
+            Some(token),
+            Some(&json!({ "user_code": "ABCD-EFGH", "name": "laptop" })),
+        )
+    };
+    for attempt in 0..5 {
+        let reply = miss(&member);
+        assert_eq!(reply.status, 404, "attempt {attempt}: {}", reply.body);
+    }
+    let limited = miss(&member);
+    assert_eq!(limited.status, 429, "{}", limited.body);
+    assert_eq!(limited.json()["error"], "rate_limited");
+    let wait: u64 = limited
+        .header("retry-after")
+        .expect("Retry-After header")
+        .parse()
+        .expect("seconds");
+    assert!((1..=60).contains(&wait), "Retry-After {wait}");
+
+    // The org's counter is full: another user of the org is limited too, even with a real code.
+    let pairing = start();
+    let other = approve_unlocked(&session("member"), &pairing.user_code);
+    assert_eq!(other.status, 429, "{}", other.body);
+
+    // Let the one-minute window pass so the other tests' approvals work again.
+    std::thread::sleep(Duration::from_secs(wait + 1));
+    let again = approve_unlocked(&session("member"), &pairing.user_code);
+    assert_eq!(again.status, 200, "{}", again.body);
+}
+
+fn approve_unlocked(token: &str, user_code: &str) -> Reply {
+    http(
+        "POST",
+        "/v1/devices/approve",
+        Some(token),
+        Some(&json!({ "user_code": user_code, "name": unique("laptop") })),
+    )
+}
+
+#[test]
+fn the_token_names_the_org_and_approver_and_a_machine_can_revoke_itself() {
+    let pairing = start();
+    let approved = approve(Some(owner()), &pairing.user_code, &unique("laptop"));
+    assert_eq!(approved.status, 200, "{}", approved.body);
+    let granted = poll(&pairing.device_code);
+    assert_eq!(granted.status, 200, "{}", granted.body);
+    let granted = granted.json();
+    assert_eq!(granted["org"]["name"], "Devices Test");
+    assert!(
+        granted["org"]["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+    assert_eq!(granted["org"]["id"], granted["org_id"]);
+    assert_eq!(granted["approved_by"]["name"], "Owner");
+    assert!(granted["approved_by"]["id"].as_str().is_some());
+    let machine_id = granted["machine_id"].as_str().expect("id").to_owned();
+    let credential = granted["credential"]
+        .as_str()
+        .expect("credential")
+        .to_owned();
+
+    // A session token is not a machine credential; neither is a made-up one.
+    let session_token = http("DELETE", "/v1/devices/self", Some(owner()), None);
+    assert_eq!(session_token.status, 401, "{}", session_token.body);
+    let none = http("DELETE", "/v1/devices/self", None, None);
+    assert_eq!(none.status, 401, "{}", none.body);
+
+    let revoked = http("DELETE", "/v1/devices/self", Some(&credential), None);
+    assert_eq!(revoked.status, 200, "{}", revoked.body);
+    let listed = http("GET", "/v1/devices", Some(owner()), None).json();
+    let mine = listed["devices"]
+        .as_array()
+        .expect("devices")
+        .iter()
+        .find(|d| d["machine_id"] == machine_id.as_str())
+        .expect("listed");
+    assert!(mine["revoked_at"].is_string(), "{mine}");
+    // The credential is spent for this route too.
+    let again = http("DELETE", "/v1/devices/self", Some(&credential), None);
+    assert_eq!(again.status, 401, "{}", again.body);
 }

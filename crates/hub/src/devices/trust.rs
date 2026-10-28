@@ -37,6 +37,30 @@ pub fn tunnel_allowed(require_trusted: bool, origin: Option<Origin>, revoked: bo
 
 /// [`tunnel_allowed`] for a stored machine; `false` when there is no such machine.
 pub async fn machine_may_connect(db: &impl Db, machine_id: &str) -> Result<bool, DbError> {
+    Ok(tunnel_verdict(db, machine_id, false).await? == Verdict::Allowed)
+}
+
+/// What the tunnel route does with an upgrade for a machine (M2B-005a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// Forward to the Machine DO, which checks the credential.
+    Allowed,
+    /// Revoked: forwarded anyway; the DO accepts the socket and closes it with `auth_revoked`
+    /// (tunnel.md §4.3), which tells the runner to wipe its credential.
+    Revoked,
+    /// Not vouched for while the org requires trusted devices (or unknown): refused, `401`.
+    Untrusted,
+}
+
+/// [`tunnel_allowed`] for a stored machine, split so a revoked machine keeps its `auth_revoked`
+/// close. A machine with no D1 row is `Untrusted`, except under `dev_fixtures` (the dev
+/// credential route provisions Machine DOs without a row): there it is held to the dev org's
+/// setting, which makes the rule testable on a live hub.
+pub async fn tunnel_verdict(
+    db: &impl Db,
+    machine_id: &str,
+    dev_fixtures: bool,
+) -> Result<Verdict, DbError> {
     let rows = db
         .query(
             "SELECT m.origin AS origin, m.revoked_at IS NOT NULL AS revoked, \
@@ -46,13 +70,38 @@ pub async fn machine_may_connect(db: &impl Db, machine_id: &str) -> Result<bool,
         )
         .await?;
     let Some(row) = rows.first() else {
-        return Ok(false);
+        if !dev_fixtures {
+            return Ok(Verdict::Untrusted);
+        }
+        let dev = db
+            .query(
+                "SELECT require_trusted_devices AS require_trusted FROM orgs WHERE id = ?",
+                &[Param::Text(crate::auth::DEV_ORG_ID.to_owned())],
+            )
+            .await?;
+        let required = match dev.first() {
+            Some(row) => int(row, "require_trusted")? == 1,
+            None => false,
+        };
+        return Ok(if required {
+            Verdict::Untrusted
+        } else {
+            Verdict::Allowed
+        });
     };
-    Ok(tunnel_allowed(
+    if int(row, "revoked")? == 1 {
+        return Ok(Verdict::Revoked);
+    }
+    let allowed = tunnel_allowed(
         int(row, "require_trusted")? == 1,
         Origin::parse(&text(row, "origin")?),
-        int(row, "revoked")? == 1,
-    ))
+        false,
+    );
+    Ok(if allowed {
+        Verdict::Allowed
+    } else {
+        Verdict::Untrusted
+    })
 }
 
 #[cfg(test)]

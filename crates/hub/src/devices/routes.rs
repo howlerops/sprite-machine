@@ -2,11 +2,12 @@
 //!
 //! | Route                              | Auth                                              |
 //! | ---------------------------------- | ------------------------------------------------- |
-//! | `POST /v1/devices/code`            | none (rate limit TODO, see `service::start`)      |
+//! | `POST /v1/devices/code`            | none; rate limited (`limits`): `429` + Retry-After |
 //! | `POST /v1/devices/token`           | none; the device code is the secret (RFC 8628)    |
-//! | `POST /v1/devices/approve`         | session token, member; audited                    |
+//! | `POST /v1/devices/approve`         | session token, member; audited; `429` on guessing |
 //! | `POST /v1/devices/deny`            | session token, member; audited                    |
 //! | `GET /v1/devices`                  | session token, viewer                             |
+//! | `DELETE /v1/devices/self`          | `Bearer <the new machine's credential>`; audited  |
 //! | `DELETE /v1/devices/{machine_id}`  | session token, admin; audited                     |
 //! | `PUT /v1/devices/policy`           | session token, admin; audited                     |
 //!
@@ -15,7 +16,10 @@
 use axum::{
     Json, Router,
     extract::{Path, Request, State},
-    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
+    http::{
+        HeaderMap, HeaderValue, StatusCode,
+        header::{AUTHORIZATION, RETRY_AFTER},
+    },
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
@@ -23,6 +27,7 @@ use protocol::turn_event::is_valid_id;
 use serde_json::Value;
 use worker::Env;
 
+use super::limits;
 use super::service::{self, PollError};
 use crate::auth::routes::error_response;
 use crate::auth::service::parse_body;
@@ -44,7 +49,23 @@ pub fn device_routes() -> Router<AppState> {
         .route("/v1/devices/approve", post(approve))
         .route("/v1/devices/deny", post(deny))
         .route("/v1/devices/policy", axum::routing::put(policy))
+        .route("/v1/devices/self", delete(revoke_self))
         .route("/v1/devices/{machine_id}", delete(revoke))
+}
+
+/// The cron trigger's work: purge expired pairings and old attempt counters.
+pub async fn purge_scheduled(env: &Env) {
+    let result = async {
+        let database = database(env)?;
+        limits::purge(&D1::new(&database), now_ms()).await
+    }
+    .await;
+    match result {
+        Ok((pairings, attempts)) => {
+            worker::console_log!("devices purge: {pairings} pairings, {attempts} attempts")
+        }
+        Err(error) => worker::console_log!("devices purge failed: {}", error.message),
+    }
 }
 
 fn dev_fixtures(env: &Env) -> bool {
@@ -90,7 +111,15 @@ async fn read_body(req: Request) -> Result<(HeaderMap, Value), ApiError> {
 fn respond(result: Result<Value, ApiError>, ok: StatusCode) -> Response {
     match result {
         Ok(body) => (ok, Json(body)).into_response(),
-        Err(error) => error_response(&error),
+        Err(error) => {
+            let mut response = error_response(&error);
+            if let Some(seconds) = limits::retry_after(&error)
+                && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+            {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+            response
+        }
     }
 }
 
@@ -111,7 +140,17 @@ async fn code(State(env): State<AppState>, req: Request) -> Response {
     let result = async {
         let headers = req.headers().clone();
         let database = database(&env)?;
-        service::start(&D1::new(&database), &base_url(&headers), now_ms()).await
+        // Cloudflare sets this from the connection; the rate limit is per IP when it is present.
+        let client_ip = headers
+            .get("cf-connecting-ip")
+            .and_then(|value| value.to_str().ok());
+        service::start(
+            &D1::new(&database),
+            &base_url(&headers),
+            client_ip,
+            now_ms(),
+        )
+        .await
     }
     .await;
     respond(result, StatusCode::OK)
@@ -229,6 +268,23 @@ async fn policy(State(env): State<AppState>, req: Request) -> Response {
         let caller =
             authenticate(&db, authorization(&headers).as_deref(), dev_fixtures(&env)).await?;
         service::set_policy(&db, &caller, &body, &request_id_of(&headers)).await
+    }
+    .await;
+    respond(result, StatusCode::OK)
+}
+
+#[worker::send]
+async fn revoke_self(State(env): State<AppState>, req: Request) -> Response {
+    let result = async {
+        let headers = req.headers().clone();
+        let database = database(&env)?;
+        service::revoke_self(
+            &D1::new(&database),
+            &DoControl { env: &env },
+            authorization(&headers).as_deref(),
+            &request_id_of(&headers),
+        )
+        .await
     }
     .await;
     respond(result, StatusCode::OK)

@@ -47,6 +47,12 @@ new_sqlite_classes = ["Thread", "Machine", "Flow"]
 tag = "v3"
 deleted_classes = ["TracerHub"]
 
+# ---- Cron Triggers --------------------------------------------------------------------------
+
+# Hourly: purge expired device pairings and old rate-limit counters (devices::limits::purge).
+[triggers]
+crons = ["17 * * * *"]
+
 # ---- D1, R2, Queues -----------------------------------------------------------------------
 
 [[d1_databases]]

@@ -27,7 +27,10 @@ use axum::{
     routing::get,
 };
 use tower_service::Service;
-use worker::{Context, Env, HttpRequest, MessageBatch, event, send::SendWrapper};
+use worker::{
+    Context, Env, HttpRequest, MessageBatch, ScheduleContext, ScheduledEvent, event,
+    send::SendWrapper,
+};
 
 use crate::router::{self, REQUEST_ID_HEADER};
 
@@ -70,6 +73,13 @@ async fn queue(
     worker::console_log!("{}", router::queue_log(NOTIFY_QUEUE, messages));
     batch.ack_all();
     Ok(())
+}
+
+/// The Cron Trigger (wrangler.toml `[triggers]`): purges expired device pairings and old
+/// attempt counters.
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    crate::devices::routes::purge_scheduled(&env).await;
 }
 
 async fn healthz() -> Json<serde_json::Value> {
