@@ -1,8 +1,9 @@
 //! Which role each thread route needs and which action it audits (plan §4.2 "Auth").
 //!
 //! Reads (`GET`, subscribe) need `viewer`. Sending a prompt, resolving an approval and cancelling
-//! need `member`, so a viewer gets `403 forbidden`. Deleting a pending task is destructive and
-//! needs `admin`. Every mutation names an audit action; reads name none.
+//! need `member`, so a viewer gets `403 forbidden`. Removing a queued task (`DELETE .../pending/
+//! {task_id}`, client-api §5.3) needs `member`, like cancel. Every mutation names an audit action;
+//! reads name none.
 
 use crate::db::Role;
 
@@ -62,7 +63,7 @@ pub fn thread_policy(method: &str, path: &str) -> Option<Policy> {
             Some(("interrupt_id", (*interrupt_id).to_owned())),
         ),
         (false, "DELETE", ["pending", task_id]) => make(
-            Role::Admin,
+            Role::Member,
             Some("thread.pending.delete"),
             Some(("task_id", (*task_id).to_owned())),
         ),
@@ -84,7 +85,10 @@ mod tests {
         let p = thread_policy("POST", "/v1/threads/t1/subscribe-ticket").expect("policy");
         assert_eq!((p.role, p.action), (Role::Viewer, None));
         let p = thread_policy("DELETE", "/v1/threads/t1/pending/k1").expect("policy");
-        assert_eq!(p.role, Role::Admin);
+        assert_eq!(
+            (p.role, p.action),
+            (Role::Member, Some("thread.pending.delete"))
+        );
         assert_eq!(p.extra, Some(("task_id", "k1".to_owned())));
         let p = thread_policy("POST", "/v1/threads/t1/interrupts/i1").expect("policy");
         assert_eq!(p.action, Some("thread.approval.resolve"));
