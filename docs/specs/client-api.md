@@ -257,6 +257,56 @@ before it stores the token.
 - One pending notification per task (`Topic` = task id). A user cancel (`RunError{cancelled}`)
   sends nothing.
 
+### 5.9 GitHub sign-in, members and invites
+
+> M2-003b. OAuth authorization code + PKCE (RFC 7636, S256 only) for the desktop app (RFC 8252) and
+> the web page. The hub is the authorization server for the client and the confidential client of
+> GitHub (it holds `GITHUB_CLIENT_SECRET`; the client never sees it). The result is an ordinary
+> session token (§2) with the user's role in the org.
+
+**Sign-in** (the client opens the first URL in the system browser):
+
+1. **`GET /v1/auth/github/authorize`** `?redirect_uri&code_challenge&code_challenge_method=S256&state[&org_id]`
+   → 302 to GitHub. `redirect_uri` must be exactly one of: `http://127.0.0.1:<port>/callback` or
+   `http://[::1]:<port>/callback` (any port; the desktop app listens there, RFC 8252 §7.3), or the
+   hub's own `<origin>/auth/github/callback` (the web page). Anything else (`localhost`, `https`,
+   another path, a query, another host) is **400 `invalid_request`** with no redirect. `code_challenge`
+   is the 43-character S256 challenge; `plain` is refused. `state` (8-128 of `[A-Za-z0-9-._~]`) is
+   required and returned unchanged. `org_id` picks the org of the session; default is the
+   user's oldest membership.
+2. GitHub redirects to **`GET /auth/github/callback?code&state`** (register this URL in the GitHub OAuth
+   app). The hub's `state` is single use, 10 minutes, bound to the hub's own PKCE verifier for the
+   GitHub leg. A missing, used or expired state is **400**, never a redirect. The hub exchanges the
+   GitHub code with the client secret and that verifier, reads the GitHub user, and maps it to a hub
+   user **by GitHub user id** (not login). An account with no hub user and no open invite, or with no
+   membership in the requested org, gets `…?error=access_denied&state=<state>` and nothing is created.
+3. The hub redirects to `redirect_uri?code=<hub code>&state=<state>` (the web page gets
+   `<origin>/#/auth/github?code=…&state=…`, in the fragment). The code is single use, 2 minutes.
+4. **`POST /v1/auth/github/token`** `{ "code", "code_verifier", "redirect_uri" }` (no auth) → 201
+   `{ "token", "expires_at", "user", "org", "role" }` (like §5.7). Any mismatch (unknown, used or expired
+   code, wrong verifier, other `redirect_uri`) is **400 `invalid_grant`** and burns the code.
+   Audited (`auth.github.signin`; `member.invite.accept` for each invite taken).
+
+**Members and invites** (all scoped to the org of the session; no session is 401):
+
+| Route | Role | Notes |
+| ----- | ---- | ----- |
+| `GET /v1/members` | viewer | `{ members: [{ user_id, display_name, github_login, role, joined_at }] }` |
+| `POST /v1/invites` `{ github_login, role? }` | admin | 201 `{ invite: { id, github_login, role, expires_at_ms } }`; `role` (default `member`) may not exceed the inviter's own (403); 409 if the account is already a member or has an open invite; the login is stored lowercase; valid 14 days |
+| `GET /v1/invites` | admin | open invites |
+| `DELETE /v1/invites/{id}` | admin | 404 if not an open invite of this org |
+| `PATCH /v1/members/{user_id}` `{ role }` | admin | never above your own role, never yourself, 404 for another org's user |
+| `DELETE /v1/members/{user_id}` | admin | same limits; the member's sessions in the org end at once |
+
+An invite is accepted by the first GitHub sign-in of that account, which makes it a member with the
+invite's role. Every mutation is audited (`member.invite`, `member.invite.revoke`, `member.role`,
+`member.remove`).
+
+Hub configuration: var `GITHUB_CLIENT_ID`, Worker secret `GITHUB_CLIENT_SECRET`, optional var
+`HUB_PUBLIC_URL` (default: the request's origin). `GITHUB_API_BASE` (dev and tests only) points
+authorize, token and user at a mock GitHub; unset means github.com and api.github.com. Unset client
+id: **503 `not_configured`**.
+
 ## 6. Who emits what
 
 | Event                                             | Emitted by | When                                                                                                                  |

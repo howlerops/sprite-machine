@@ -118,6 +118,19 @@ export ANDROID_PACKAGE_NAME=dev.sprite.machine.test
 ANDROID_SHA256_CERT_FINGERPRINTS=$(printf 'AB:%.0s' $(seq 1 31))AB
 export ANDROID_SHA256_CERT_FINGERPRINTS
 
+# M2-003b: for the oauth suite only, a mock GitHub (served by the test process on a free local port),
+# a fake client id and a random per-run client secret (never a real one). The hub gets them as --var
+# (GITHUB_API_BASE points at the mock), the test process as env vars.
+github_args=()
+if [[ $name == oauth ]]; then
+  GITHUB_CLIENT_ID=test-client-id
+  GITHUB_CLIENT_SECRET=$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')
+  MOCK_GITHUB_PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
+  export GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET MOCK_GITHUB_PORT
+  github_args=(--var "GITHUB_CLIENT_ID:$GITHUB_CLIENT_ID" --var "GITHUB_CLIENT_SECRET:$GITHUB_CLIENT_SECRET" \
+    --var "GITHUB_API_BASE:http://127.0.0.1:$MOCK_GITHUB_PORT")
+fi
+
 PORT=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
 BASE="http://127.0.0.1:$PORT"
 echo "== wrangler dev --local --test-scheduled on port $PORT"
@@ -127,7 +140,7 @@ echo "== wrangler dev --local --test-scheduled on port $PORT"
   --var "VAPID_PRIVATE_KEY:$VAPID_PRIVATE_KEY" --var "VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY" \
   --var "APPLE_TEAM_ID:$APPLE_TEAM_ID" --var "APPLE_BUNDLE_ID:$APPLE_BUNDLE_ID" \
   --var "ANDROID_PACKAGE_NAME:$ANDROID_PACKAGE_NAME" \
-  --var "ANDROID_SHA256_CERT_FINGERPRINTS:$ANDROID_SHA256_CERT_FINGERPRINTS" \
+  --var "ANDROID_SHA256_CERT_FINGERPRINTS:$ANDROID_SHA256_CERT_FINGERPRINTS" "${github_args[@]}" \
   --show-interactive-dev-session=false) >"$LOG" 2>&1 </dev/null &
 WRANGLER_PID=$!
 

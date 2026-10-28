@@ -72,9 +72,67 @@ pub fn thread_policy(method: &str, path: &str) -> Option<Policy> {
     }
 }
 
+/// What an org-level members route requires and records (M2-003b). Every route is scoped to the
+/// caller's own org (the org of the session), so a non-member has no session and gets `401`, and
+/// a member of another org cannot name this org's rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrgPolicy {
+    pub role: Role,
+    /// The audit action for a mutation; `None` for reads.
+    pub action: Option<&'static str>,
+    /// The `{user_id}` or `{invite_id}` the path names.
+    pub target: Option<String>,
+}
+
+/// The policy of a members or invites route, or `None` if it is not one (fail closed: `404`).
+pub fn member_policy(method: &str, path: &str) -> Option<OrgPolicy> {
+    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let make = |role, action, target: Option<&str>| {
+        Some(OrgPolicy {
+            role,
+            action,
+            target: target.map(str::to_owned),
+        })
+    };
+    match (method, segments.as_slice()) {
+        ("GET", ["v1", "members"]) => make(Role::Viewer, None, None),
+        ("PATCH", ["v1", "members", user_id]) => {
+            make(Role::Admin, Some("member.role"), Some(user_id))
+        }
+        ("DELETE", ["v1", "members", user_id]) => {
+            make(Role::Admin, Some("member.remove"), Some(user_id))
+        }
+        ("GET", ["v1", "invites"]) => make(Role::Admin, None, None),
+        ("POST", ["v1", "invites"]) => make(Role::Admin, Some("member.invite"), None),
+        ("DELETE", ["v1", "invites", invite_id]) => {
+            make(Role::Admin, Some("member.invite.revoke"), Some(invite_id))
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn member_routes_need_their_roles_and_audit_their_mutations() {
+        let p = member_policy("GET", "/v1/members").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Viewer, None));
+        let p = member_policy("POST", "/v1/invites").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Admin, Some("member.invite")));
+        let p = member_policy("DELETE", "/v1/invites/inv_1").expect("policy");
+        assert_eq!(p.action, Some("member.invite.revoke"));
+        assert_eq!(p.target.as_deref(), Some("inv_1"));
+        let p = member_policy("PATCH", "/v1/members/usr_1").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Admin, Some("member.role")));
+        let p = member_policy("DELETE", "/v1/members/usr_1").expect("policy");
+        assert_eq!(p.action, Some("member.remove"));
+        assert!(member_policy("GET", "/v1/invites").expect("policy").role == Role::Admin);
+        assert!(member_policy("PUT", "/v1/members").is_none());
+        assert!(member_policy("POST", "/v1/members").is_none());
+        assert!(member_policy("GET", "/v1/members/usr_1/x").is_none());
+    }
 
     #[test]
     fn routes_map_to_roles_and_actions() {

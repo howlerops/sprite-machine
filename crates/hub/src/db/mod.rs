@@ -75,6 +75,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0013_subscribe_tickets.sql",
         include_str!("../../migrations/0013_subscribe_tickets.sql"),
     ),
+    (
+        "0014_github_oauth.sql",
+        include_str!("../../migrations/0014_github_oauth.sql"),
+    ),
 ];
 
 /// One result row: column name to JSON value (what D1 returns for an object row).

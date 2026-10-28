@@ -44,6 +44,8 @@ pub fn router(env: Env) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .merge(crate::auth::routes::auth_routes())
+        .merge(crate::auth::github_routes::github_routes())
+        .merge(crate::members::routes::member_routes())
         .merge(crate::threads::routes::thread_routes())
         .merge(crate::machines::routes::machine_routes())
         .merge(crate::devices::routes::device_routes())
