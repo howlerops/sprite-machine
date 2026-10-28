@@ -2,7 +2,7 @@
 // (GET /v1/threads), grouped by machine. It polls every 5 s while the page is visible (a
 // subscription needs a socket per machine; polling is two cheap GETs) and on becoming visible.
 
-import { request } from '/src/api.js';
+import { ApiError, request } from '/src/api.js';
 
 export const POLL_MS = 5000;
 const MAX_PAGES = 4;
@@ -147,5 +147,183 @@ export function mountSessions(host) {
     stopped = true;
     clearInterval(timer);
     document.removeEventListener('visibilitychange', onVisibility);
+  };
+}
+
+// ---- Members screen ----------------------------------------------------------------------------
+// The members screen (client-api.md §5.9): everyone sees the list; an admin also invites by
+// GitHub login, revokes open invites, changes roles and removes members. The hub enforces every
+// rule (never above your own role, never yourself); the page only hides what would be refused.
+// All text goes in with textContent.
+
+
+const ROLES = ['viewer', 'member', 'admin', 'owner'];
+const rank = (role) => ROLES.indexOf(role);
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key === 'text') node.textContent = value;
+    else if (key === 'class') node.className = value;
+    else if (key in node) node[key] = value;
+    else node.setAttribute(key, value);
+  }
+  node.append(...children);
+  return node;
+}
+
+function failure(error) {
+  if (!(error instanceof ApiError)) return 'Could not reach the hub. Try again.';
+  if (error.status === 403) return 'Your role does not allow that.';
+  if (error.status === 409) return 'That GitHub account is already a member or has an open invite.';
+  if (error.status === 404) return 'That member or invite is gone. The list was refreshed.';
+  if (error.status === 400) return 'That is not a valid GitHub login.';
+  return 'The hub refused that. Try again.';
+}
+
+/** Mounts the screen in `container`; returns the teardown. `session` is the stored session. */
+export function mountMembers(container, session) {
+  const myRank = rank(session.role);
+  const admin = myRank >= rank('admin');
+  const myId = session.user && session.user.id;
+  let alive = true;
+
+  const message = el('p', { class: 'notice', role: 'alert', hidden: true });
+  const list = el('ul', { class: 'people', id: 'members-list', 'aria-label': 'Members' });
+  const invitesHeading = el('h2', { text: 'Open invites', hidden: true });
+  const invites = el('ul', { class: 'people', id: 'invites-list', 'aria-label': 'Open invites', hidden: true });
+  container.replaceChildren(message, list);
+
+  const say = (text) => {
+    message.textContent = text || '';
+    message.hidden = !text;
+  };
+  const run = async (call) => {
+    say('');
+    try {
+      await call();
+    } catch (error) {
+      say(failure(error));
+    }
+    await refresh();
+  };
+
+  function memberRow(member) {
+    const name = member.display_name || member.user_id;
+    const who = el('div', { class: 'person' }, el('strong', { text: name }));
+    if (member.github_login) who.append(el('span', { class: 'login', text: `@${member.github_login}` }));
+    const row = el('li', { 'data-user': member.user_id }, who);
+    const manageable = admin && member.user_id !== myId && rank(member.role) <= myRank;
+    if (!manageable) {
+      row.append(el('span', { class: 'role', text: member.role }));
+      return row;
+    }
+    const select = el('select', { 'aria-label': `Role of ${name}` });
+    for (const role of ROLES.filter((r) => rank(r) <= myRank)) {
+      select.append(el('option', { value: role, text: role, selected: role === member.role }));
+    }
+    select.addEventListener('change', () =>
+      run(() =>
+        request('PATCH', `/v1/members/${encodeURIComponent(member.user_id)}`, {
+          body: { role: select.value },
+        }),
+      ),
+    );
+    const remove = el('button', { type: 'button', text: 'Remove', 'aria-label': `Remove ${name}` });
+    remove.addEventListener('click', () => {
+      if (remove.dataset.armed !== '1') {
+        remove.dataset.armed = '1';
+        remove.textContent = 'Confirm remove';
+        return;
+      }
+      run(() => request('DELETE', `/v1/members/${encodeURIComponent(member.user_id)}`));
+    });
+    row.append(select, remove);
+    return row;
+  }
+
+  function inviteRow(invite) {
+    const row = el(
+      'li',
+      { 'data-invite': invite.id },
+      el(
+        'div',
+        { class: 'person' },
+        el('strong', { text: `@${invite.github_login}` }),
+        el('span', { class: 'login', text: `invited as ${invite.role}` }),
+      ),
+    );
+    const revoke = el('button', {
+      type: 'button',
+      text: 'Revoke',
+      'aria-label': `Revoke invite for ${invite.github_login}`,
+    });
+    revoke.addEventListener('click', () =>
+      run(() => request('DELETE', `/v1/invites/${encodeURIComponent(invite.id)}`)),
+    );
+    row.append(revoke);
+    return row;
+  }
+
+  async function refresh() {
+    try {
+      const [members, open] = await Promise.all([
+        request('GET', '/v1/members'),
+        admin ? request('GET', '/v1/invites') : Promise.resolve(null),
+      ]);
+      if (!alive) return;
+      list.replaceChildren(...(members.members || []).map(memberRow));
+      if (open) {
+        const items = open.invites || [];
+        invites.replaceChildren(...items.map(inviteRow));
+        invitesHeading.hidden = items.length === 0;
+        invites.hidden = items.length === 0;
+      }
+    } catch (error) {
+      if (alive && !(error instanceof ApiError && error.status === 401)) {
+        say('Could not load the members. Try again.');
+      }
+    }
+  }
+
+  if (admin) {
+    const login = el('input', {
+      type: 'text',
+      id: 'invite-login',
+      autocomplete: 'off',
+      autocapitalize: 'none',
+      spellcheck: false,
+      required: true,
+    });
+    const role = el('select', { id: 'invite-role', 'aria-label': 'Role for the invite' });
+    for (const name of ROLES.filter((r) => rank(r) <= myRank && r !== 'owner')) {
+      role.append(el('option', { value: name, text: name, selected: name === 'member' }));
+    }
+    const form = el(
+      'form',
+      { class: 'invite-form', id: 'invite-form' },
+      el('h2', { text: 'Invite by GitHub login' }),
+      el('label', { htmlFor: 'invite-login', text: 'GitHub login' }),
+      login,
+      role,
+      el('button', { type: 'submit', class: 'primary', text: 'Send invite' }),
+    );
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const value = login.value.trim().replace(/^@/, '');
+      if (!value) return;
+      run(async () => {
+        await request('POST', '/v1/invites', { body: { github_login: value, role: role.value } });
+        login.value = '';
+      });
+    });
+    container.append(form, invitesHeading, invites);
+  } else {
+    container.append(el('p', { class: 'hint', text: 'Only admins can invite or change members.' }));
+  }
+
+  refresh();
+  return () => {
+    alive = false;
   };
 }

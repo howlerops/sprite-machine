@@ -1,5 +1,7 @@
 // Test helpers: the hub's HTTP API from Node, and the dev-fixture routes (DEV_FIXTURES=1).
 
+import { createHash, randomBytes } from 'node:crypto';
+
 const base = () => process.env.SM_BASE_URL;
 export const ownerToken = () => process.env.SM_OWNER_TOKEN;
 
@@ -133,4 +135,58 @@ export async function signedIn(page, session) {
   await page.goto('/');
   await page.evaluate((value) => localStorage.setItem('sm.session', value), JSON.stringify(session));
   await page.goto('/');
+}
+
+// ---- GitHub sign-in against the mock GitHub (WEB-006) ----------------------------------------
+
+/** A made-up GitHub account for the mock: lowercase login and a numeric id. */
+export function githubAccount(prefix = 'gh') {
+  return { login: unique(prefix), id: 1_000_000 + Math.floor(Math.random() * 900_000_000) };
+}
+
+/** The code the mock accepts for `account` (the browser's authorize step is played by the test). */
+export const githubCode = (account) => `ghcode.${account.login}.${account.id}`;
+
+/** The owner invites a GitHub login (`role` viewer, member or admin). */
+export function invite(login, role = 'member') {
+  return ok(
+    api('POST', '/v1/invites', { token: ownerToken(), body: { github_login: login, role } }),
+    201,
+  );
+}
+
+/**
+ * The whole PKCE flow without a browser, as the desktop app would run it: invites the account,
+ * then authorize -> (mock GitHub) -> callback -> token. Resolves to the session
+ * `{token, expires_at, user, org, role}`.
+ */
+export async function githubSession(account, role = 'member') {
+  await invite(account.login, role);
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const state = randomBytes(16).toString('base64url');
+  const redirectUri = `${base()}/auth/github/callback`;
+  const query = new URLSearchParams({
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    state,
+  });
+  const authorize = await fetch(`${base()}/v1/auth/github/authorize?${query}`, { redirect: 'manual' });
+  if (authorize.status !== 302) throw new Error(`authorize answered ${authorize.status}`);
+  const hubState = new URL(authorize.headers.get('location')).searchParams.get('state');
+  const callback = await fetch(
+    `${base()}/auth/github/callback?${new URLSearchParams({ code: githubCode(account), state: hubState })}`,
+    { redirect: 'manual' },
+  );
+  if (callback.status !== 302) throw new Error(`callback answered ${callback.status}`);
+  const back = new URL(callback.headers.get('location'));
+  const returned = new URLSearchParams(back.hash.split('?')[1] || '');
+  if (returned.get('state') !== state) throw new Error('the hub did not echo the state');
+  return ok(
+    api('POST', '/v1/auth/github/token', {
+      body: { code: returned.get('code'), code_verifier: verifier, redirect_uri: redirectUri },
+    }),
+    201,
+  );
 }

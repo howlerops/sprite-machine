@@ -3,7 +3,9 @@
 //   signed out:  sign-in            /            "Sign in with a device code"
 //                QR link            /pair?code=  redeem, then confirm
 //                device code        /pair/device the page's own code, polled, then confirm
+//                GitHub             /#/auth/github?code=&state=  the return from GitHub (pairing.js)
 //   signed in:   session list       /            machines, presence, threads (sessions.js)
+//                members            /#/members   the org's members; invites for admins (sessions.js)
 //                thread             /#/t/<id>    the transcript, live over the subscription (thread.js)
 //
 // The session token is stored only after the person confirms the user and org it names.
@@ -17,9 +19,16 @@ import {
   setUnauthorizedHandler,
   signOut,
 } from '/src/api.js';
-import { pollDevice, redeemLink, startDevice } from '/src/pairing.js';
+import {
+  completeGithubSignIn,
+  GithubError,
+  pollDevice,
+  redeemLink,
+  startDevice,
+  startGithubSignIn,
+} from '/src/pairing.js';
 import { disablePush, forgetSession, mountPushButton, registerServiceWorker, rememberSession } from '/src/push.js';
-import { mountSessions } from '/src/sessions.js';
+import { mountMembers, mountSessions } from '/src/sessions.js';
 import { clearThreadCaches, mountThread } from '/src/thread.js';
 
 const root = document.getElementById('app');
@@ -31,6 +40,8 @@ let notice = '';
 let linkCode = null;
 // The thread on screen: a hash change fires both hashchange and popstate, one mount is enough.
 let shownThread = null;
+// The return from GitHub (/#/auth/github?code=&state=): read once, then the address is cleaned.
+let githubReturn = null;
 
 function screen(html, stop = () => {}) {
   teardown();
@@ -55,8 +66,18 @@ function showSignIn(message = notice) {
       <h1 tabindex="-1">Sign in</h1>
       ${message ? `<p class="notice" role="alert">${esc(message)}</p>` : ''}
       <p>Scan the QR code that <code>sm rc</code> prints on your computer, or pair this phone with a device code.</p>
-      <button type="button" class="primary" id="device">Sign in with a device code</button>
+      <div class="actions">
+        <button type="button" class="primary" id="github">Sign in with GitHub</button>
+        <button type="button" id="device">Sign in with a device code</button>
+      </div>
     </main>`);
+  root.querySelector('#github').addEventListener('click', async () => {
+    try {
+      await startGithubSignIn();
+    } catch {
+      showSignIn('Could not start the GitHub sign-in: this browser blocks session storage.');
+    }
+  });
   root.querySelector('#device').addEventListener('click', () => go('/pair/device'));
 }
 
@@ -69,6 +90,24 @@ async function showRedeem(code) {
     notice = expired
       ? 'This sign-in link is used or expired. Ask your computer for a new one (sm rc).'
       : 'Could not use this sign-in link. Check your connection and try again.';
+    go('/');
+  }
+}
+
+async function showGithubReturn(params) {
+  screen('<main class="card"><h1 tabindex="-1">Signing in</h1><p>Finishing your GitHub sign-in…</p></main>');
+  try {
+    saveSession(await completeGithubSignIn(params));
+    go('/');
+  } catch (error) {
+    const reason =
+      error instanceof GithubError ? error.code : error instanceof ApiError ? 'grant' : 'network';
+    notice =
+      reason === 'access_denied'
+        ? 'This GitHub account has no access. Ask an admin to invite your GitHub login.'
+        : reason === 'network'
+          ? 'Could not reach the hub. Check your connection and try again.'
+          : 'The GitHub sign-in did not complete. Try again.';
     go('/');
   }
 }
@@ -155,7 +194,10 @@ function showSessions(session) {
   screen(`<header class="bar">
       <div><h1 tabindex="-1">Sessions</h1>
         <p class="who-line"><span id="bar-user">${esc(who)}</span>${org ? ` · <span id="bar-org">${esc(org)}</span>` : ''}</p></div>
-      <button type="button" id="signout">Sign out</button>
+      <div class="bar-actions">
+        <a class="button" href="#/members" id="members-link">Members</a>
+        <button type="button" id="signout">Sign out</button>
+      </div>
     </header>
     <main id="list" aria-label="Machines and sessions"></main>`);
   mountPushButton(root.querySelector('.bar'));
@@ -166,6 +208,18 @@ function showSessions(session) {
     clearThreadCaches();
     go('/');
   });
+}
+
+function showMembers(session) {
+  if (shownThread === '#members') return;
+  screen(`
+    <header class="bar">
+      <div><h1 tabindex="-1">Members</h1><p class="who-line">${esc((session.org && session.org.name) || '')}</p></div>
+      <a class="button" href="#/" id="back">Back</a>
+    </header>
+    <main id="members" aria-label="Members"></main>`);
+  teardown = mountMembers(root.querySelector('#members'), session);
+  shownThread = '#members';
 }
 
 function showThread(id) {
@@ -191,6 +245,17 @@ function route() {
     linkCode = params.get('code');
     history.replaceState(null, '', '/pair');
   }
+  const github = location.hash.match(/^#\/auth\/github\?(.*)$/);
+  if (github) {
+    githubReturn = new URLSearchParams(github[1]);
+    history.replaceState(null, '', '/');
+  }
+  if (githubReturn) {
+    const returned = githubReturn;
+    githubReturn = null;
+    showGithubReturn(returned);
+    return;
+  }
   if (linkCode) {
     const code = linkCode;
     linkCode = null;
@@ -203,7 +268,8 @@ function route() {
       history.replaceState(null, '', `/${location.hash}`);
     }
     const thread = location.hash.match(/^#\/t\/([^/?]+)/);
-    if (thread) showThread(decodeURIComponent(thread[1]));
+    if (location.hash === '#/members') showMembers(session);
+    else if (thread) showThread(decodeURIComponent(thread[1]));
     else showSessions(session);
     return;
   }
