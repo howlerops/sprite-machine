@@ -2683,13 +2683,18 @@ items:
     title: 'hub: titles, rename, archive/delete, D1 FTS5 search + deep links'
     milestone: M2
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     deps: [M2-008, M2-016]
     paths:
-      - 'crates/hub/src/tasks/**'
-      - 'crates/hub/src/links*'
-      - 'crates/hub/migrations/*tasks_fts*'
-      - 'crates/hub/tests/tasks.rs'
-      - 'crates/hub/tests/links.rs'
+      - "crates/hub/src/tasks/**"
+      - "crates/hub/src/links*"
+      - "crates/hub/migrations/0008_tasks_index.sql"
+      - "crates/hub/src/threads/** (D1 sync hook)"
+      - "crates/hub/src/auth/policy.rs"
+      - "crates/hub/tests/tasks.rs"
+      - "crates/hub/tests/links.rs"
     context:
       - 'apps/control-plane/src/title.ts (v1 heuristic)'
       - 'docs/PLAN-v2-ade.md §3 (Inbox), §4.2 (D1, Workers Static Assets)'
