@@ -181,3 +181,4 @@
 2026-10-28T11:13Z M2-010 back (haiku; do/thread.rs sync hook out of path, accepted). Added M2-010a (deleted thread = 404 everywhere [leader decision], index reconcile, done status, live app-link check)
 2026-10-28T11:15Z M2B-005a → done (verify9). M2-011 and M2-010 merged (leader resolved union conflicts: MIGRATIONS 0007/0008/0010, [[test]] entries, do/thread.rs hooks, router merges). Full verify running (11 live suites)
 2026-10-28T11:15Z M2-003c assigned (sonnet, priority 1)
+2026-10-28T11:35Z leader: post-merge verify found wrangler.toml with two [vars] tables (M2-010 x M2-011 auto-merge) → every hub-test failed at d1 migrations apply. Fixed d3d8e00; M2-003c worker told to merge v2. Workspace tests 759 passed. Re-running the 11 live suites + tracer
