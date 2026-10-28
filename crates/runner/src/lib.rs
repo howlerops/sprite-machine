@@ -10,4 +10,5 @@ pub mod settings;
 pub mod sleep;
 pub mod tracer;
 pub mod trust;
+pub mod tui;
 pub mod tunnel;

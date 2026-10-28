@@ -18,6 +18,9 @@ test-support = ["sidecar/test-support"]
 [dependencies]
 protocol = { path = "../protocol" }
 sidecar = { path = "../sidecar" }
+# The interactive TUI (M2B-010) is a client of the hub like the phone: it reads the thread through
+# client-core and sends through its outbox.
+client-core = { path = "../client-core" }
 anyhow.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
@@ -31,6 +34,9 @@ webpki-roots = "1"
 rand = "0.9"
 # `sm login` (M2B-005): the pairing QR rendered as unicode text (no image deps).
 qrcode = { version = "0.14", default-features = false }
+# The interactive TUI (M2B-010): ratatui on its crossterm backend; tests render to a TestBackend.
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+unicode-width = "0.2"
 
 # The macOS Keychain for the machine credential (M2B-005). Platform-native only, no default
 # features: no openssl, no libdbus. Linux keeps the credential in the 0600 file (keyutils is lost
