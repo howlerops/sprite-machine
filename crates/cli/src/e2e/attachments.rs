@@ -34,7 +34,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use client_core::{Applied, Subscription, ThreadSync};
+use client_core::{Applied, CreateThread, FirstPrompt, Subscription, ThreadSync};
+use protocol::tunnel::{ContentPart, Workspace};
 use protocol::turn_event::Event;
 use runner::login::{CredentialStore, Login};
 use runner::server::{self, Options, PermissionMode};
@@ -417,29 +418,30 @@ async fn create_thread(
     task: &str,
     parts: Vec<Value>,
 ) -> Result<String> {
-    let body = json!({
-        "machine_id": machine_id,
-        "agent": AGENT_ID,
-        "workspace": { "path": project.to_string_lossy(), "spawn": "same_dir" },
-        "permission_mode": "default",
-        "title": "attachments e2e",
-        "prompt": { "task_id": task, "message_id": format!("msg_{task}"), "parts": parts },
-    });
-    let response = reqwest::Client::new()
-        .post(format!("{api}/threads"))
-        .bearer_auth(DEV_TOKEN)
-        .header("Idempotency-Key", new_key("thread"))
-        .json(&body)
-        .send()
+    let parts = parts
+        .into_iter()
+        .map(|part| serde_json::from_value::<ContentPart>(part).context("a file part"))
+        .collect::<Result<Vec<_>>>()?;
+    let request = CreateThread {
+        machine_id: machine_id.to_owned(),
+        agent: AGENT_ID.to_owned(),
+        workspace: Workspace {
+            path: project.to_string_lossy().into_owned(),
+            branch: None,
+            spawn: Some("same_dir".to_owned()),
+        },
+        permission_mode: Some("default".to_owned()),
+        title: Some("attachments e2e".to_owned()),
+        prompt: Some(FirstPrompt {
+            task_id: task.to_owned(),
+            message_id: format!("msg_{task}"),
+            parts,
+        }),
+    };
+    let created = client_core::create_thread(api, Some(DEV_TOKEN), &new_key("thread"), &request)
         .await
         .context("POST /v1/threads")?;
-    let status = response.status();
-    let answer: Value = response.json().await.context("thread answer")?;
-    ensure!(
-        status.as_u16() == 201,
-        "POST /v1/threads answered HTTP {status}: {answer}"
-    );
-    Ok(string_of(&answer, "thread_id")?.to_owned())
+    Ok(created.thread_id)
 }
 
 /// `POST /v1/threads/{id}/prompts` (client-api.md §5.3).

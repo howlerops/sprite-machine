@@ -394,7 +394,7 @@ pub fn new_idempotency_key() -> String {
     format!("idk_{:032x}", rand::random::<u128>())
 }
 
-fn valid_key(key: &str) -> bool {
+pub(crate) fn valid_key(key: &str) -> bool {
     (1..=128).contains(&key.len())
         && key
             .bytes()

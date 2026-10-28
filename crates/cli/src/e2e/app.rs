@@ -8,8 +8,7 @@
 //! (`client_core::tracer`): it drives the public client-core API. [`client_core::Subscription`]
 //! follows the thread, [`client_core::Outbox`] (over a [`client_core::Cache`]) sends the
 //! approval answer, and the loop ends at `RunFinished{success}`. The thread is created with
-//! `POST /v1/threads`, a raw request as in `e2e attachments`: client-core has no create-thread
-//! intent yet.
+//! [`client_core::create_thread`] (`POST /v1/threads` with the first prompt).
 //!
 //! The run passes when the client sees the turn-event.md §5 rule 6 stream for one prompt with
 //! one approval, answers the approval through the outbox (HTTP 200), and sees
@@ -19,13 +18,13 @@ use std::time::{Duration, Instant};
 
 use super::tracer::{self, TempDir, Wrangler};
 use anyhow::{Context, Result, anyhow, bail, ensure};
+use client_core::outbox::new_idempotency_key;
 use client_core::{
-    Applied, Cache, Clock, HttpTransport, Intent, IntentState, Outbox, RetryPolicy, Subscription,
-    SubscriptionError, SystemClock, SystemRandom, ThreadSync,
+    Applied, Cache, Clock, CreateThread, FirstPrompt, HttpTransport, Intent, IntentState, Outbox,
+    RetryPolicy, Subscription, SubscriptionError, SystemClock, SystemRandom, ThreadSync,
 };
-use protocol::tunnel::Outcome;
+use protocol::tunnel::{ContentPart, Outcome, Workspace};
 use protocol::turn_event::{Envelope, Event, InterruptKind, PermissionOptionKind, RunOutcome};
-use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
 const AGENT_ID: &str = "agt_acp_mock";
@@ -235,36 +234,29 @@ async fn drive(base: &str, machine_id: &str, workspace: &str) -> Result<Vec<Enve
 
 /// `POST /v1/threads` with the task's first prompt; returns the thread id (201).
 async fn create_thread(api: &str, machine_id: &str, workspace: &str, seed: &str) -> Result<String> {
-    let body = json!({
-        "machine_id": machine_id,
-        "agent": AGENT_ID,
-        "workspace": { "path": workspace, "spawn": "same_dir" },
-        "title": "App",
-        "prompt": {
-            "task_id": format!("tk_{seed}"),
-            "message_id": format!("msg_{seed}"),
-            "parts": [{ "type": "text", "text": "Add a /healthz route" }],
+    let request = CreateThread {
+        machine_id: machine_id.to_owned(),
+        agent: AGENT_ID.to_owned(),
+        workspace: Workspace {
+            path: workspace.to_owned(),
+            branch: None,
+            spawn: Some("same_dir".to_owned()),
         },
-    });
-    let response = reqwest::Client::new()
-        .post(format!("{api}/threads"))
-        .bearer_auth(DEV_TOKEN)
-        .header("Idempotency-Key", format!("idk_create_{seed}"))
-        .json(&body)
-        .send()
-        .await
-        .context("POST /v1/threads")?;
-    let status = response.status();
-    let answer: serde_json::Value = response.json().await.context("thread answer")?;
-    ensure!(
-        status.as_u16() == 201,
-        "POST /v1/threads answered HTTP {status}: {answer}"
-    );
-    answer
-        .get("thread_id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow!("POST /v1/threads answered without a thread_id: {answer}"))
+        permission_mode: None,
+        title: Some("App".to_owned()),
+        prompt: Some(FirstPrompt {
+            task_id: format!("tk_{seed}"),
+            message_id: format!("msg_{seed}"),
+            parts: vec![ContentPart::Text {
+                text: "Add a /healthz route".to_owned(),
+            }],
+        }),
+    };
+    let created =
+        client_core::create_thread(api, Some(DEV_TOKEN), &new_idempotency_key(), &request)
+            .await
+            .context("POST /v1/threads")?;
+    Ok(created.thread_id)
 }
 
 /// The next applied message. A dropped socket is reconnected from the last applied seq, with
