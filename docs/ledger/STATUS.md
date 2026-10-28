@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 83/241 (3 dropped) · in-flight M2-003c · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 77/120
+done 83/241 (3 dropped) · in-flight M1A-006g,M2-003c,M2B-007b,WEB-001 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 80/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 83/241 (3 dropped) · in-flight M2-003c · blocked 12 (human: M0-014, M0-02
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 59 | 30 | 1 |
+| P2 | 59 | 30 | 4 |
 | P3 | 20 | 1 | 0 |
 | P4 | 36 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -44,7 +44,7 @@ done 83/241 (3 dropped) · in-flight M2-003c · blocked 12 (human: M0-014, M0-02
 | M1A-006f | worker | rust | done | Tracer bridge built with Bridge::spawn_with (agent respawn); mapper harness-exit ending per SPEC-004 for every open interrupt; remove acp::reattach::fail_stale_interrupts |
 | M2B-004e | worker | rust | done | runner: start the sleep watcher at startup with a logind delay inhibitor; macOS sleep watcher (IOKit) implemented |
 | M2-008e | worker | rust | done | hub authz (security): every thread route checks the thread belongs to the caller's org (D1 thread_hosts(thread_id, org_id, machine_id)); unknown or foreign thread = 404 |
-| M1A-006g | worker | rust | todo | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
+| M1A-006g | worker | rust | assigned | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
 | M2B-005a | worker | rust | done | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
 | M2B-005b | worker | rust | todo | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
 | M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
@@ -53,7 +53,7 @@ done 83/241 (3 dropped) · in-flight M2-003c · blocked 12 (human: M0-014, M0-02
 | M2B-007a | worker | rust | done | sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout) |
 | SPEC-005 | leader | docs | done | Spec: browser sign-in for the mobile web page (runner QR link; browser device code) |
 | M2-003c | worker | rust | assigned | hub: browser sign-in routes per client-api §5.7 (signin links minted by a paired machine; link redeem; user device-code flow); sm rc prints the QR |
-| M2B-007b | worker | rust | todo | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
+| M2B-007b | worker | rust | assigned | sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command |
 | M2B-005c | worker | rust | todo | hub (security): turning require_trusted_devices on closes live tunnels of machines that are no longer trusted; per-IP limit on POST /v1/devices/token |
 | M2-011a | worker | rust | todo | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
 | M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
@@ -76,7 +76,7 @@ done 83/241 (3 dropped) · in-flight M2-003c · blocked 12 (human: M0-014, M0-02
 | M2B-014 | worker | rust | todo | Presence + reconnect notifications on the phone |
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
-| WEB-001 | worker | rust | todo | web: mobile web page — pairing (QR / device code) + session list with presence |
+| WEB-001 | worker | rust | assigned | web: mobile web page — pairing (QR / device code) + session list with presence |
 | WEB-002 | worker | rust | todo | web: transcript rendering for every TurnEvent variant |
 | WEB-003 | worker | rust | todo | web: composer with attachments + Allow/Deny + Stop |
 | WEB-004 | worker | rust | todo | web: PWA + Web Push |

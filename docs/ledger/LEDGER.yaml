@@ -2425,6 +2425,9 @@ items:
     title: 'Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording'
     milestone: M1a
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: medium
@@ -2689,6 +2692,9 @@ items:
     title: 'sm rc: a prompt for a thread whose idle session was closed reopens it (recreate the worktree from its branch, resume the ACP session); acp-mock scripts can advertise mcp_capabilities; local close command'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:haiku"
     lane: rust
     size: S
     risk: medium
@@ -3427,6 +3433,9 @@ items:
     title: 'web: mobile web page — pairing (QR / device code) + session list with presence'
     milestone: M2b
     phase: P2
+    status: "assigned"
+    attempt: 1
+    assignee: "worker:sonnet"
     deps:
       - "M2B-005"
       - "M2B-002"
