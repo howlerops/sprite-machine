@@ -9,7 +9,8 @@ use agui_fixture::{FixtureConfig, RunningFixture, Scenario, start};
 use client_core::cache::Cache;
 use client_core::sync::{Incoming, parse_incoming};
 use client_core::view::Item;
-use client_core::{Applied, Subscription, ThreadSync};
+use client_core::{Applied, Subscription, SubscriptionError, ThreadSync};
+use futures_util::SinkExt;
 use protocol::tunnel::{Actor, ActorKind, ContentPart};
 use protocol::turn_event::{
     AssistantRole, Envelope, Event, RunFinished, RunOutcome, RunReason, RunStarted,
@@ -430,5 +431,158 @@ async fn cold_restart_resumes_from_the_cached_seq_not_from_zero() {
     assert_eq!(total.len() as u64, subscription.sync().last_seq());
     assert_contiguous(&total);
 
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The hub's wire text of an event this build does not know. The spacing, key order and the
+/// `}` and escaped quote inside a string are deliberate: only a verbatim copy reproduces them.
+const UNKNOWN_ENVELOPE: &str = r#"{ "v": 1,  "seq": 2, "thread_id": "th_1", "task_id": null, "run_id": null, "ts": "2026-10-27T22:00:04.000Z", "event": { "type": "SomethingFromTheFuture", "note": "a } and \"quote\"", "x": [1, 2.50, "y"] } }"#;
+
+#[tokio::test]
+async fn a_failed_append_leaves_the_view_where_the_cache_is_and_the_next_event_is_not_a_gap() {
+    // The first event is for another thread, so the cache refuses it (WrongThread) and stores
+    // nothing. The view must not move on it, so the next correct event applies at seq 1.
+    let mut foreign: serde_json::Value = serde_json::from_str(
+        &serde_json::to_string(&envelope(
+            1,
+            Some("tk_1"),
+            None,
+            Event::UserMessage(UserMessage {
+                message_id: "msg_u1".to_owned(),
+                parts: vec![ContentPart::Text {
+                    text: "hello".to_owned(),
+                }],
+                author: user(),
+            }),
+        ))
+        .expect("serializes"),
+    )
+    .expect("parses");
+    foreign["thread_id"] = json!("th_other");
+    let foreign = foreign.to_string();
+    let known = serde_json::to_string(&prompt(1)).expect("serializes");
+    let frames = vec![
+        r#"{"type":"hello","head_seq":2,"replay_from":1}"#.to_owned(),
+        format!(r#"{{"type":"event","envelope":{foreign}}}"#),
+        format!(r#"{{"type":"event","envelope":{known}}}"#),
+        format!(r#"{{"type":"event","envelope":{UNKNOWN_ENVELOPE}}}"#),
+        r#"{"type":"live"}"#.to_owned(),
+    ];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
+    let base = format!("http://{}", listener.local_addr().expect("address"));
+    let hub = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accepts");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("handshake");
+        for frame in frames {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(frame.into()))
+                .await
+                .expect("sends");
+        }
+        std::future::pending::<()>().await;
+    });
+
+    let path = temp_db("append-first");
+    let mut cache = Cache::open(&path).expect("opens");
+    let mut subscription = Subscription::connect(&base, ThreadSync::new(THREAD), None)
+        .await
+        .expect("connects");
+
+    let hello = subscription.next_persisted(&mut cache).await;
+    assert!(matches!(hello, Ok(Applied::Hello { .. })), "{hello:?}");
+    let refused = subscription.next_persisted(&mut cache).await;
+    assert!(
+        matches!(refused, Err(SubscriptionError::Cache(_))),
+        "the cache refuses the foreign event: {refused:?}"
+    );
+    assert_eq!(
+        subscription.sync().last_seq(),
+        0,
+        "the view did not advance past the cache"
+    );
+    assert_eq!(cache.last_seq(THREAD).expect("last seq"), 0);
+
+    let mut events = 0;
+    loop {
+        match subscription
+            .next_persisted(&mut cache)
+            .await
+            .expect("no gap after the failed append")
+        {
+            Applied::Event(_) => events += 1,
+            Applied::Live => break,
+            _ => {}
+        }
+    }
+    hub.abort();
+    assert_eq!(events, 2);
+    assert_eq!(subscription.sync().last_seq(), 2);
+    assert_eq!(
+        cache.raw_events(THREAD).expect("raw events"),
+        vec![known, UNKNOWN_ENVELOPE.to_owned()]
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn a_live_unknown_event_is_stored_as_its_envelope_text_and_survives_a_restart() {
+    let known = serde_json::to_string(&prompt(1)).expect("serializes");
+    let frames = vec![
+        r#"{"type":"hello","head_seq":2,"replay_from":1}"#.to_owned(),
+        format!(r#"{{"type":"event",   "envelope": {known}}}"#),
+        format!(r#"{{ "envelope" : {UNKNOWN_ENVELOPE}, "type": "event" }}"#),
+        r#"{"type":"live"}"#.to_owned(),
+    ];
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
+    let base = format!("http://{}", listener.local_addr().expect("address"));
+    let hub = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accepts");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("handshake");
+        for frame in frames {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(frame.into()))
+                .await
+                .expect("sends");
+        }
+        std::future::pending::<()>().await;
+    });
+
+    let path = temp_db("live-unknown");
+    let mut cache = Cache::open(&path).expect("opens");
+    let mut subscription = Subscription::connect(&base, ThreadSync::new(THREAD), None)
+        .await
+        .expect("connects");
+    let mut events = 0;
+    loop {
+        match subscription
+            .next_persisted(&mut cache)
+            .await
+            .expect("subscription read")
+        {
+            Applied::Event(_) => events += 1,
+            Applied::Live => break,
+            _ => {}
+        }
+    }
+    hub.abort();
+    assert_eq!(events, 2);
+    drop(subscription);
+    drop(cache);
+
+    let restored = Cache::open(&path).expect("reopens");
+    assert_eq!(
+        restored.raw_events(THREAD).expect("raw events"),
+        vec![known, UNKNOWN_ENVELOPE.to_owned()],
+        "each stored text is the envelope exactly as the hub sent it"
+    );
+    assert_eq!(restored.last_seq(THREAD).expect("last seq"), 2);
     let _ = std::fs::remove_file(&path);
 }
