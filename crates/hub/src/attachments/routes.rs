@@ -8,9 +8,8 @@
 //!
 //! The two signed routes need no session: the URL is the credential, and its HMAC covers the
 //! operation, the object, the expiry and (for a PUT) the size and type. They do not touch D1.
-//! The signing key comes from the `ATTACHMENT_SIGNING_KEY` secret or var. With `DEV_FIXTURES=1`
-//! and no key set, the placeholder below is used, so a local run (`scripts/hub-test.sh`) needs
-//! no secret. Production never sets `DEV_FIXTURES`, so it fails closed without the key.
+//! The signing key comes from the `ATTACHMENT_SIGNING_KEY` secret or var; without it the routes
+//! fail closed. `scripts/hub-test.sh` passes a random per-run key as a `--var`.
 
 use axum::{
     Json, Router,
@@ -43,11 +42,6 @@ const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 
 /// Largest `POST /v1/attachments` body. The body is a few fields of JSON.
 const MAX_CREATE_BODY_BYTES: usize = 64 * 1024;
-
-/// DEV ONLY placeholder signing key. Used only with `DEV_FIXTURES=1` when no
-/// `ATTACHMENT_SIGNING_KEY` is set (the same value is in wrangler.toml `[env.dev.vars]`).
-/// Never a production key.
-const DEV_SIGNING_KEY: &str = "dev-only-attachment-signing-key-not-a-secret-00";
 
 /// The attachment routes; merged into the Worker router by `worker.rs`.
 pub fn attachment_routes() -> Router<AppState> {
@@ -109,12 +103,8 @@ fn signer(env: &Env) -> Result<Signer, ApiError> {
         .map(|secret| secret.to_string())
         .or_else(|_| env.var(SIGNING_KEY_VAR).map(|var| var.to_string()))
         .ok();
-    let key = match configured {
-        Some(key) => key,
-        None if dev_fixtures(env) => DEV_SIGNING_KEY.to_owned(),
-        None => {
-            return Err(ApiError::internal(format!("{SIGNING_KEY_VAR} is not set")));
-        }
+    let Some(key) = configured else {
+        return Err(ApiError::internal(format!("{SIGNING_KEY_VAR} is not set")));
     };
     Signer::new(key.as_bytes()).map_err(|KeyTooShort| {
         ApiError::internal(format!("{SIGNING_KEY_VAR} must be at least 32 bytes"))
