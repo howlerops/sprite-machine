@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 88/245 (3 dropped) · in-flight M2B-002b,M2-008a,M2B-012,WEB-002 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 85/120
+done 89/247 (3 dropped) · in-flight M2B-002b,M2-008a,M2B-012 · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, CI-001, M2B-020, M3-016, M6-002, M6-006) · attempts 85/120
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 88/245 (3 dropped) · in-flight M2B-002b,M2-008a,M2B-012,WEB-002 · blocked
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 60 | 35 | 4 |
+| P2 | 62 | 36 | 3 |
 | P3 | 20 | 1 | 0 |
 | P4 | 39 | 0 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -58,6 +58,8 @@ done 88/245 (3 dropped) · in-flight M2B-002b,M2-008a,M2B-012,WEB-002 · blocked
 | M2-011a | worker | rust | todo | Push follow-ups: hub-test.sh passes a random VAPID_PRIVATE_KEY (drop the dev key derivation from ATTACHMENT_SIGNING_KEY); retry only the failed subscriptions of a job (no duplicate pushes on partial failure) |
 | M2-010a | worker | rust | todo | Task index follow-ups: a deleted thread is 404 on every route; backfill/reconcile index rows (pre-0008 threads, failed upserts); a `done` status producer; hub-test passes app-link vars for a live 200 check |
 | M2B-002b | worker | rust | assigned | hub: GET /v1/machines returns the client-api §5.1 shape (machine_id, presence{state,since}, capabilities) for members; live test that /v1/dev/fixtures/* are 404 without DEV_FIXTURES |
+| SPEC-006 | leader | docs | done | Spec: browser-usable auth for the thread subscription (single-use subscribe ticket) |
+| M2-008h | worker | rust | todo | hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006) |
 | M2-008a | worker | rust | assigned | hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh |
 | M2-009 | worker | rust | done | hub: attachments in R2 + signed URLs |
 | M2-010 | worker | rust | done | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
@@ -78,7 +80,7 @@ done 88/245 (3 dropped) · in-flight M2B-002b,M2-008a,M2B-012,WEB-002 · blocked
 | M2B-019 | worker | rust | todo | E2E: start on computer, continue from the phone (mobile web + headless client), survive a dropped tunnel |
 | M2B-020 | human | rust | blocked | Real-device Remote Control check |
 | WEB-001 | worker | rust | done | web: mobile web page — pairing (QR / device code) + session list with presence |
-| WEB-002 | worker | rust | assigned | web: transcript rendering for every TurnEvent variant |
+| WEB-002 | worker | rust | todo | web: transcript rendering for every TurnEvent variant |
 | WEB-003 | worker | rust | todo | web: composer with attachments + Allow/Deny + Stop |
 | WEB-004 | worker | rust | todo | web: PWA + Web Push |
 

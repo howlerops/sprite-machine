@@ -2867,6 +2867,48 @@ items:
     verify:
       - 'cargo test -p hub'
 
+  - id: SPEC-006
+    title: 'Spec: browser-usable auth for the thread subscription (single-use subscribe ticket)'
+    milestone: M2b
+    phase: P2
+    lane: docs
+    owner: leader
+    status: "done"
+    evidence: "1a9a23a (leader): client-api.md §5.2 subscribe ticket"
+    deps: []
+    acceptance:
+      - 'client-api §5.2 defines POST /v1/threads/{id}/subscribe-ticket and the ?ticket= upgrade'
+    verify:
+      - 'grep -q subscribe-ticket docs/specs/client-api.md'
+
+  - id: M2-008h
+    title: 'hub: POST /v1/threads/{id}/subscribe-ticket + ?ticket= on the subscribe upgrade (SPEC-006)'
+    milestone: M2
+    phase: P2
+    priority: 1
+    lane: rust
+    size: S
+    risk: high
+    deps: [SPEC-006]
+    paths:
+      - 'crates/hub/src/auth/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/do/thread.rs'
+      - 'crates/hub/migrations/0013_subscribe_tickets.sql'
+      - 'crates/hub/src/db/mod.rs'
+      - 'crates/hub/tests/thread_do.rs'
+      - 'crates/hub/tests/subscribe_ticket.rs'
+    context:
+      - 'docs/specs/client-api.md §5.2 (SPEC-006), §2'
+      - 'docs/ledger/reports/WEB-002.md (blocked_on)'
+    acceptance:
+      - 'Ticket route: viewer+, same org/thread check as subscribe (authorize_thread), 201 {ticket, expires_at}; only the SHA-256 stored; single use; 60 s TTL; bound to session, user and thread'
+      - 'Subscribe accepts ?ticket= when no Authorization header: valid ticket upgrades and is consumed; missing/reused/expired/other-thread/revoked-session ticket = 401 (same answer); the ticket never appears in logs or audit (live tests in subscribe_ticket.rs with a real WebSocket; expiry natively with an injected clock)'
+    verify:
+      - 'cargo test -p hub'
+      - 'bash scripts/hub-test.sh subscribe_ticket'
+      - 'bash scripts/hub-test.sh thread_do'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2
@@ -3566,10 +3608,13 @@ items:
     title: 'web: transcript rendering for every TurnEvent variant'
     milestone: M2b
     phase: P2
-    status: "assigned"
+    status: "todo"
     attempt: 1
     assignee: "worker:haiku"
-    deps: [WEB-001, M2-008]
+    deps:
+      - "WEB-001"
+      - "M2-008"
+      - "M2-008h"
     paths:
       - "web/src/transcript*"
       - "web/src/render*"
