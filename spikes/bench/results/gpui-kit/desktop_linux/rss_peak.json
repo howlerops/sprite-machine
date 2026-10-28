@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "candidate": "gpui-kit",
+  "device": "desktop_linux",
+  "device_model": "unknown",
+  "os_version": "Ubuntu 24.04.5 LTS kernel 6.18.44-fc-v180",
+  "date": "2026-10-28",
+  "pinned": {
+    "gpui_rev": "gpui-pre@0.3.10",
+    "gpui_component_rev": "c8917c3661ed1090870f403c312b39e0d8a62e0b"
+  },
+  "gate": "rss_peak",
+  "kind": "numeric",
+  "unit": "MB",
+  "threshold": 300,
+  "statistic": "median_of_runs",
+  "value": 166.8669,
+  "samples": [
+    166.9038,
+    167.1209,
+    166.6458,
+    166.3222,
+    166.8669
+  ],
+  "p50": 166.8669,
+  "p95": 167.1209,
+  "runs": [
+    {
+      "run": 1,
+      "n": 1,
+      "value": 166.9038
+    },
+    {
+      "run": 2,
+      "n": 1,
+      "value": 167.1209
+    },
+    {
+      "run": 3,
+      "n": 1,
+      "value": 166.6458
+    },
+    {
+      "run": 4,
+      "n": 1,
+      "value": 166.3222
+    },
+    {
+      "run": 5,
+      "n": 1,
+      "value": 166.8669
+    }
+  ],
+  "pass": true,
+  "evidence": [
+    "spikes/bench/results/gpui-kit/desktop_linux/raw"
+  ],
+  "notes": "peak VmHWM of the spike process; median of 5 runs. spike commit 6ac70a8; release build; xvfb-run -s \"-screen 0 1280x800x24\"; renderer lavapipe (VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json); fixture transcript-10k at 200 ev/s"
+}
