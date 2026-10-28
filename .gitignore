@@ -54,3 +54,6 @@ apps/mobile/expo-env.d.ts
 
 # Rust
 target/
+web/test-results/
+web/playwright-report/
+web/node_modules/
