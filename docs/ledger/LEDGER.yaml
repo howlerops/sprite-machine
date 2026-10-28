@@ -211,8 +211,8 @@ items:
     title: 'CI: run the tracer bullet (`cargo run -p cli -- e2e tracer`) on every push/PR to v2'
     milestone: M0
     phase: P1
-    status: "review"
-    evidence: "merged 55a802f; awaiting first green tracer job on GitHub"
+    status: "done"
+    evidence: "merged 55a802f; CI rust.yml run 40609114253 tracer job success (cold: worker-build install 5 min, tracer 5 min)"
     assignee: "worker:haiku"
     attempt: 1
     priority: 1
