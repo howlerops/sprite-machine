@@ -142,14 +142,20 @@ impl HubState {
                     frame_seq,
                     envelope,
                     ..
-                } => out.extend(self.append_from_tunnel(machine_id, frame_seq, envelope)),
+                } => out.extend(self.append_from_tunnel(machine_id, frame_seq, envelope, now_ms)),
             }
         }
         out
     }
 
     /// Validates and appends one envelope from a machine, then acks (or nacks) its frame.
-    fn append_from_tunnel(&mut self, machine_id: &str, frame_seq: u64, raw: Value) -> Vec<Out> {
+    fn append_from_tunnel(
+        &mut self,
+        machine_id: &str,
+        frame_seq: u64,
+        raw: Value,
+        now_ms: u64,
+    ) -> Vec<Out> {
         let mut out = Vec::new();
         let tunnel = |frame: Frame| Out::Tunnel {
             machine_id: machine_id.to_owned(),
@@ -177,7 +183,7 @@ impl HubState {
                     Some(thread) if thread.machine_id() == machine_id => {
                         let thread_id = envelope.thread_id.clone();
                         thread
-                            .append(envelope)
+                            .append(envelope, now_ms)
                             .map(|stored| Out::Subscribers {
                                 thread_id,
                                 message: event_message(&stored),
@@ -267,12 +273,7 @@ impl HubState {
             Outcome::Cancelled => ResolvedOutcome::Cancelled,
         };
         let resolved = thread
-            .resolve_interrupt(
-                interrupt_id,
-                outcome,
-                request.resolved_by.clone(),
-                format_timestamp(now_ms),
-            )
+            .resolve_interrupt(interrupt_id, outcome, request.resolved_by.clone(), now_ms)
             .map_err(|error| match error {
                 ResolveError::NotFound => {
                     HttpError::new(404, format!("no interrupt {interrupt_id}"))
@@ -280,6 +281,10 @@ impl HubState {
                 ResolveError::AlreadyResolved { resolved_by } => HttpError {
                     status: 409,
                     body: json!({ "error": "already resolved", "resolved_by": resolved_by }),
+                },
+                ResolveError::Rejected(error) => HttpError {
+                    status: error.status,
+                    body: error.body(),
                 },
             })?;
         let machine_id = thread.machine_id().to_owned();
@@ -378,6 +383,26 @@ mod tests {
         .expect("json")
     }
 
+    fn user_message_frame(seq: u64) -> String {
+        let envelope = Envelope::new(
+            "th_1",
+            Some("tk_1".into()),
+            None,
+            "2026-10-27T22:00:00.000Z",
+            protocol::turn_event::UserMessage {
+                message_id: "msg_u1".into(),
+                parts: vec![ContentPart::Text { text: "hi".into() }],
+                author: user(),
+            },
+        );
+        serde_json::to_string(&Frame::Event {
+            seq,
+            event_id: format!("evt_{seq}"),
+            envelope: serde_json::to_value(envelope).expect("json"),
+        })
+        .expect("json")
+    }
+
     fn frames(out: &[Out]) -> Vec<&Frame> {
         out.iter()
             .filter_map(|o| match o {
@@ -419,11 +444,13 @@ mod tests {
             agent_id: None,
             machine_id: None,
         };
-        let out = hub.tunnel_message("mch_1", &event_frame(1, started), 0);
+        // The tracer's runner emits UserMessage itself (the hub only does for real prompts).
+        hub.tunnel_message("mch_1", &user_message_frame(1), 0);
+        let out = hub.tunnel_message("mch_1", &event_frame(2, started), 0);
         assert!(
-            matches!(&out[0], Out::Subscribers { message, .. } if message["envelope"]["seq"] == 1)
+            matches!(&out[0], Out::Subscribers { message, .. } if message["envelope"]["seq"] == 2)
         );
-        assert_eq!(frames(&out), [&Frame::Ack { seq: 1 }]);
+        assert_eq!(frames(&out), [&Frame::Ack { seq: 2 }]);
 
         let interrupt = Interrupt {
             interrupt_id: "int_1".into(),
@@ -436,13 +463,13 @@ mod tests {
             response_schema: None,
             url: None,
         };
-        hub.tunnel_message("mch_1", &event_frame(2, interrupt), 0);
+        hub.tunnel_message("mch_1", &event_frame(3, interrupt), 0);
         let paused = RunFinished {
             outcome: RunOutcome::Interrupt {
                 interrupt_ids: vec!["int_1".into()],
             },
         };
-        hub.tunnel_message("mch_1", &event_frame(3, paused), 0);
+        hub.tunnel_message("mch_1", &event_frame(4, paused), 0);
 
         let answer = || AnswerRequest {
             outcome: Outcome::Selected {
@@ -453,7 +480,7 @@ mod tests {
         let (status, body, out) = hub
             .answer_interrupt("th_1", "int_1", "idk_a1", answer(), 0)
             .expect("answer accepted");
-        assert_eq!((status, &body), (200, &json!({"seq": 4})));
+        assert_eq!((status, &body), (200, &json!({"seq": 5})));
         assert!(matches!(
             frames(&out)[..],
             [Frame::Command {
@@ -472,7 +499,7 @@ mod tests {
             .answer_interrupt("th_1", "int_1", "idk_a2", answer(), 0)
             .expect_err("second answer");
         assert_eq!(conflict.status, 409);
-        assert_eq!(hub.thread("th_1").map(ThreadState::head_seq), Some(4));
+        assert_eq!(hub.thread("th_1").map(ThreadState::head_seq), Some(5));
     }
 
     #[test]

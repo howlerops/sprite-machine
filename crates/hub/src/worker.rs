@@ -8,6 +8,7 @@
 //! Routes:
 //!
 //! - `GET /healthz`: build info (`{"name","version"}`).
+//! - `/v1/threads/...` and `/v1/dev/threads/...`: the Thread DO routes (M2-008, `threads/routes.rs`).
 //! - tracer routes (MVP-000, NO AUTH, see `tracer/worker.rs`), forwarded to the `TracerHub`
 //!   Durable Object. `GET /health` is the tracer's liveness probe (`cli e2e tracer` polls it).
 //! - anything else: `404` with the client-api.md §4 error body.
@@ -43,6 +44,7 @@ const NOTIFY_QUEUE: &str = "sm-notify";
 pub fn router(env: Env) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .merge(crate::threads::routes::thread_routes())
         .merge(tracer_routes())
         .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)

@@ -30,6 +30,10 @@ rusqlite = { version = "0.41.0", features = ["bundled"] }
 name = "smoke"
 required-features = ["live"]
 
+[[test]]
+name = "thread_do"
+required-features = ["live"]
+
 # Workers glue (spike M0-017 pins). wasm32 only, so native builds and tests stay plain Rust.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 worker = { version = "=0.8.7", features = ["http", "axum", "d1", "queue"] }
