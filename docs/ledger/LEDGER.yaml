@@ -3868,7 +3868,8 @@ items:
     title: 'client (desktop): shell, login (pairing + GitHub OAuth), settings, navigation, theming, i18n'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; client-gpui clippy clean, tests 35 passed (shell 33) on merged tree"
     assignee: "sonnet"
     attempt: 1
     lane: client

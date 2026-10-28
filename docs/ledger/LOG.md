@@ -261,3 +261,4 @@
 2026-10-28T21:42Z M3-002 back (sonnet): desktop shell over client-core (pairing QR, GitHub PKCE loopback via Browser trait, nav, settings, light/dark, Fluent, a11y focus table), 33 shell tests → merged; merged-tree client-gpui test running. Added M3-002a (P3 runnable app), M3-002b (P4 keychain). Spec gap (device-token success body shape) noted for a leader spec pass
 2026-10-28T21:46Z MVP-000h back (haiku): [build] calls a prebuilt strip binary (HUB_STRIP_BIN); smoke + tracer pass; held-lock check not run by worker → merged; leader running oauth live + playwright pairing while a client-gpui build holds the lock
 2026-10-28T21:51Z M2B-019a back (haiku): TUI queue for lines typed during a task; e2e rc + rc.spec.js pass without the retype step. Its own M2B-019d (local_prompts map leak) sent back to fix on the same attempt, plus a test of the Session refusal path. Added M2B-019c (P3, local vs hub-queued prompt race)
+2026-10-28T21:58Z M3-002 verify green → done
