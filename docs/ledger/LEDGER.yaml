@@ -2866,7 +2866,12 @@ items:
     milestone: M2b
     phase: P2
     size: M
-    deps: [M2B-004, M2B-006]
+    deps:
+      - "M2B-004"
+      - "M2B-006"
+      - "M1A-006f"
+      - "M2B-005"
+      - "M2B-004d"
     paths:
       - 'crates/runner/src/server/**'
       - 'crates/runner/tests/server_mode.rs'
@@ -2874,7 +2879,8 @@ items:
       - 'https://code.claude.com/docs/en/remote-control (server mode flags)'
       - 'docs/PLAN-v2-ade.md §4.10'
     acceptance:
-      - '--spawn same-dir|worktree (git worktree per session), --capacity (default 32), --permission-mode, --name-prefix (default hostname, names like host-word-word), -c/--continue resumes the last session for the directory; spawn mode saved per project'
+      - "--spawn same-dir|worktree (git worktree per session), --capacity (default 32), --permission-mode, --name-prefix (default hostname, names like host-word-word), -c/--continue resumes the last session for the directory; spawn mode saved per project"
+      - "The server builds each session's bridge with Bridge::spawn_with (a Connector that spawns the harness), so a crashed agent is respawned and resumed on the next prompt (test kills the agent); the tunnel uses KeychainCredentials and the sleep watcher (M2B-004e) is started; every runner-started thread calls TunnelSink::mark_local_thread + thread_open before its first event"
     verify:
       - 'cargo test -p runner --test server_mode'
 
