@@ -213,6 +213,26 @@ expires_in }`; a signed-in member approves the user code (desktop app, another b
 (M2B-005a), and the token response names the approving user and org, which the page shows
 before it stores the token.
 
+### 5.8 Push notifications
+
+> M2-011. Web Push (RFC 8291 aes128gcm, RFC 8292 VAPID); APNs/FCM later behind the same hub
+> provider trait.
+
+- **`GET /v1/push/vapid-public-key`** → 200 `{ "key" }` (the page passes it to `pushManager.subscribe`).
+- **`POST /v1/push/subscriptions`** `{ "endpoint", "keys": { "p256dh", "auth" } }` (member) → 201,
+  or 200 with the same id when this user and device already registered the endpoint.
+  **`DELETE /v1/push/subscriptions`** `{ "endpoint" }` → 204. Both are idempotent by the endpoint
+  itself, so they are the one exception to §3: `Idempotency-Key` is accepted but not required.
+- **`GET` / `PUT /v1/push/prefs`** `{ "classes": { "approval_needed", "task_done", "task_failed" },
+  "muted_threads": [..], "quiet_hours": { "start": "22:00", "end": "07:00", "tz": "Europe/Berlin" } }`.
+- **Payload** (encrypted to the subscription): `{ "kind", "thread_id", "task_id", "interrupt_id"?,
+  "title", "actions"? }`. `title` is generic ("Approval needed", "Task finished", "Task failed");
+  no prompt text, tool input, file names or agent output ever appears in a push. `actions` (for an
+  approval) carries `{ "action", "option_id" }` pairs; the service worker answers through
+  §5.4 with the page's session — there is no unauthenticated action route.
+- One pending notification per task (`Topic` = task id). A user cancel (`RunError{cancelled}`)
+  sends nothing.
+
 ## 6. Who emits what
 
 | Event                                             | Emitted by | When                                                                                                                  |
