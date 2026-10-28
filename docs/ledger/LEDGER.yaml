@@ -2784,6 +2784,26 @@ items:
       - 'bash scripts/hub-test.sh tasks'
       - 'bash scripts/hub-test.sh links'
 
+  - id: M2B-007c
+    title: 'sm rc hygiene: control socket created under a 0700 dir (no umask window); delete an sm/<name> branch with no commits when its worktree is removed; -c restores the last session''s worktree; no worktree left behind when the store fails to open'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-007b]
+    paths:
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/tests/server_mode.rs'
+    context:
+      - 'docs/ledger/reports/M2B-007b.md (Decisions and limits, Discovered work)'
+    acceptance:
+      - 'rc.sock lives in a 0700 directory (or bind under a 0077 umask); test asserts no moment where it is group/other accessible'
+      - 'An sm/<name> branch with no commits beyond its base is deleted when its clean worktree is removed; a branch with commits is kept (tests)'
+      - 'sm rc -c restores the last session''s worktree (test); a failing store open removes the just-added worktree (test)'
+    verify:
+      - 'cargo test -p runner --test server_mode'
+
   - id: M2-008a
     title: 'hub Thread DO hardening: secret redaction before persist, catch-up streaming cap, state-history compaction, DEV_FIXTURES via hub-test.sh'
     milestone: M2

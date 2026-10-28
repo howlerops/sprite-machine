@@ -184,3 +184,4 @@
 2026-10-28T11:35Z leader: post-merge verify found wrangler.toml with two [vars] tables (M2-010 x M2-011 auto-merge) → every hub-test failed at d1 migrations apply. Fixed d3d8e00; M2-003c worker told to merge v2. Workspace tests 759 passed. Re-running the 11 live suites + tracer
 2026-10-28T12:03Z M2-011 → done, M2-010 → done (all 11 live suites + tracer after the wrangler fix). M2-003c merged 721d8e5 (sonnet); leader checked role_cap = min(member role, cap) with Viewer<Member<Admin<Owner. Verify running
 2026-10-28T12:04Z WEB-001 assigned (sonnet; paths += web/src/api*, styles, hub [assets] settings), M1A-006g (haiku), M2B-007b (haiku; paths += main.rs close subcommand, sidecar session_config test)
+2026-10-28T12:18Z M2B-007b back (haiku; one denied self interrupt_session call). M1A-006g blocked on two one-line out-of-path origin fields → leader allowed them; worker finishing. Added M2B-007c (P4 hygiene)
