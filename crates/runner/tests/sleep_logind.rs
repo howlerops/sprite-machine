@@ -186,10 +186,8 @@ async fn release_delay_closes_the_fd_and_is_idempotent() -> Result<()> {
     let mut f = fixture().await?;
     f.watcher.take_delay().await?;
     f.watcher.release_delay()?;
-    assert_eq!(
-        fd_state(&f.seen.lock().unwrap().read_ends[0]),
-        FdState::Released
-    );
+    // The mock's own copy of the fd closes asynchronously after its reply, so wait for EOF.
+    wait_for(|| fd_state(&f.seen.lock().unwrap().read_ends[0]) == FdState::Released).await?;
     // A second release with nothing held is not an error.
     f.watcher.release_delay()?;
     Ok(())
@@ -200,9 +198,9 @@ async fn taking_the_delay_again_closes_the_previous_fd() -> Result<()> {
     let mut f = fixture().await?;
     f.watcher.take_delay().await?;
     f.watcher.take_delay().await?;
+    wait_for(|| fd_state(&f.seen.lock().unwrap().read_ends[0]) == FdState::Released).await?;
     let seen = f.seen.lock().unwrap();
     assert_eq!(seen.read_ends.len(), 2);
-    assert_eq!(fd_state(&seen.read_ends[0]), FdState::Released);
     assert_eq!(fd_state(&seen.read_ends[1]), FdState::Held);
     Ok(())
 }
@@ -215,10 +213,7 @@ async fn dropping_the_watcher_releases_the_inhibitor() -> Result<()> {
     } = f;
     watcher.take_delay().await?;
     drop(watcher);
-    assert_eq!(
-        fd_state(&seen.lock().unwrap().read_ends[0]),
-        FdState::Released
-    );
+    wait_for(|| fd_state(&seen.lock().unwrap().read_ends[0]) == FdState::Released).await?;
     Ok(())
 }
 

@@ -474,7 +474,13 @@ pub(super) fn wasm_target_dir(hub_dir: &Path) -> Result<PathBuf> {
 /// `cli` in the run's temp dir. It is already built, so wrangler never waits on the shared cargo
 /// lock, and a later build that replaces `debug/cli` cannot swap it mid-run.
 fn strip_tool(work: &TempDir) -> Result<PathBuf> {
-    let exe = std::env::current_exe().context("current cli binary")?;
+    // /proc/self/exe stays readable when the shared target dir rebuilds or deletes debug/cli
+    // while this run is going; current_exe() would then name a path that no longer exists.
+    let exe = if cfg!(target_os = "linux") {
+        PathBuf::from("/proc/self/exe")
+    } else {
+        std::env::current_exe().context("current cli binary")?
+    };
     let copy = work.path.join("cli-strip");
     fs::copy(&exe, &copy)
         .with_context(|| format!("copy {} to {}", exe.display(), copy.display()))?;
