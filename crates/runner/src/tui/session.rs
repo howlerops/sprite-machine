@@ -143,6 +143,12 @@ impl Inner {
     /// Appends an event to the log, numbered, and shows it. Returns its index.
     fn push(&mut self, mut envelope: Envelope, to_hub: bool) {
         envelope.seq = self.log.len() as u64 + 1;
+        // The bridge took a prompt typed here once its task has events: it is no longer one the
+        // bridge could refuse.
+        if let Some(task) = &envelope.task_id {
+            self.local_prompts
+                .retain(|_, pending| pending.as_str() != task.as_str());
+        }
         let _ = self
             .feed
             .send(Feed::Thread(Incoming::Event(Box::new(envelope.clone()))));
@@ -220,6 +226,11 @@ pub struct Handle {
 
 impl Handle {
     /// The hub commands the bridge has processed. Taken once, by the task that acks them.
+    /// How many prompts typed here the bridge has not taken yet (or refused). For tests.
+    pub async fn tracked_prompts(&self) -> usize {
+        self.inner.lock().await.local_prompts.len()
+    }
+
     pub fn take_processed(&self) -> Option<Processed> {
         self.processed
             .lock()

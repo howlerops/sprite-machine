@@ -1403,13 +1403,16 @@ mod session {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use protocol::tunnel::{Command, ContentPart, Workspace};
+    use protocol::tunnel::{Command, CommandErrorCode, ContentPart, Workspace};
     use runner::tui::driver::execute;
     use runner::tui::session::{
         Handle, HubAnswerFuture, HubVerdict, Identity, Registrar, Registration, Session, Upstream,
         UpstreamFuture, local_actor,
     };
-    use sidecar::bridge::{Bridge, Config, IncomingCommand, Origin, SequentialGenerator};
+    use sidecar::bridge::{
+        Bridge, CommandFailure, CommandSource, Config, EventSink, IncomingCommand, Origin,
+        SequentialGenerator,
+    };
     use sidecar::store::Store;
     use tempfile::TempDir;
     use tokio::time::timeout;
@@ -1716,6 +1719,88 @@ mod session {
         assert_eq!(rig.registrations.load(Ordering::SeqCst), 0);
         assert!(rig.hub.sent.lock().expect("lock").is_empty());
         assert!(rig.hub.opened.lock().expect("lock").is_empty());
+    }
+
+    /// Each prompt typed here is taken by the bridge, and afterwards nothing about it is kept.
+    #[tokio::test]
+    async fn accepted_prompts_leave_nothing_tracked() {
+        let mut rig = rig(
+            vec![plain_turn("One."), plain_turn("Two."), plain_turn("Three.")],
+            false,
+        )
+        .await;
+        rig.start().await;
+        for (done, text) in ["one", "two", "three"].into_iter().enumerate() {
+            let done = done + 1;
+            rig.say(text).await;
+            rig.until("the turn", move |app| {
+                app.view()
+                    .tasks()
+                    .iter()
+                    .filter(|t| t.status() == client_core::TaskStatus::Succeeded)
+                    .count()
+                    == done
+            })
+            .await;
+        }
+        assert_eq!(rig.handle.tracked_prompts().await, 0);
+    }
+
+    /// A prompt typed here that the bridge refuses comes back to the screen as `Feed::Refused`
+    /// for the task it was typed for, and is no longer tracked.
+    #[tokio::test]
+    async fn a_refused_typed_prompt_is_fed_back_to_the_screen() {
+        let work = TempDir::new().expect("work dir");
+        let registrar: Registrar = Box::new(|_handle| {
+            Box::pin(async { Err::<Registration, String>("no hub".to_owned()) })
+        });
+        let (mut session, sink, mut commands) = Session::new(
+            Identity {
+                thread_id: THREAD.to_owned(),
+                title: "refusal".to_owned(),
+                agent: "agt_mock".to_owned(),
+                workspace: Workspace {
+                    path: work.path().to_string_lossy().into_owned(),
+                    branch: None,
+                    spawn: None,
+                },
+            },
+            Arc::new(|| 1_700_000_000_000),
+            registrar,
+        );
+        let handle = session.handle();
+        session
+            .prompt(
+                "tk_typed".to_owned(),
+                "msg_typed".to_owned(),
+                "typed".to_owned(),
+            )
+            .await
+            .expect("the prompt is queued for the bridge");
+        assert_eq!(handle.tracked_prompts().await, 1);
+
+        // The bridge reads the command and refuses it, as it does while a task runs.
+        let command = commands.next().await.expect("the prompt command");
+        sink.command_result(CommandFailure {
+            idempotency_key: command.idempotency_key,
+            code: CommandErrorCode::Invalid,
+            message: "thread t already has a running task".to_owned(),
+        })
+        .await
+        .expect("the refusal is reported");
+
+        match timeout(STEP, session.next())
+            .await
+            .expect("the refusal reaches the screen")
+            .expect("the session is open")
+        {
+            Feed::Refused { task_id, message } => {
+                assert_eq!(task_id, "tk_typed");
+                assert!(message.contains("already has a running task"), "{message}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert_eq!(handle.tracked_prompts().await, 0);
     }
 
     /// A line typed while the approval of a running turn is open waits behind that turn, and runs
