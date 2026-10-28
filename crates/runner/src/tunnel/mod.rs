@@ -19,7 +19,7 @@ mod io;
 mod tls;
 
 pub use backoff::{Backoff, Jitter, RandomJitter};
-pub use client::{CredentialSource, Exit, StaticCredential, TunnelClient};
+pub use client::{CredentialSource, Exit, SleepHint, StaticCredential, TunnelClient};
 pub use io::{TunnelCommands, TunnelSink};
 
 use std::sync::Arc;

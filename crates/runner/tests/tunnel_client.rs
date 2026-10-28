@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use protocol::tunnel::{Capabilities, CloseCode, Command};
+use protocol::tunnel::{Capabilities, CloseCode, Command, Workspace};
 use protocol::turn_event::Envelope;
 use runner::tunnel::{
     Backoff, CredentialSource, Exit, Jitter, Timing, TunnelClient, TunnelCommands, TunnelConfig,
@@ -972,6 +972,142 @@ async fn shutdown_sends_close_normal() {
     assert_eq!(close["t"], "close");
     assert_eq!(close["code"], "normal");
     assert_eq!(rig.finished().await.unwrap(), Exit::Shutdown);
+}
+
+// ---- thread_open and presence ---------------------------------------------------------------
+
+fn workspace() -> Workspace {
+    Workspace {
+        path: "/Users/me/src/app".to_owned(),
+        branch: Some("main".to_owned()),
+        spawn: None,
+    }
+}
+
+#[tokio::test]
+async fn thread_open_goes_out_before_the_first_event_of_its_thread() {
+    let mut rig = Rig::new().await;
+    // Queued while the tunnel is down, as a local session starts before it connects.
+    rig.sink
+        .thread_open("th_1", "fix flaky test", "claude", &workspace())
+        .unwrap();
+    rig.emit("first").await;
+    let mut conn = rig.connect(20_000).await;
+
+    let open = conn.recv().await;
+    assert_eq!(open["t"], "thread_open");
+    assert_eq!(open["seq"], 1);
+    assert_eq!(open["thread_id"], "th_1");
+    assert_eq!(open["title"], "fix flaky test");
+    assert_eq!(open["agent"], "claude");
+    assert_eq!(
+        open["workspace"],
+        json!({ "path": "/Users/me/src/app", "branch": "main" })
+    );
+    assert!(open["event_id"].as_str().unwrap().starts_with("evt_"));
+    let events = conn.events(1).await;
+    assert_eq!(events[0].0, 2, "the event follows its thread_open");
+
+    conn.ack(2).await;
+    rig.wait_acked(2).await;
+    assert!(rig.store.outbox_state().unwrap().unacked.is_empty());
+}
+
+#[tokio::test]
+async fn thread_open_is_resent_first_after_a_resumed_reconnect() {
+    let mut rig = Rig::new().await;
+    rig.sink
+        .thread_open("th_1", "fix flaky test", "claude", &workspace())
+        .unwrap();
+    rig.emit("first").await;
+    let mut conn = rig.connect(20_000).await;
+    let open = conn.recv().await;
+    let event = conn.recv().await;
+    assert_eq!(event["t"], "event");
+
+    // The hub took both frames but acked neither, then the socket dropped.
+    conn.drop_socket();
+    let mut again = rig.hub.next_conn().await;
+    again.hello().await;
+    again.welcome(true, "rt_2", 0, 20_000).await;
+    assert_eq!(again.recv().await, open, "thread_open resent unchanged");
+    assert_eq!(again.recv().await, event, "event resent after it");
+
+    again.ack(2).await;
+    rig.wait_acked(2).await;
+    assert!(rig.store.outbox_state().unwrap().unacked.is_empty());
+}
+
+#[tokio::test]
+async fn thread_open_is_renumbered_first_after_a_fresh_stream() {
+    let mut rig = Rig::new().await;
+    rig.sink
+        .thread_open("th_1", "fix flaky test", "claude", &workspace())
+        .unwrap();
+    rig.emit("first").await;
+    let mut conn = rig.connect(20_000).await;
+    conn.recv().await;
+    conn.events(1).await;
+
+    conn.drop_socket();
+    let mut again = rig.hub.next_conn().await;
+    again.hello().await;
+    again.welcome(false, "rt_2", 0, 20_000).await;
+    let open = again.recv().await;
+    assert_eq!(open["t"], "thread_open");
+    assert_eq!(open["seq"], 1, "a fresh stream numbers from one");
+    assert_eq!(open["thread_id"], "th_1");
+    let events = again.events(1).await;
+    assert_eq!(events[0].0, 2);
+}
+
+#[tokio::test]
+async fn the_sleep_hint_sends_presence_asleep_on_the_live_connection() {
+    let mut rig = Rig::new().await;
+    let hint = rig.client.as_ref().unwrap().sleep_hint();
+    let mut conn = rig.connect(20_000).await;
+
+    assert!(
+        hint.asleep().await,
+        "the hint was not written to the socket"
+    );
+    // Presence is not sequenced and not in the outbox (§3.7).
+    assert_eq!(
+        conn.recv().await,
+        json!({ "t": "presence", "state": "asleep", "reason": "os_sleep" })
+    );
+    assert!(rig.store.outbox_state().unwrap().unacked.is_empty());
+}
+
+#[tokio::test]
+async fn the_sleep_hint_gives_up_without_a_connection_so_the_sleep_is_not_held() {
+    let rig = Rig::new().await;
+    let hint = rig.client.as_ref().unwrap().sleep_hint();
+    let started = Instant::now();
+    assert!(!hint.asleep().await);
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[tokio::test]
+async fn shutdown_after_the_sleep_hint_sends_close_normal_and_never_reconnects() {
+    let mut rig = Rig::new().await;
+    let hint = rig.client.as_ref().unwrap().sleep_hint();
+    let mut conn = rig.connect(20_000).await;
+    assert!(hint.asleep().await);
+    assert_eq!(conn.recv().await["t"], "presence");
+
+    rig.stop.take().unwrap().send(()).unwrap();
+    let close = conn.recv().await;
+    assert_eq!(close["t"], "close");
+    assert_eq!(close["code"], "normal");
+    assert_eq!(rig.finished().await.unwrap(), Exit::Shutdown);
+    assert!(
+        rig.hub
+            .try_next_conn(Duration::from_millis(300))
+            .await
+            .is_none(),
+        "close{{normal}} must not reconnect"
+    );
 }
 
 // ---- backoff --------------------------------------------------------------------------------

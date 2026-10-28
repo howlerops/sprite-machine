@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use protocol::tunnel::MAX_FRAME_BYTES;
+use protocol::tunnel::{MAX_FRAME_BYTES, Workspace};
 use serde_json::{Value, json};
 use sidecar::bridge::{CommandFailure, CommandSource, EventSink, IncomingCommand, SinkError};
 use sidecar::store::Store;
@@ -111,6 +111,27 @@ impl TunnelSink {
             .outbox_state()
             .map(|state| state.unacked.len())
             .unwrap_or(0)
+    }
+
+    /// Queues `thread_open` (tunnel.md §3.4) for a thread started on this runner. Call it
+    /// before the thread's first event. The outbox sends frames in seq order, so the hub sees
+    /// it first, also when the frames are resent after a reconnect. Returns the outbox seq.
+    pub fn thread_open(
+        &self,
+        thread_id: &str,
+        title: &str,
+        agent: &str,
+        workspace: &Workspace,
+    ) -> Result<u64, SinkError> {
+        let workspace = serde_json::to_value(workspace)
+            .map_err(|e| SinkError(format!("unserialisable workspace: {e}")))?;
+        self.shared.enqueue(json!({
+            "t": "thread_open",
+            "thread_id": thread_id,
+            "title": title,
+            "agent": agent,
+            "workspace": workspace,
+        }))
     }
 }
 

@@ -10,8 +10,8 @@ use anyhow::{Result, anyhow, bail};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use protocol::tunnel::{
-    CloseCode, Frame, NackCode, PROTO_VERSION, ParsedCommand, Receiver, SUBPROTOCOL, Sender,
-    Verdict, parse_command_frame, parse_frame,
+    CloseCode, Frame, NackCode, PROTO_VERSION, ParsedCommand, PresenceState, Receiver, SUBPROTOCOL,
+    Sender, Verdict, parse_command_frame, parse_frame,
 };
 use protocol::turn_event::{Envelope, Event, RunError, RunErrorReason, format_timestamp};
 use rustls::{ClientConfig, RootCertStore};
@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use sidecar::bridge::IncomingCommand;
 use sidecar::store::{OutboxState, Store, StoreError};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -96,6 +96,36 @@ pub struct TunnelClient<C> {
     /// of one is not fed again.
     in_flight: HashSet<String>,
     up_since: Option<Instant>,
+    /// Sleep hints from [`SleepHint`]; each carries a reply that says whether it was sent.
+    sleep_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
+    sleep_rx: mpsc::UnboundedReceiver<oneshot::Sender<()>>,
+}
+
+/// How long [`SleepHint::asleep`] waits for the connection to write the hint.
+const SLEEP_HINT_WAIT: Duration = Duration::from_secs(1);
+
+/// Asks the connection to tell the hub the OS is about to sleep (`presence{asleep}`, §3.7).
+/// Cloneable; get it from [`TunnelClient::sleep_hint`] before `run`.
+#[derive(Clone)]
+pub struct SleepHint {
+    tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
+}
+
+impl SleepHint {
+    /// Sends `presence{asleep, reason: "os_sleep"}` on the live connection and returns `true`
+    /// once it was written to the socket. Best effort: returns `false` at once if the client
+    /// has stopped, and after [`SLEEP_HINT_WAIT`] if no connection wrote it (for example while
+    /// the client is reconnecting). The caller sleeps either way.
+    pub async fn asleep(&self) -> bool {
+        let (reply, written) = oneshot::channel();
+        if self.tx.send(reply).is_err() {
+            return false;
+        }
+        matches!(
+            tokio::time::timeout(SLEEP_HINT_WAIT, written).await,
+            Ok(Ok(()))
+        )
+    }
 }
 
 pub(crate) fn build<C: CredentialSource>(
@@ -106,6 +136,7 @@ pub(crate) fn build<C: CredentialSource>(
     let shared = Arc::new(Shared::new(store));
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (processed_tx, processed_rx) = mpsc::unbounded_channel();
+    let (sleep_tx, sleep_rx) = mpsc::unbounded_channel();
     let backoff = Backoff::new(
         config.timing.backoff_base,
         config.timing.backoff_cap,
@@ -123,6 +154,8 @@ pub(crate) fn build<C: CredentialSource>(
         pending: VecDeque::new(),
         in_flight: HashSet::new(),
         up_since: None,
+        sleep_tx,
+        sleep_rx,
     };
     (
         client,
@@ -174,6 +207,7 @@ impl From<serde_json::Error> for SessErr {
 enum Wakeup {
     Shutdown,
     Outbox,
+    Asleep(oneshot::Sender<()>),
     Processed(String),
     Inbound(Inbound),
     Tick,
@@ -206,6 +240,15 @@ impl<C: CredentialSource> TunnelClient<C> {
     pub fn with_tls_roots(mut self, roots: RootCertStore) -> Self {
         self.tls = tls::client_config(roots);
         self
+    }
+
+    /// A handle that sends `presence{asleep}` before the OS sleeps. Take it before [`run`].
+    ///
+    /// [`run`]: TunnelClient::run
+    pub fn sleep_hint(&self) -> SleepHint {
+        SleepHint {
+            tx: self.sleep_tx.clone(),
+        }
     }
 
     /// Replaces the backoff jitter source.
@@ -474,6 +517,7 @@ impl<C: CredentialSource> TunnelClient<C> {
             let wakeup = tokio::select! {
                 () = shutdown.as_mut() => Wakeup::Shutdown,
                 () = self.shared.wake.notified() => Wakeup::Outbox,
+                Some(reply) = self.sleep_rx.recv() => Wakeup::Asleep(reply),
                 Some(key) = self.processed.recv() => Wakeup::Processed(key),
                 inbound = read(&mut stream) => Wakeup::Inbound(inbound),
                 _ = ticker.tick() => Wakeup::Tick,
@@ -481,6 +525,15 @@ impl<C: CredentialSource> TunnelClient<C> {
             match wakeup {
                 Wakeup::Shutdown => return Ok(goodbye(&mut sink).await),
                 Wakeup::Outbox => {}
+                Wakeup::Asleep(reply) => {
+                    // Presence is not sequenced (§3.7): written straight to the socket.
+                    let hint = Frame::Presence {
+                        state: PresenceState::Asleep,
+                        reason: "os_sleep".to_owned(),
+                    };
+                    send(&mut sink, serde_json::to_string(&hint)?).await?;
+                    let _ = reply.send(());
+                }
                 Wakeup::Processed(key) => {
                     self.in_flight.remove(&key);
                     match self.pending.iter_mut().find(|p| p.key == key && !p.done) {
