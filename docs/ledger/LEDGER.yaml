@@ -6153,3 +6153,23 @@ items:
       - 'A SessionStore backed by the OS keychain where available; tests with a fake keychain; FileStore stays the fallback'
     verify:
       - 'cargo test -p client-gpui --test shell'
+
+  - id: M2B-019c
+    title: 'runner tui: when a task ends, a queued local line and a phone prompt queued at the hub do not race (the hub tells the TUI what it will send next, or the TUI sends only when the hub has nothing queued)'
+    milestone: M2b
+    phase: P3
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-019a]
+    paths:
+      - 'crates/runner/src/tui/**'
+      - 'crates/runner/tests/tui.rs'
+      - 'crates/cli/src/e2e/rc.rs'
+    context:
+      - 'docs/ledger/reports/M2B-019a.md (Notes, Discovered work)'
+    acceptance:
+      - 'A test with a local queued line and a hub-queued phone prompt at task end: neither is refused by the bridge; both run once, in a defined order'
+    verify:
+      - 'cargo test -p runner --test tui'
+      - 'cargo run -p cli -- e2e rc'
