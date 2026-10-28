@@ -48,6 +48,8 @@ pub fn thread_policy(method: &str, path: &str) -> Option<Policy> {
         (false, "GET", []) | (false, "GET", ["subscribe"]) | (false, "GET", ["pending"]) => {
             make(Role::Viewer, None, None)
         }
+        (false, "PATCH", []) => make(Role::Member, Some("thread.update"), None),
+        (false, "DELETE", []) => make(Role::Admin, Some("thread.delete"), None),
         (false, "POST", ["prompts"]) => make(Role::Member, Some("thread.prompt"), None),
         (false, "POST", ["cancel"]) => make(Role::Member, Some("thread.cancel"), None),
         (false, "POST", ["session"]) => make(Role::Member, Some("thread.session"), None),
@@ -86,6 +88,20 @@ mod tests {
         let p = thread_policy("POST", "/v1/threads").expect("policy");
         assert_eq!((p.role, p.action), (Role::Member, Some("thread.create")));
         assert!(p.thread_id.is_empty());
+    }
+
+    #[test]
+    fn rename_is_member_and_delete_is_admin_and_both_are_audited() {
+        let p = thread_policy("PATCH", "/v1/threads/t1").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Member, Some("thread.update")));
+        assert_eq!(p.thread_id, "t1");
+        let p = thread_policy("DELETE", "/v1/threads/t1").expect("policy");
+        assert_eq!((p.role, p.action), (Role::Admin, Some("thread.delete")));
+        // A viewer may read the thread but not rename or delete it.
+        assert_eq!(
+            thread_policy("GET", "/v1/threads/t1").expect("policy").role,
+            Role::Viewer
+        );
     }
 
     #[test]

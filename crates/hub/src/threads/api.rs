@@ -9,6 +9,8 @@
 //! | Route                                             | Notes                              |
 //! | ------------------------------------------------- | ---------------------------------- |
 //! | `GET  /v1/threads/{id}`                           | head seq and `states`              |
+//! | `PATCH /v1/threads/{id}`                          | `{title?, archived?}` (M2-010)     |
+//! | `DELETE /v1/threads/{id}`                         | soft delete, `Idempotency-Key` (M2-010) |
 //! | `POST /v1/threads/{id}/prompts`                   | `Idempotency-Key`                  |
 //! | `GET  /v1/threads/{id}/pending`                   |                                    |
 //! | `DELETE /v1/threads/{id}/pending/{task_id}`       | `Idempotency-Key`                  |
@@ -40,7 +42,7 @@ use serde_json::{Map, Value, json};
 use protocol::turn_event::is_valid_id;
 
 use super::core::{
-    CreateThreadBody, PromptBody, Reply, SessionBody, ThreadCore, request_hash,
+    CreateThreadBody, PromptBody, Reply, SessionBody, ThreadCore, UpdateThreadBody, request_hash,
     valid_idempotency_key,
 };
 use super::error::ApiError;
@@ -121,6 +123,13 @@ fn route<S: ThreadStore>(
     let method = request.method.as_str();
     match (method, segments.as_slice()) {
         ("GET", ["v1", "threads", _]) => core.thread_info(),
+        ("PATCH", ["v1", "threads", _]) => {
+            let body: UpdateThreadBody = parse_body(&request.body)?;
+            core.update_thread(body, now_ms)
+        }
+        ("DELETE", ["v1", "threads", _]) => {
+            write(core, request, now_ms, |core, _, _| core.delete_thread())
+        }
         ("GET", ["v1", "threads", _, "pending"]) => core.list_pending(),
         ("POST", ["v1", "threads", _, "prompts"]) => {
             let body: PromptBody = parse_body(&request.body)?;

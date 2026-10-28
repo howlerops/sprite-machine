@@ -30,6 +30,7 @@ use worker::{
 
 use crate::machines::internal::{push_body, push_to_machine};
 use crate::machines::store::HostKind;
+use crate::tasks::index::changes_index;
 use crate::threads::api::{self, ApiRequest, ApiResponse, thread_id_of};
 use crate::threads::auth::dev_fixtures_enabled;
 use crate::threads::sqlite::SqlStore;
@@ -115,6 +116,9 @@ impl DurableObject for Thread {
         };
         for envelope in &appended {
             self.broadcast(&event_message(envelope).to_string());
+        }
+        if changes_index(&request.method, &request.path, &appended) {
+            self.sync_index(&thread_id).await;
         }
         // M2-011: an Interrupt, a finished run or a failed run notifies; the NOTIFY queue job
         // carries ids only (`notify::job`).
@@ -301,6 +305,18 @@ impl Thread {
         match push_to_machine(&self.env, &machine_id, &body).await {
             Ok(()) => *self.last_pushed.borrow_mut() = Some(ids),
             Err(message) => worker::console_log!("thread {thread_id}: {message}"),
+        }
+    }
+
+    /// Upserts this thread's row in the D1 task index (M2-010, `tasks::sync`). A failure is only
+    /// logged: the events are stored, and the next change to the thread upserts the row again.
+    async fn sync_index(&self, thread_id: &str) {
+        let row = match self.with_core(thread_id, |core| core.index_row(now_ms())) {
+            Ok(Ok(row)) => row,
+            _ => return,
+        };
+        if let Err(message) = crate::tasks::sync::upsert_thread(&self.env, &row).await {
+            worker::console_log!("thread {thread_id}: task index: {message}");
         }
     }
 

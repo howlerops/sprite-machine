@@ -49,6 +49,7 @@ pub fn router(env: Env) -> Router {
         .merge(crate::devices::routes::device_routes())
         .merge(crate::attachments::routes::attachment_routes())
         .merge(crate::notify::routes::push_routes())
+        .merge(crate::links::routes::link_routes())
         .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)
         .layer(middleware::from_fn(observe))

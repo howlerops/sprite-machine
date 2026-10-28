@@ -56,6 +56,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../migrations/0007_device_limits.sql"),
     ),
     (
+        "0008_tasks_index.sql",
+        include_str!("../../migrations/0008_tasks_index.sql"),
+    ),
+    (
         "0010_push_subscriptions.sql",
         include_str!("../../migrations/0010_push_subscriptions.sql"),
     ),
