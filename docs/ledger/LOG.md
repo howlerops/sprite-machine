@@ -221,3 +221,4 @@
 2026-10-28T15:40Z budget max_total_attempts 120 → 200 (user: drive it all the way through)
 2026-10-28T15:44Z M2B-014 blocked on paths (my scoping again: notify Kind/prefs + machine DO call site not listed). Leader decisions: Kind machine_back, default on, one job per comeback, debounce persisted in DO storage, leading edge; paths widened; worker resumed on the same attempt. Lesson re-noted: list the call site and the enum an item must extend
 2026-10-28T15:53Z verify18 green → M2-010a done
+2026-10-28T15:54Z P2 left: M2B-014, WEB-003, M2B-005f in flight; WEB-004, M2B-010 wait on WEB-003; M1B-008c leader. Started P3 in parallel within caps: M3-001b, M3-017 (haiku)

@@ -3784,6 +3784,9 @@ items:
     title: 'client-core: persist live events as raw frame text; one connectivity banner state (subscription + outbox)'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     priority: 3
     deps: [M3-001a]
     paths:
@@ -4103,6 +4106,9 @@ items:
     title: 'cli e2e app: drive a task from client-core against hub + fixture agent'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: client
     deps: [M3-001, M2-008]
     paths:
