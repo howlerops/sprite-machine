@@ -1664,7 +1664,106 @@ fn the_index_status_follows_the_run_and_its_approvals() {
     assert_eq!(answer.status, 200);
     assert_eq!(core.index_row(NOW).expect("row").status, "running");
     append(&mut core, success("tk_1", "run_1"));
+    assert_eq!(core.index_row(NOW).expect("row").status, "done");
+}
+
+#[test]
+fn a_thread_is_done_after_its_last_task_succeeds_until_the_next_prompt() {
+    let mut core = core();
+    created(&mut core, create_body(false));
     assert_eq!(core.index_row(NOW).expect("row").status, "open");
+    start_task(&mut core, "tk_1", "run_1");
+    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    // A second prompt queues behind the running task: the first task's end is not `done`
+    // while a task is pending (the next one starts at once).
+    let queued = core
+        .submit_prompt(&actor("usr_1"), "idk_tk_2", prompt("tk_2", "more"), NOW)
+        .expect("queue");
+    assert_eq!(queued.body["status"], "pending");
+    append(&mut core, success("tk_1", "run_1"));
+    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    append(&mut core, started("tk_2", "run_2"));
+    append(&mut core, success("tk_2", "run_2"));
+    assert_eq!(core.index_row(NOW).expect("row").status, "done");
+    // The next prompt makes it running again, and a failed run leaves it idle, not done.
+    start_task(&mut core, "tk_3", "run_3");
+    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    append(
+        &mut core,
+        run_event(
+            "tk_3",
+            "run_3",
+            RunError {
+                reason: RunErrorReason::Error,
+                code: None,
+                message: "boom".to_owned(),
+            },
+        ),
+    );
+    assert_eq!(core.index_row(NOW).expect("row").status, "open");
+}
+
+#[test]
+fn a_deleted_thread_is_404_not_found_on_every_client_route() {
+    let mut core = core();
+    created(&mut core, create_body(true));
+    let routes = [
+        ("GET", "/v1/threads/th_1", Value::Null),
+        ("PATCH", "/v1/threads/th_1", json!({"title": "x"})),
+        ("GET", "/v1/threads/th_1/pending", Value::Null),
+        (
+            "POST",
+            "/v1/threads/th_1/prompts",
+            json!({"task_id": "tk_9", "parts": [{"type": "text", "text": "hi"}]}),
+        ),
+        ("DELETE", "/v1/threads/th_1/pending/tk_9", Value::Null),
+        (
+            "POST",
+            "/v1/threads/th_1/interrupts/int_1",
+            json!({"outcome": {"kind": "cancelled"}}),
+        ),
+        (
+            "POST",
+            "/v1/threads/th_1/cancel",
+            json!({"task_id": "tk_1"}),
+        ),
+        ("POST", "/v1/threads/th_1/session", json!({})),
+        ("DELETE", "/v1/threads/th_1", Value::Null),
+    ];
+    let before = api::handle(
+        &mut core,
+        &request("GET", "/v1/threads/th_1", "usr_1", None, Value::Null),
+        NOW,
+    );
+    assert_eq!(before.status, 200);
+    core.delete_thread().expect("delete");
+    for (method, path, body) in &routes {
+        let answer = api::handle(
+            &mut core,
+            &request(method, path, "usr_1", Some("idk_after"), body.clone()),
+            NOW,
+        );
+        assert_eq!(answer.status, 404, "{method} {path} after the delete");
+        assert_eq!(answer.body["error"], "not_found", "{method} {path}");
+    }
+    assert_eq!(
+        core.catch_up(0).err().map(|error| error.status),
+        Some(404),
+        "subscribe"
+    );
+    // The runner's internal route still reaches it: events of a running task are not lost.
+    let internal = api::handle(
+        &mut core,
+        &request(
+            "POST",
+            "/internal/threads/th_1/reindex",
+            "usr_1",
+            None,
+            Value::Null,
+        ),
+        NOW,
+    );
+    assert_eq!(internal.status, 204);
 }
 
 #[test]

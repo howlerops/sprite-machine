@@ -515,6 +515,17 @@ pub async fn authorize_thread(
             policy.thread_id
         )));
     }
+    // A soft-deleted thread is as good as unknown on every route (M2-010a); the Thread DO checks
+    // too, this answers before an audit row and covers the routes that stop at the Worker.
+    if thread_deleted(db, &principal.org_id, &policy.thread_id)
+        .await
+        .map_err(db_failure)?
+    {
+        return Err(ApiError::not_found(format!(
+            "no thread {}",
+            policy.thread_id
+        )));
+    }
     if let Some(action) = policy.action {
         let mut detail = json!({ "thread_id": policy.thread_id });
         if let Some((key, value)) = &policy.extra {
@@ -531,6 +542,18 @@ pub async fn authorize_thread(
         audit::record(db, &event).await?;
     }
     Ok((principal, policy))
+}
+
+/// `true` when the org's task index marks the thread soft-deleted (`DELETE /v1/threads/{id}`).
+async fn thread_deleted(db: &impl Db, org_id: &str, thread_id: &str) -> Result<bool, DbError> {
+    let rows = db
+        .query(
+            "SELECT 1 AS found FROM tasks \
+             WHERE org_id = ? AND thread_id = ? AND deleted_at IS NOT NULL",
+            &[org_id.into(), thread_id.into()],
+        )
+        .await?;
+    Ok(!rows.is_empty())
 }
 
 #[cfg(test)]
