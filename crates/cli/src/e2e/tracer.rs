@@ -2,12 +2,16 @@
 //!
 //! acp-mock (in-process, over `tokio::io::duplex`) → runner core (`sidecar::tracer` bridge +
 //! `runner::tracer` tunnel client, in-process) → tunnel → hub (`crates/hub`, built with
-//! `worker-build`, served by `wrangler dev --local` on a free port) → headless client
-//! (`client_core::tracer`).
+//! `worker-build`, served by `wrangler dev --local` on a free port, D1 migrations applied) →
+//! headless client (`client_core::tracer`) on the real `/v1` routes as the dev user
+//! (`DEV_FIXTURES=1`, client-api.md §2).
 //!
-//! The run passes when the client observes the turn-event.md §5 rule 6 stream for one prompt
-//! with one approval, answers it through the hub, and sees `RunFinished{success}`, with envelope
-//! `seq` strictly increasing by one. Every component except this harness is a TRACER STUB.
+//! The machine is registered with `POST /v1/machines`; the client creates the thread with
+//! `POST /v1/threads`, subscribes with `GET /v1/threads/{id}/subscribe` and answers the
+//! interrupt with `POST /v1/threads/{id}/interrupts/{id}`. The run passes when the client
+//! observes the turn-event.md §5 rule 6 stream for one prompt with one approval (the hub emits
+//! the `UserMessage`), answers it through the hub, and sees `RunFinished{success}`, with
+//! envelope `seq` strictly increasing by one.
 //!
 //! `wrangler dev` runs in its own process group; the group is killed when this command ends,
 //! on success, on error, on panic (unwinding), and on Ctrl-C / SIGTERM. Local only: this never
@@ -21,12 +25,10 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use protocol::tunnel::{Actor, ActorKind};
 use protocol::turn_event::{Envelope, Event, InterruptKind, RunOutcome, RunReason};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
-const MACHINE_ID: &str = "mch_tracer";
 const AGENT_ID: &str = "agt_acp_mock";
 const READY_TIMEOUT: Duration = Duration::from_secs(240);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -122,6 +124,9 @@ async fn tracer(work: &TempDir) -> Result<()> {
     println!("built in {:.1}s", build_started.elapsed().as_secs_f64());
     report_bundle(&hub_dir)?;
 
+    println!("== d1 migrations (local)");
+    migrate(&hub_dir, work)?;
+
     let port = free_port()?;
     let base = format!("http://127.0.0.1:{port}");
     println!("== wrangler dev --local on port {port}");
@@ -129,7 +134,10 @@ async fn tracer(work: &TempDir) -> Result<()> {
     wrangler.wait_ready(&base).await?;
 
     println!("== runner core (acp-mock + bridge + tunnel) and headless client");
-    let observed = run_loop(&base).await;
+    let observed = match create_machine(&base).await {
+        Ok(machine_id) => run_loop(&base, &machine_id).await,
+        Err(error) => Err(error),
+    };
     let stop = wrangler.stop();
     let observed = observed?;
     stop?;
@@ -151,7 +159,7 @@ async fn tracer(work: &TempDir) -> Result<()> {
 
 /// Wires acp-mock → bridge → tunnel client in-process and runs the headless client against the
 /// hub. Shuts the runner side down afterwards.
-async fn run_loop(base: &str) -> Result<client_core::tracer::Observed> {
+async fn run_loop(base: &str, machine_id: &str) -> Result<client_core::tracer::Observed> {
     let script = acp_mock::Script::from_value(&script()).context("tracer acp-mock script")?;
     let (client_io, agent_io) = tokio::io::duplex(1 << 16);
     let (agent_reader, agent_writer) = tokio::io::split(agent_io);
@@ -161,9 +169,10 @@ async fn run_loop(base: &str) -> Result<client_core::tracer::Observed> {
     let (event_tx, event_rx) = mpsc::channel(256);
     let (client_reader, client_writer) = tokio::io::split(client_io);
     let cwd = std::env::current_dir().context("current dir")?;
+    let cwd_text = cwd.to_string_lossy().into_owned();
     let mut bridge = tokio::spawn(sidecar::tracer::run(
         sidecar::tracer::BridgeConfig {
-            machine_id: MACHINE_ID.to_owned(),
+            machine_id: machine_id.to_owned(),
             agent_id: AGENT_ID.to_owned(),
             cwd,
         },
@@ -178,7 +187,7 @@ async fn run_loop(base: &str) -> Result<client_core::tracer::Observed> {
     let mut tunnel = tokio::spawn(runner::tracer::run(
         runner::tracer::TunnelConfig {
             hub_ws_base: ws_base,
-            machine_id: MACHINE_ID.to_owned(),
+            machine_id: machine_id.to_owned(),
             runner_version: env!("CARGO_PKG_VERSION").to_owned(),
         },
         event_rx,
@@ -188,19 +197,12 @@ async fn run_loop(base: &str) -> Result<client_core::tracer::Observed> {
         },
     ));
 
-    let user = Actor {
-        kind: ActorKind::User,
-        id: "usr_tracer".to_owned(),
-        name: Some("Tracer".to_owned()),
-        device_id: Some("dev_headless".to_owned()),
-    };
     let client = client_core::tracer::run(client_core::tracer::ClientConfig {
         http_base: base.to_owned(),
-        thread_id: format!("th_tracer_{}", std::process::id()),
-        machine_id: MACHINE_ID.to_owned(),
-        task_id: "tk_1".to_owned(),
+        machine_id: machine_id.to_owned(),
+        agent: AGENT_ID.to_owned(),
+        workspace: cwd_text,
         prompt: "Add a /healthz route".to_owned(),
-        user,
         timeout: CLIENT_TIMEOUT,
     });
 
@@ -229,6 +231,49 @@ async fn run_loop(base: &str) -> Result<client_core::tracer::Observed> {
     }
     agent.abort();
     observed
+}
+
+/// Registers the runner's machine as the dev user: `POST /v1/machines` (client-api.md §5.1).
+async fn create_machine(base: &str) -> Result<String> {
+    let response = reqwest::Client::new()
+        .post(format!("{base}/v1/machines"))
+        .bearer_auth("dev")
+        .json(&json!({ "name": "tracer" }))
+        .send()
+        .await
+        .context("POST /v1/machines")?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await.context("machine answer")?;
+    ensure!(
+        status.as_u16() == 201,
+        "POST /v1/machines answered HTTP {status}: {body}"
+    );
+    body.pointer("/machine/id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow!("POST /v1/machines answered without machine.id: {body}"))
+}
+
+/// Applies the hub's D1 migrations to the local database wrangler dev will persist in `work`.
+fn migrate(hub_dir: &Path, work: &TempDir) -> Result<()> {
+    let log = work.path.join("d1-migrations.log");
+    let status = Command::new("wrangler")
+        .current_dir(hub_dir)
+        .args(["d1", "migrations", "apply", "DB", "--local", "--persist-to"])
+        .arg(work.path.join("persist"))
+        .env_remove("RUSTFLAGS")
+        .env_remove("RUSTC_WRAPPER")
+        .env("WRANGLER_SEND_METRICS", "false")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(File::create(&log).context("d1 log")?))
+        .stderr(Stdio::from(log_file_append_std(&log)?))
+        .status()
+        .context("run wrangler d1 migrations apply (is wrangler installed?)")?;
+    if !status.success() {
+        print_tail(&log, 40);
+        bail!("wrangler d1 migrations apply failed: {status}");
+    }
+    Ok(())
 }
 
 fn task_ended(
@@ -285,7 +330,18 @@ fn check_sequence(envelopes: &[Envelope]) -> Result<()> {
             pair[1].seq
         );
     }
-    let shape: Vec<String> = envelopes.iter().map(shape_of).collect();
+    // The hub also logs state (`StateSnapshot`/`StateDelta`) and the machine's `Presence` in the
+    // thread's stream; they are not part of the turn shape rule 6 describes.
+    let shape: Vec<String> = envelopes
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e.event,
+                Event::StateSnapshot(_) | Event::StateDelta(_) | Event::Presence(_)
+            )
+        })
+        .map(shape_of)
+        .collect();
     let expected = [
         "UserMessage",
         "RunStarted{prompt}",
@@ -497,7 +553,7 @@ impl Wrangler {
                 bail!("wrangler dev exited early");
             }
             let ready = http
-                .get(format!("{base}/health"))
+                .get(format!("{base}/healthz"))
                 .send()
                 .await
                 .is_ok_and(|r| r.status().is_success());

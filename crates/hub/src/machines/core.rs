@@ -617,7 +617,7 @@ impl<S: MachineStore> MachineCore<S> {
         Ok(())
     }
 
-    /// Commands pushed by a Thread DO (or the tracer hub): queue the new ones, withdraw the
+    /// Commands pushed by a Thread DO: queue the new ones, withdraw the
     /// ones a snapshot no longer lists, and send what the connection allows. Registers the
     /// thread as hosted by this machine (a queued command proves the hub put it here).
     pub fn push(&mut self, body: PushBody, now_ms: u64) -> StoreResult<Result<Effects, PushError>> {

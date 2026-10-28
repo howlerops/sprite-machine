@@ -1,5 +1,5 @@
 //! Calls between Durable Objects (wasm32 only): stub fetches to the Thread DO, the Machine DO
-//! and the tracer hub, and the D1 presence mirror. These implement [`ThreadHost`] and
+//! and the D1 presence mirror. These implement [`ThreadHost`] and
 //! [`MachineControl`] for the Worker; the logic that uses them is native-tested with fakes.
 //!
 //! The internal routes are not registered in the Worker router, so only code holding a stub
@@ -20,9 +20,6 @@ use crate::threads::ApiError;
 /// Durable Object bindings (wrangler.toml).
 pub const THREAD_BINDING: &str = "THREAD";
 pub const MACHINE_BINDING: &str = "MACHINE";
-/// TRACER STUB: the tracer hub object and its single instance.
-pub const TRACER_BINDING: &str = "HUB";
-pub const TRACER_NAME: &str = "tracer";
 
 /// The DO routes on the path only, so any origin works.
 const ORIGIN: &str = "https://do.internal";
@@ -58,8 +55,7 @@ pub async fn call(
     Ok((status, text))
 }
 
-/// Pushes a batch of commands to a machine's Machine DO (Thread DO after it queued one, or the
-/// tracer hub). `Err` carries a message for the log; the commands stay with the pusher.
+/// Pushes a batch of commands to a machine's Machine DO (Thread DO after it queued one). `Err` carries a message for the log; the commands stay with the pusher.
 pub async fn push_to_machine(env: &Env, machine_id: &str, body: &Value) -> Result<(), String> {
     let path = format!("/internal/machines/{machine_id}/commands");
     match call(
@@ -125,7 +121,6 @@ impl WorkerHost<'_> {
     fn target(host: HostKind, thread_id: &str) -> (&'static str, String) {
         match host {
             HostKind::Thread => (THREAD_BINDING, thread_id.to_owned()),
-            HostKind::Tracer => (TRACER_BINDING, TRACER_NAME.to_owned()),
         }
     }
 }
@@ -140,13 +135,11 @@ impl ThreadHost for WorkerHost<'_> {
     ) -> Result<(), HostError> {
         let (binding, name) = Self::target(host, thread_id);
         let path = format!("/internal/threads/{thread_id}/events");
-        // The Thread DO takes `{event_id, envelope}` and dedupes the id (tunnel.md §4.2); the
-        // tracer's stub host only knows the bare envelope.
-        let body = match (host, event_id) {
-            (HostKind::Thread, Some(event_id)) => {
-                serde_json::json!({ "event_id": event_id, "envelope": envelope })
-            }
-            _ => envelope.clone(),
+        // The Thread DO takes `{event_id, envelope}` and dedupes the id (tunnel.md §4.2); an
+        // envelope the hub itself appends (presence) has no event id and goes bare.
+        let body = match event_id {
+            Some(event_id) => serde_json::json!({ "event_id": event_id, "envelope": envelope }),
+            None => envelope.clone(),
         };
         let (status, body) = call(self.env, binding, &name, Method::Post, &path, Some(&body))
             .await
@@ -203,12 +196,9 @@ impl ThreadHost for WorkerHost<'_> {
 
     async fn list_commands(
         &self,
-        host: HostKind,
+        _host: HostKind,
         thread_id: &str,
     ) -> Result<Vec<PushCommand>, HostError> {
-        if host != HostKind::Thread {
-            return Ok(Vec::new());
-        }
         let path = format!("/internal/threads/{thread_id}/commands?limit={COMMAND_LIST_LIMIT}");
         let (status, body) = call(
             self.env,
@@ -234,13 +224,10 @@ impl ThreadHost for WorkerHost<'_> {
 
     async fn ack_commands(
         &self,
-        host: HostKind,
+        _host: HostKind,
         thread_id: &str,
         source_ids: &[String],
     ) -> Result<(), HostError> {
-        if host != HostKind::Thread {
-            return Ok(());
-        }
         let ids: Vec<u64> = source_ids.iter().filter_map(|id| id.parse().ok()).collect();
         if ids.is_empty() {
             return Ok(());

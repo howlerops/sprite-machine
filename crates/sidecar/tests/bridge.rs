@@ -435,10 +435,10 @@ async fn scripted_turn_with_permission_matches_the_golden_stream() {
 }
 
 #[tokio::test]
-async fn emit_user_message_flag_makes_the_bridge_emit_it() {
+async fn a_prompt_typed_locally_makes_the_bridge_emit_user_message() {
     let script = json!({ "turns": [{ "steps": [{ "text": "hi" }] }] });
-    let mut h = Harness::start(script, |config| config.emit_user_message = true).await;
-    h.feed.send(Command::Prompt {
+    let mut h = Harness::start(script, |_| {}).await;
+    h.feed.send_local(Command::Prompt {
         thread_id: "th_1".into(),
         task_id: "tk_1".into(),
         message_id: "msg_u1".into(),

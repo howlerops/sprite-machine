@@ -12,12 +12,6 @@ command = "worker-build --profile wasm-release"
 
 # ---- Durable Objects (SQLite-backed: a class cannot switch storage later) -------------------
 
-# TRACER STUB: replaced by M2-008 / M2B-002 (Thread DO, Machine DO). One in-memory object
-# holds the whole tracer hub.
-[[durable_objects.bindings]]
-name = "HUB"
-class_name = "TracerHub"
-
 # WORKSPACE: the Workspace DO of workers/workspace (M0-008a), bound from another Worker by
 # namespace (script_name). Its class has its own migrations there, so none here.
 # Rust side: crates/hub/src/workspace_do (M0-008b).
@@ -46,6 +40,11 @@ new_sqlite_classes = ["TracerHub"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Thread", "Machine", "Flow"]
+
+# MVP-000d: the tracer's in-memory hub is gone; its class is deleted.
+[[migrations]]
+tag = "v3"
+deleted_classes = ["TracerHub"]
 
 # ---- D1, R2, Queues -----------------------------------------------------------------------
 

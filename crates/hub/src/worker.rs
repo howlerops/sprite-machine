@@ -13,20 +13,18 @@
 //!   the Machine DO (M2B-002, `machines/routes.rs`).
 //! - `/v1/attachments...`: the attachment create (session token) and the signed upload and content
 //!   URLs (M2-009, `attachments/routes.rs`).
-//! - tracer routes (MVP-000, NO AUTH, see `tracer/worker.rs`), forwarded to the `TracerHub`
-//!   Durable Object. `GET /health` is the tracer's liveness probe (`cli e2e tracer` polls it).
-//! - anything else: `404` with the client-api.md §4 error body.
+//! //! - anything else: `404` with the client-api.md §4 error body.
 //!
 //! Every response carries `x-request-id` and one JSON access-log line goes to the Workers console.
 
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Request, State},
+    extract::Request,
     http::{HeaderValue, Method, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
 };
 use tower_service::Service;
 use worker::{Context, Env, HttpRequest, MessageBatch, event, send::SendWrapper};
@@ -36,15 +34,10 @@ use crate::router::{self, REQUEST_ID_HEADER};
 /// Router state: the Worker bindings.
 pub type AppState = SendWrapper<Env>;
 
-/// Durable Object binding and the single instance name used by the tracer.
-const HUB_BINDING: &str = "HUB";
-const HUB_NAME: &str = "tracer";
-
 /// The Queue bound as `NOTIFY` (producer and consumer, see wrangler.toml).
 const NOTIFY_QUEUE: &str = "sm-notify";
 
-/// Builds the request router. Tracer routes are merged in; the middleware wraps every route
-/// and the fallback, so even a 404 gets a request id and an access-log line.
+/// Builds the request router. The middleware wraps every route and the fallback, so even a 404 gets a request id and an access-log line.
 pub fn router(env: Env) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
@@ -52,7 +45,6 @@ pub fn router(env: Env) -> Router {
         .merge(crate::threads::routes::thread_routes())
         .merge(crate::machines::routes::machine_routes())
         .merge(crate::attachments::routes::attachment_routes())
-        .merge(tracer_routes())
         .merge(crate::workspace_do::dev::routes())
         .fallback(not_found)
         .layer(middleware::from_fn(observe))
@@ -112,47 +104,4 @@ async fn observe(req: Request, next: Next) -> Response {
         router::access_log(&id, &method, &path, status, elapsed)
     );
     response
-}
-
-// ---- tracer routes (MVP-000 stub; the tunnel is the Machine DO's since M2B-002) -------------
-
-/// The tracer's routes. Each one forwards the request, WebSocket upgrades included, to the
-/// `TracerHub` Durable Object (`tracer/worker.rs`), which does the work. The runner's tunnel is
-/// not one of them any more: `/v1/machines/{id}/tunnel` is a Machine DO route.
-fn tracer_routes() -> Router<AppState> {
-    Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .route("/threads/{thread_id}/subscribe", get(to_hub))
-        .route("/threads/{thread_id}/prompts", post(to_hub))
-        .route(
-            "/threads/{thread_id}/interrupts/{interrupt_id}",
-            post(to_hub),
-        )
-}
-
-/// Forwards the request unchanged (WebSocket upgrades included) to the tracer DO.
-#[worker::send]
-async fn to_hub(State(env): State<AppState>, req: Request) -> Result<Response, AppError> {
-    let stub = env
-        .durable_object(HUB_BINDING)?
-        .id_from_name(HUB_NAME)?
-        .get_stub()?;
-    let req = worker::Request::try_from(req)?;
-    let res = stub.fetch_with_request(req).await?;
-    Ok(res.into())
-}
-
-/// A worker error becomes a 500 with the message as body.
-struct AppError(worker::Error);
-
-impl From<worker::Error> for AppError {
-    fn from(e: worker::Error) -> Self {
-        Self(e)
-    }
-}
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
-    }
 }

@@ -26,8 +26,9 @@
 //! - **Durability.** Threads, tasks, sessions and open interrupts are stored; a known thread's
 //!   session is re-attached (`session/resume`, then `session/load`) before its next prompt.
 //!
-//! `UserMessage` is the hub's (client-api.md §6). [`Config::emit_user_message`] makes the
-//! bridge emit it for the tracer hub, which does not.
+//! `UserMessage` is the hub's (client-api.md §6): a `prompt` or `dispatch` command starts with
+//! `RunStarted{prompt}`. The bridge emits it only for a prompt typed locally (a command whose
+//! idempotency key starts with [`LOCAL_KEY_PREFIX`]), which the hub never saw.
 //!
 //! **Harness restart.** When the agent process exits, every running task ends with
 //! `InterruptResolved{cancelled}` for each open interrupt and then `RunError{error,
@@ -81,6 +82,11 @@ use crate::acp::client::{AcpClient, ClientError, Transport};
 use crate::acp::reattach::Reattacher;
 use crate::store::{Store, StoreError};
 
+/// Idempotency keys of prompts typed on the runner itself start with this. The hub never saw
+/// such a prompt, so the bridge emits its `UserMessage` (client-api.md §6). A key from the
+/// hub must not start with it.
+pub const LOCAL_KEY_PREFIX: &str = "local:";
+
 /// Default approval TTL (PLAN-v2 §4.1): 10 minutes.
 pub const DEFAULT_APPROVAL_TTL: Duration = Duration::from_secs(10 * 60);
 
@@ -93,9 +99,6 @@ pub struct Config {
     pub agent_id: String,
     /// Working directory for threads the bridge learns of from a `prompt` (not `dispatch`).
     pub cwd: PathBuf,
-    /// Emit `UserMessage` at the start of a task. `false` (the default): the hub does
-    /// (client-api.md §6). The tracer adapter sets it.
-    pub emit_user_message: bool,
     /// How long an interrupt waits for its answer.
     pub approval_ttl: Duration,
     /// How often overdue interrupts are looked for.
@@ -119,7 +122,6 @@ impl Config {
             machine_id: machine_id.into(),
             agent_id: agent_id.into(),
             cwd: cwd.into(),
-            emit_user_message: false,
             approval_ttl: DEFAULT_APPROVAL_TTL,
             expiry_check_interval: Duration::from_secs(5),
             max_running_tasks: 32,
@@ -182,6 +184,8 @@ struct Start {
     message_id: String,
     parts: Vec<ContentPart>,
     author: Actor,
+    /// A prompt typed locally: the bridge emits its `UserMessage`.
+    local: bool,
     /// `dispatch` names the harness and the directory; `prompt` uses the thread's.
     harness: Option<String>,
     cwd: Option<PathBuf>,

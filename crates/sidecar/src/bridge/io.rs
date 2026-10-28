@@ -11,6 +11,8 @@ use protocol::tunnel::{Command, CommandErrorCode};
 use protocol::turn_event::Envelope;
 use tokio::sync::mpsc;
 
+use super::LOCAL_KEY_PREFIX;
+
 /// The sink cannot take more output (the tunnel client stopped). The bridge stops too.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("event sink closed: {0}")]
@@ -147,6 +149,15 @@ impl CommandFeed {
     pub fn send(&self, command: Command) -> String {
         let seq = self.next_seq();
         let key = format!("idk_{seq}");
+        self.send_frame(seq, &key, command);
+        key
+    }
+
+    /// Sends `command` as a prompt typed locally (key prefixed [`LOCAL_KEY_PREFIX`]); returns
+    /// the key.
+    pub fn send_local(&self, command: Command) -> String {
+        let seq = self.next_seq();
+        let key = format!("{LOCAL_KEY_PREFIX}{seq}");
         self.send_frame(seq, &key, command);
         key
     }
