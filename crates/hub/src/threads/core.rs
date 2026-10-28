@@ -100,6 +100,22 @@ pub struct PromptBody {
     pub parts: Vec<ContentPart>,
 }
 
+/// `POST /v1/threads/{id}/session` body (client-api.md §5.5a): a mode, a config option, or both.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SessionBody {
+    #[serde(default)]
+    pub mode_id: Option<String>,
+    #[serde(default)]
+    pub config: Option<SessionConfigBody>,
+}
+
+/// The `config` of [`SessionBody`]: an option id and its new value (a value id, or a boolean).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SessionConfigBody {
+    pub id: String,
+    pub value: Value,
+}
+
 /// `POST /v1/threads` body (client-api.md §5.2), as the Worker forwards it to the Thread DO.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct CreateThreadBody {
@@ -1120,6 +1136,90 @@ impl<S: ThreadStore> ThreadCore<S> {
         ))
     }
 
+    // ---- session mode and config (client-api.md §5.5a) --------------------------------------
+
+    /// `POST /session`: checks `mode_id` and `config` against the thread's current `session`
+    /// state (`modes`, `config_options`, as the runner's snapshot advertised them), then queues
+    /// a `session_config` command (tunnel.md §3.5) for the Machine DO. 202 `{status: "queued"}`;
+    /// the runner's change arrives as `StateDelta{session}`. `400` for an empty body or a value
+    /// the session did not advertise, `404` for an unknown thread; nothing is queued then.
+    pub fn session_config(
+        &mut self,
+        idempotency_key: &str,
+        body: SessionBody,
+        now_ms: u64,
+    ) -> Result<Reply, ApiError> {
+        if body.mode_id.is_none() && body.config.is_none() {
+            return Err(ApiError::invalid_request(
+                "the session body needs a mode_id, a config, or both",
+            ));
+        }
+        if self.head == 0 && self.store.get_meta("info")?.is_none() {
+            return Err(ApiError::not_found(format!("no thread {}", self.thread_id)));
+        }
+        let state = self
+            .store
+            .state_at(StateScope::Session, self.head)?
+            .unwrap_or_else(|| json!({}));
+        if let Some(mode) = &body.mode_id {
+            let advertised = state
+                .get("modes")
+                .and_then(Value::as_array)
+                .is_some_and(|modes| {
+                    modes
+                        .iter()
+                        .any(|available| available.get("id").and_then(Value::as_str) == Some(mode))
+                });
+            if !advertised {
+                return Err(ApiError::invalid_request(format!(
+                    "mode_id {mode} is not one of the session's modes"
+                )));
+            }
+        }
+        let config = match body.config {
+            None => None,
+            Some(change) => {
+                let options = state
+                    .get("config_options")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                let option = options
+                    .iter()
+                    .find(|option| option.get("id").and_then(Value::as_str) == Some(&change.id))
+                    .ok_or_else(|| {
+                        ApiError::invalid_request(format!(
+                            "config id {} is not one of the session's config options",
+                            change.id
+                        ))
+                    })?;
+                if !config_value_fits(option, &change.value) {
+                    return Err(ApiError::invalid_request(format!(
+                        "the value does not fit config option {}",
+                        change.id
+                    )));
+                }
+                // The command's config type is private to the protocol's command module; the
+                // wire shape `{id, value}` is what it deserializes from.
+                Some(
+                    serde_json::from_value(json!({ "id": change.id, "value": change.value }))
+                        .map_err(|error| ApiError::internal(error.to_string()))?,
+                )
+            }
+        };
+        let command = Command::SessionConfig {
+            thread_id: self.thread_id.clone(),
+            mode_id: body.mode_id,
+            config,
+        };
+        self.store
+            .queue_command(idempotency_key, &format_timestamp(now_ms), &command)?;
+        Ok(Reply::new(
+            202,
+            json!({ "thread_id": self.thread_id, "status": "queued" }),
+        ))
+    }
+
     /// Ends a started task whose runner never saw it: a run that starts and is cancelled at
     /// once (the §5 validator only accepts `RunError` inside an open run).
     fn end_unstarted_task(&mut self, task: &TaskRecord, now_ms: u64) -> Result<(), ApiError> {
@@ -1271,6 +1371,35 @@ fn patch_add(path: &str, value: Value) -> PatchOp {
         from: None,
         value: Some(value),
     }
+}
+
+/// `true` when `value` fits the advertised config `option`: a boolean for a boolean option, a
+/// listed value id for a select option (flat or grouped `options`).
+fn config_value_fits(option: &Value, value: &Value) -> bool {
+    match option.get("type").and_then(Value::as_str) {
+        Some("boolean") => value.is_boolean(),
+        Some("select") => value
+            .as_str()
+            .is_some_and(|text| select_values(option.get("options")).contains(&text)),
+        _ => false,
+    }
+}
+
+/// Every value id a select option lists, flat or inside groups.
+fn select_values(options: Option<&Value>) -> Vec<&str> {
+    options
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| match entry.get("options") {
+            Some(group) => select_values(Some(group)),
+            None => entry
+                .get("value")
+                .and_then(Value::as_str)
+                .into_iter()
+                .collect(),
+        })
+        .collect()
 }
 
 /// Which outcomes an interrupt accepts from a client.

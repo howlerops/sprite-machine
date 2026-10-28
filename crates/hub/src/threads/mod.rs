@@ -26,7 +26,8 @@ pub mod sqlite;
 
 pub use self::core::{
     CreateThreadBody, EVENT_ID_TTL_MS, IDEMPOTENCY_TTL_MS, PromptBody, Reply, Resolved, SCOPES,
-    ThreadCore, event_message, request_hash, scope_name, valid_idempotency_key,
+    SessionBody, SessionConfigBody, ThreadCore, event_message, request_hash, scope_name,
+    valid_idempotency_key,
 };
 pub use self::error::ApiError;
 pub use self::patch::apply_patch;

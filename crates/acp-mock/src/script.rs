@@ -209,6 +209,13 @@ impl Step {
                     json!({ "availableCommands": commands }),
                 )?)))
             }
+            "config_option" => {
+                let options = array_payload(payload, key)?;
+                Ok(Self::Update(Box::new(typed_update(
+                    "config_option_update",
+                    json!({ "configOptions": options }),
+                )?)))
+            }
             "current_mode" => {
                 let mode = string_payload(payload, key)?;
                 Ok(Self::Update(Box::new(typed_update(

@@ -1363,3 +1363,179 @@ fn cancelling_a_dispatch_the_runner_never_received_retracts_it() {
         .collect();
     assert_eq!(types, ["RunStarted", "RunError"]);
 }
+
+// ---- session mode and config (client-api.md §5.5a) --------------------------------------
+
+/// A thread with a `session` state that advertises two modes and two config options (a select
+/// and a boolean), as a runner's `session/new` snapshot does.
+fn core_with_session_state() -> ThreadCore<MemoryStore> {
+    let mut core = core();
+    assert_eq!(
+        create(&mut core, "idk_create_session", create_body(false)).status,
+        201
+    );
+    let snapshot = json!({
+        "available_commands": [],
+        "current_mode_id": "code",
+        "modes": [
+            { "id": "code", "name": "Code" },
+            { "id": "plan", "name": "Plan" }
+        ],
+        "config_options": [
+            {
+                "id": "model", "name": "Model", "type": "select", "currentValue": "sonnet",
+                "options": [
+                    { "value": "sonnet", "name": "Sonnet" },
+                    { "value": "opus", "name": "Opus" }
+                ]
+            },
+            { "id": "auto_fix", "name": "Auto fix", "type": "boolean", "currentValue": false }
+        ]
+    });
+    append(
+        &mut core,
+        envelope(
+            None,
+            None,
+            StateSnapshot {
+                scope: StateScope::Session,
+                snapshot: snapshot.as_object().cloned().unwrap_or_default(),
+            },
+        ),
+    );
+    core
+}
+
+fn session_route(key: &str, body: Value) -> ApiRequest {
+    request("POST", "/v1/threads/th_1/session", "usr_1", Some(key), body)
+}
+
+/// The `session_config` commands the Machine DO would see, as their wire form.
+fn queued_session_configs(core: &mut ThreadCore<MemoryStore>) -> Vec<Value> {
+    queued(core)
+        .into_iter()
+        .filter(|command| command["command"]["kind"] == "session_config")
+        .collect()
+}
+
+#[test]
+fn a_session_change_is_checked_against_the_advertised_state_and_queues_a_command() {
+    let mut core = core_with_session_state();
+
+    // Each of these is refused with 400 and queues nothing.
+    let refused = [
+        json!({}),
+        json!({ "mode_id": "nope" }),
+        json!({ "config": { "id": "nope", "value": "opus" } }),
+        json!({ "config": { "id": "model", "value": "gpt" } }),
+        json!({ "config": { "id": "auto_fix", "value": "yes" } }),
+        json!({ "config": { "id": "model" } }),
+    ];
+    for (index, body) in refused.into_iter().enumerate() {
+        let key = format!("idk_refused_{index}");
+        let reply = api::handle(&mut core, &session_route(&key, body.clone()), NOW);
+        assert_eq!(reply.status, 400, "{body} was accepted: {:?}", reply.body);
+        assert_eq!(reply.body["error"], "invalid_request", "{body}");
+    }
+    assert!(
+        queued_session_configs(&mut core).is_empty(),
+        "a refused change queued"
+    );
+
+    // A valid mode and config option: 202, one command, nothing else.
+    let body = json!({ "mode_id": "plan", "config": { "id": "model", "value": "opus" } });
+    let reply = api::handle(
+        &mut core,
+        &session_route("idk_session_ok", body.clone()),
+        NOW,
+    );
+    assert_eq!(reply.status, 202, "{:?}", reply.body);
+    let commands = queued_session_configs(&mut core);
+    assert_eq!(commands.len(), 1, "{commands:?}");
+    let command = &commands[0]["command"];
+    assert_eq!(command["thread_id"], "th_1");
+    assert_eq!(command["mode_id"], "plan");
+    assert_eq!(command["config"], json!({ "id": "model", "value": "opus" }));
+    assert_eq!(commands[0]["idempotency_key"], "idk_session_ok");
+
+    // A boolean option alone, with no mode.
+    let flag = json!({ "config": { "id": "auto_fix", "value": true } });
+    let reply = api::handle(&mut core, &session_route("idk_session_flag", flag), NOW);
+    assert_eq!(reply.status, 202, "{:?}", reply.body);
+    let commands = queued_session_configs(&mut core);
+    assert_eq!(commands.len(), 2);
+    assert!(
+        commands[1]["command"]
+            .get("mode_id")
+            .is_none_or(Value::is_null)
+    );
+    assert_eq!(commands[1]["command"]["config"]["value"], true);
+}
+
+#[test]
+fn a_session_change_replays_the_same_answer_and_queues_once() {
+    let mut core = core_with_session_state();
+    let body = json!({ "mode_id": "plan" });
+    let first = api::handle(
+        &mut core,
+        &session_route("idk_session_replay", body.clone()),
+        NOW,
+    );
+    assert_eq!(first.status, 202);
+    let replay = api::handle(&mut core, &session_route("idk_session_replay", body), NOW);
+    assert_eq!(replay, first, "the stored answer is replayed");
+    assert_eq!(
+        queued_session_configs(&mut core).len(),
+        1,
+        "no second command"
+    );
+
+    // The same key with another body is refused, and nothing is queued for it.
+    let changed = json!({ "mode_id": "code" });
+    let mismatch = api::handle(
+        &mut core,
+        &session_route("idk_session_replay", changed),
+        NOW,
+    );
+    assert_eq!(mismatch.status, 422);
+    assert_eq!(queued_session_configs(&mut core).len(), 1);
+}
+
+#[test]
+fn a_session_change_needs_a_known_thread_and_a_key() {
+    // No thread at all: 404, nothing queued.
+    let mut empty = core();
+    let reply = api::handle(
+        &mut empty,
+        &session_route("idk_session_none", json!({ "mode_id": "plan" })),
+        NOW,
+    );
+    assert_eq!(reply.status, 404, "{:?}", reply.body);
+    assert!(queued(&mut empty).is_empty());
+
+    // A thread with no session state yet: nothing is advertised, so any change is refused.
+    let mut bare = core();
+    assert_eq!(
+        create(&mut bare, "idk_create_bare", create_body(false)).status,
+        201
+    );
+    let reply = api::handle(
+        &mut bare,
+        &session_route("idk_session_bare", json!({ "mode_id": "plan" })),
+        NOW,
+    );
+    assert_eq!(reply.status, 400, "{:?}", reply.body);
+    assert!(queued_session_configs(&mut bare).is_empty());
+
+    // Without an Idempotency-Key the write is refused.
+    let mut keyed = core_with_session_state();
+    let no_key = request(
+        "POST",
+        "/v1/threads/th_1/session",
+        "usr_1",
+        None,
+        json!({ "mode_id": "plan" }),
+    );
+    assert_eq!(api::handle(&mut keyed, &no_key, NOW).status, 400);
+    assert!(queued_session_configs(&mut keyed).is_empty());
+}

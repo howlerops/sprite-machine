@@ -14,6 +14,7 @@
 //! | `DELETE /v1/threads/{id}/pending/{task_id}`       | `Idempotency-Key`                  |
 //! | `POST /v1/threads/{id}/interrupts/{interrupt_id}` | `Idempotency-Key`                  |
 //! | `POST /v1/threads/{id}/cancel`                    | `Idempotency-Key`                  |
+//! | `POST /v1/threads/{id}/session`                   | `Idempotency-Key`; mode/config checked against `session` state (§5.5a) |
 //! | `POST /v1/dev/threads/{id}/events`                | only with `DEV_FIXTURES=1`         |
 //!
 //! Internal routes (only reachable through a Durable Object stub; the Worker never exposes
@@ -39,7 +40,8 @@ use serde_json::{Map, Value, json};
 use protocol::turn_event::is_valid_id;
 
 use super::core::{
-    CreateThreadBody, PromptBody, Reply, ThreadCore, request_hash, valid_idempotency_key,
+    CreateThreadBody, PromptBody, Reply, SessionBody, ThreadCore, request_hash,
+    valid_idempotency_key,
 };
 use super::error::ApiError;
 use super::store::ThreadStore;
@@ -149,6 +151,12 @@ fn route<S: ThreadStore>(
             let body: CancelBody = parse_body(&request.body)?;
             write(core, request, now_ms, |core, actor, key| {
                 core.cancel(actor, key, &body.task_id, now_ms)
+            })
+        }
+        ("POST", ["v1", "threads", _, "session"]) => {
+            let body: SessionBody = parse_body(&request.body)?;
+            write(core, request, now_ms, |core, _, key| {
+                core.session_config(key, body, now_ms)
             })
         }
         ("POST", ["v1", "dev", "threads", _, "events"]) => {
