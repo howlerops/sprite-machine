@@ -4467,7 +4467,9 @@ items:
     title: 'approval card: an HTTP-failed answer on a still-open request stays answerable (retry from the card)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
