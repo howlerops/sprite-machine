@@ -2,7 +2,17 @@
 //! when a request must refresh that row. Pure: the DO builds the row ([`crate::threads`]) and
 //! writes it through [`super::sync`] (wasm32) or [`super::store::upsert`].
 
-use protocol::turn_event::{Envelope, Event, StateScope};
+use protocol::turn_event::{Envelope, Event, InterruptOption, StateScope};
+use serde::{Deserialize, Serialize};
+
+/// An open approval interrupt on a thread, as `GET /v1/threads` lists it (client-api.md §5.2).
+/// `options` are the ACP options the agent sent, unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingInterrupt {
+    pub interrupt_id: String,
+    pub title: String,
+    pub options: Vec<InterruptOption>,
+}
 
 /// The stored task statuses the Thread DO writes (`open`, `running`, `waiting`, `done`).
 pub const STATUS_OPEN: &str = "open";
@@ -25,6 +35,8 @@ pub struct IndexRow {
     pub status: &'static str,
     pub archived: bool,
     pub deleted: bool,
+    /// The open approval interrupts (other kinds are not listed).
+    pub pending_interrupts: Vec<PendingInterrupt>,
     /// The time of the change that produced this row (ISO-8601 UTC).
     pub updated_at: String,
     pub last_seq: i64,

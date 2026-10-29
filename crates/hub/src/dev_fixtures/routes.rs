@@ -160,6 +160,7 @@ async fn upsert_thread(State(env): State<AppState>, req: Request) -> Response {
             status,
             archived: false,
             deleted: false,
+            pending_interrupts: Vec::new(),
             updated_at: updated_at.clone(),
             last_seq: 0,
         };

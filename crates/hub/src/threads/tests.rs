@@ -1861,7 +1861,12 @@ fn the_index_status_follows_the_run_and_its_approvals() {
     assert_eq!(core.index_row(NOW).expect("row").status, "running");
     append(&mut core, started("tk_1", "run_1"));
     append(&mut core, interrupt("tk_1", "run_1", "int_1", NOW + 60_000));
-    assert_eq!(core.index_row(NOW).expect("row").status, "waiting");
+    let waiting = core.index_row(NOW).expect("row");
+    assert_eq!(waiting.status, "waiting");
+    assert_eq!(waiting.pending_interrupts.len(), 1);
+    assert_eq!(waiting.pending_interrupts[0].interrupt_id, "int_1");
+    assert_eq!(waiting.pending_interrupts[0].title, "Allow?");
+    assert_eq!(waiting.pending_interrupts[0].options[0].option_id, "allow");
     let answer = core
         .answer_interrupt(
             &actor("usr_2"),
@@ -1874,7 +1879,9 @@ fn the_index_status_follows_the_run_and_its_approvals() {
         )
         .expect("answer");
     assert_eq!(answer.status, 200);
-    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    let answered = core.index_row(NOW).expect("row");
+    assert_eq!(answered.status, "running");
+    assert!(answered.pending_interrupts.is_empty());
     append(&mut core, success("tk_1", "run_1"));
     assert_eq!(core.index_row(NOW).expect("row").status, "done");
 }

@@ -562,3 +562,92 @@ fn a_deleted_thread_is_404_on_every_thread_route_like_an_unknown_one() {
     let unknown = http("GET", "/v1/threads/th_never_existed", Some(dev), &[], None);
     assert_eq!(unknown.status, 404);
 }
+
+/// The listed row of `thread` (any status, archived included).
+fn row_of(machine: &str, thread: &str) -> Value {
+    let reply = http(
+        "GET",
+        &format!("/v1/threads?machine_id={machine}&archived=true"),
+        Some("dev"),
+        &[],
+        None,
+    );
+    assert_eq!(reply.status, 200, "list: {}", reply.body);
+    reply.json()["threads"]
+        .as_array()
+        .expect("threads")
+        .iter()
+        .find(|row| row["thread_id"] == thread)
+        .unwrap_or_else(|| panic!("{thread} not listed"))
+        .clone()
+}
+
+/// M2-010h: rows carry `workspace`, `archived` and, while an approval is open, its options.
+#[test]
+fn rows_carry_workspace_archived_and_the_open_approvals_with_their_options() {
+    let dev = "dev";
+    let mch = machine(dev);
+    let thread = create_thread(dev, &mch, Some("Needs approval"), None);
+
+    let idle = row_of(&mch, &thread);
+    assert_eq!(idle["workspace"], "/tmp/work");
+    assert_eq!(idle["archived"], false);
+    assert_eq!(idle["pending_interrupts"], json!([]));
+
+    let task = unique("tk");
+    assert_eq!(prompt(&thread, &task).status, 202);
+    runner_event(
+        &thread,
+        &task,
+        "run_a",
+        json!({ "type": "RunStarted", "reason": "prompt" }),
+    );
+    runner_event(
+        &thread,
+        &task,
+        "run_a",
+        json!({
+            "type": "Interrupt",
+            "interrupt_id": "int_list_1",
+            "kind": "approval",
+            "title": "Run cargo test?",
+            "expires_at": "2099-01-01T00:00:00.000Z",
+            "options": [
+                { "option_id": "opt_yes", "name": "Yes, once", "kind": "allow_once" },
+                { "option_id": "opt_never", "name": "Never", "kind": "reject_always" },
+            ],
+        }),
+    );
+    let waiting = row_of(&mch, &thread);
+    assert_eq!(waiting["status"], "needs_you");
+    assert_eq!(
+        waiting["pending_interrupts"],
+        json!([{
+            "interrupt_id": "int_list_1",
+            "title": "Run cargo test?",
+            "options": [
+                { "option_id": "opt_yes", "name": "Yes, once", "kind": "allow_once" },
+                { "option_id": "opt_never", "name": "Never", "kind": "reject_always" },
+            ],
+        }])
+    );
+
+    let answer = http(
+        "POST",
+        &format!("/v1/threads/{thread}/interrupts/int_list_1"),
+        Some(dev),
+        &[("Idempotency-Key", &unique("idk"))],
+        Some(&json!({ "outcome": { "type": "selected", "option_id": "opt_yes" } })),
+    );
+    assert_eq!(answer.status, 200, "answer: {}", answer.body);
+    let resolved = row_of(&mch, &thread);
+    assert_eq!(resolved["status"], "running");
+    assert_eq!(resolved["pending_interrupts"], json!([]));
+
+    assert_eq!(
+        rename(dev, &thread, &json!({ "archived": true })).status,
+        200
+    );
+    assert_eq!(row_of(&mch, &thread)["archived"], true);
+    assert!(!listed(dev, &format!("machine_id={mch}")).contains(&thread));
+}
