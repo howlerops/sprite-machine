@@ -134,6 +134,9 @@ pub struct App {
     queue: VecDeque<Queued>,
     /// The prompt sent last, while its task has not appeared in the thread yet.
     sent: Option<Queued>,
+    /// Lines sent up to the hub in a shared session, while their task has not appeared in the
+    /// thread yet. A line the hub refuses comes back to the input from here.
+    in_flight: Vec<Queued>,
 }
 
 impl App {
@@ -155,6 +158,7 @@ impl App {
             quit: false,
             queue: VecDeque::new(),
             sent: None,
+            in_flight: Vec::new(),
         }
     }
 
@@ -253,6 +257,8 @@ impl App {
 
     /// The bridge refused a prompt this TUI sent (`task_id`) because a task was running. The
     /// prompt goes back to the front of the queue and runs when the running task has ended.
+    /// The hub refused a line sent up in a shared session (`in_flight`): it is not queued again
+    /// (the hub would refuse it again), it goes back into the input to be edited and sent.
     pub fn refused(&mut self, task_id: &str, message: &str) {
         if self
             .sent
@@ -263,6 +269,22 @@ impl App {
                 self.queue.push_front(sent);
             }
             self.notice = Some(format!("waiting for the running task: {message}"));
+            return;
+        }
+        if let Some(at) = self
+            .in_flight
+            .iter()
+            .position(|line| line.task_id == task_id)
+        {
+            let line = self.in_flight.remove(at);
+            self.input = if self.input.is_empty() {
+                line.text
+            } else {
+                format!("{} {}", line.text, self.input)
+            };
+            self.notice = Some(format!(
+                "not sent: {message} (the line is back in the input)"
+            ));
         }
     }
 
@@ -274,9 +296,13 @@ impl App {
     fn dispatch(&mut self) -> Vec<Action> {
         if matches!(self.remote, Remote::On { .. }) {
             self.sent = None;
-            return self
-                .queue
-                .drain(..)
+            let sync = &self.sync;
+            self.in_flight
+                .retain(|line| sync.view().task(&line.task_id).is_none());
+            let lines: Vec<Queued> = self.queue.drain(..).collect();
+            self.in_flight.extend(lines.iter().cloned());
+            return lines
+                .into_iter()
                 .map(|next| Action::Prompt {
                     task_id: next.task_id,
                     message_id: next.message_id,

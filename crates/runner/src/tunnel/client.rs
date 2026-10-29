@@ -28,7 +28,7 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 
 use super::backoff::{Backoff, Jitter, RandomJitter};
-use super::io::{AnswerReply, Shared, TunnelCommands, TunnelSink, frame_text};
+use super::io::{AnswerReply, PromptRefusal, Shared, TunnelCommands, TunnelSink, frame_text};
 use super::tls;
 use super::{SystemWallClock, TunnelConfig, WallClock};
 
@@ -614,6 +614,7 @@ impl<C: CredentialSource> TunnelClient<C> {
                                         code,
                                         &message,
                                     );
+                                    refuse_prompt(&self.shared, &body, code, &message);
                                 }
                             }
                             Frame::Command {
@@ -751,6 +752,24 @@ async fn pump(
         send(sink, frame_text(seq, &body.event_id, &body.body)).await?;
     }
     Ok(())
+}
+
+/// The hub rejected a `prompt_submit` (tunnel.md §3.6b): the line was neither queued nor run, so
+/// the host gets it back with the task it was sent with and keeps the line.
+fn refuse_prompt(shared: &Shared, rejected: &UpBody, code: NackCode, message: &str) {
+    if rejected.body.get("t").and_then(Value::as_str) != Some("prompt_submit") {
+        return;
+    }
+    let Some(task_id) = rejected.body.get("task_id").and_then(Value::as_str) else {
+        return;
+    };
+    let refusal = PromptRefusal {
+        task_id: task_id.to_owned(),
+        message: format!("the hub did not accept the line ({code:?}): {message}"),
+    };
+    if shared.refusals_tx.send(refusal).is_err() {
+        tracing::warn!("a refused prompt has no host to show it");
+    }
 }
 
 /// The hub rejected `rejected`: the task it belonged to cannot continue, so queue

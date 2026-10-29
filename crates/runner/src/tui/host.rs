@@ -269,6 +269,16 @@ impl Link {
                 tracing::warn!("the tunnel stopped: {error:#}");
             }
         });
+        if let Some(mut refusals) = sink.prompt_refusals() {
+            let handle = handle.clone();
+            tokio::spawn(async move {
+                while let Some(refusal) = refusals.recv().await {
+                    handle
+                        .prompt_refused(&refusal.task_id, &refusal.message)
+                        .await;
+                }
+            });
+        }
         if let Some(processed) = handle.take_processed() {
             tokio::spawn(forward(
                 commands,
