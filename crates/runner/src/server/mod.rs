@@ -147,7 +147,23 @@ impl PermissionMode {
             Self::BypassPermissions => "bypassPermissions",
         }
     }
+
+    /// Records the mode a thread's session runs in, in the session's directory, so an idle-close
+    /// reopen starts it in the same mode.
+    pub(crate) fn save(self, session_dir: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(session_dir)?;
+        std::fs::write(session_dir.join(MODE_RECORD), self.as_str())
+    }
+
+    /// The mode recorded by [`PermissionMode::save`]; `None` when there is no (valid) record.
+    pub(crate) fn load(session_dir: &std::path::Path) -> Option<Self> {
+        let text = std::fs::read_to_string(session_dir.join(MODE_RECORD)).ok()?;
+        Self::parse(text.trim())
+    }
 }
+
+/// The record of a thread's effective permission mode, in the session's directory.
+const MODE_RECORD: &str = "permission_mode";
 
 /// Everything `sm rc` needs. [`RcArgs::parse`] fills the flags; `sm` fills the environment.
 pub struct Options {

@@ -988,6 +988,43 @@ async fn a_local_close_ends_an_idle_session_and_the_next_prompt_reopens_it() {
 }
 
 #[tokio::test]
+async fn a_thread_started_in_plan_on_a_default_machine_is_reopened_in_plan() {
+    let mut first = one("a");
+    all_modes(&mut first);
+    let mut second = one("b");
+    all_modes(&mut second);
+    let rig = Rig::new(&[first, second]).await;
+    let running = start(rig.options());
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch_with_mode(
+        "th_1",
+        "tk_1",
+        "opencode",
+        json!({ "path": rig.work() }),
+        "plan",
+    )
+    .await;
+    conn.until(run_finished("tk_1")).await;
+
+    // The hub closes the idle thread, then prompts it again: the reopened agent is in plan
+    // (the thread's mode), not in the machine's default.
+    server::close_session(&rig.state(), "th_1")
+        .await
+        .expect("the session is closed");
+    conn.prompt("th_1", "tk_2").await;
+    conn.until(run_finished("tk_2")).await;
+
+    let methods = received_by(&rig, 2, |m| m.iter().any(|x| x == "session/prompt")).await;
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap();
+    assert!(
+        at("session/set_mode:plan") < at("session/prompt"),
+        "{methods:?}"
+    );
+    running.stop().await;
+}
+
+#[tokio::test]
 async fn a_local_close_of_a_running_session_or_an_unknown_thread_is_refused() {
     let rig = Rig::new(&[pauses()]).await;
     let running = start(rig.options());
@@ -1197,6 +1234,52 @@ async fn continue_registers_the_last_session_of_the_directory_and_resumes_it() {
         rig.pids().len(),
         2,
         "a new agent process resumed the session"
+    );
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_thread_started_in_plan_on_a_default_machine_continues_in_plan_with_c() {
+    let mut first = one("one");
+    all_modes(&mut first);
+    let mut second = one("two");
+    all_modes(&mut second);
+    let rig = Rig::new(&[first, second]).await;
+
+    let running = start(rig.options());
+    let (mut conn, _) = rig.hub.accept().await;
+    conn.dispatch_with_mode(
+        "th_1",
+        "tk_1",
+        "opencode",
+        json!({ "path": rig.work() }),
+        "plan",
+    )
+    .await;
+    let frames = conn.until(run_finished("tk_1")).await;
+    let last = frames
+        .iter()
+        .filter_map(|f| f["seq"].as_u64())
+        .max()
+        .unwrap();
+    conn.send(json!({ "t": "ack", "seq": last })).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    running.stop().await;
+
+    // `-c` on the default machine: the continued session is in the thread's plan, not default.
+    let mut options = rig.options();
+    options.continue_last = true;
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+    conn.until(|f| f["t"] == "thread_open").await;
+    conn.prompt("th_1", "tk_2").await;
+    conn.until(run_finished("tk_2")).await;
+
+    let methods = received_by(&rig, 2, |m| m.iter().any(|x| x == "session/prompt")).await;
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap();
+    assert!(
+        at("session/set_mode:plan") < at("session/prompt"),
+        "{methods:?}"
     );
     running.stop().await;
 }
