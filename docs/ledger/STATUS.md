@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 146/304 (4 dropped) · in-flight M2-015,M2-010h,M2B-019h · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 138/200
+done 147/308 (4 dropped) · in-flight M2-010h,M2B-019h · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 138/200
 
 ## Per phase
 
@@ -10,9 +10,9 @@ done 146/304 (4 dropped) · in-flight M2-015,M2-010h,M2B-019h · blocked 12 (hum
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 70 | 65 | 1 |
+| P2 | 71 | 66 | 0 |
 | P3 | 43 | 26 | 2 |
-| P4 | 63 | 2 | 0 |
+| P4 | 66 | 2 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 17 | 0 | 0 |
@@ -68,7 +68,8 @@ done 146/304 (4 dropped) · in-flight M2-015,M2-010h,M2B-019h · blocked 12 (hum
 | CI-001 | human | rust | done | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
 | M2-014 | leader | rust | done | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
-| M2-015 | worker | rust | assigned | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
+| M2-015 | worker | rust | done | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
+| M2-015d | worker | rust | blocked | First real hub deploy: set Cloudflare secrets, HUB_URL, Worker secrets and production VAPID public key; run deploy-hub |
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | done | runner: local harness discovery + local logins/MCP passthrough |
 | M2B-007 | worker | rust | done | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |

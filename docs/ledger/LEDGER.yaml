@@ -3186,7 +3186,8 @@ items:
     title: 'hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc'
     milestone: M2
     phase: P2
-    status: "assigned"
+    status: "done"
+    evidence: "merged; worker: wrangler deploy --dry-run --env production lists WORKSPACE, THREAD, MACHINE, FLOW, NOTIFY (sm-hub-notify), DB (sm-hub), BLOBS (sm-hub-blobs); local dry-run ok; dr.md/alerts.md non-empty; workflow YAML parses; hub-test machine_do 15 passed. Leader checked wrangler-action v3.14.1 tag exists (git ls-remote) and wrangler 4.154.0 on npm. Workflow not run yet: needs secrets (M2-015d)."
     attempt: 1
     assignee: "worker-sonnet"
     deps: [M2-014, M2-008]
@@ -3205,6 +3206,63 @@ items:
     verify:
       - 'wrangler deploy --dry-run --outdir /tmp/hub-dry --config crates/hub/wrangler.toml'
       - 'test -s docs/ops/dr.md && test -s docs/ops/alerts.md'
+  - id: M2-015a
+    title: 'hub: Analytics Engine METRICS binding and data points (push failures, auth failures, rate limits) for docs/ops/alerts.md'
+    milestone: M2
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-015]
+    paths:
+      - 'crates/hub/src/**'
+      - 'crates/hub/wrangler.toml'
+      - 'docs/ops/alerts.md'
+    acceptance:
+      - 'METRICS binding in local and production config; data points written on push failure, auth failure, rate limit; live test with a fake binding or a documented local check'
+  - id: M2-015b
+    title: 'hub: Thread/Machine DO export to R2 for DR (docs/ops/dr.md)'
+    milestone: M2
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: M
+    risk: medium
+    deps: [M2-015]
+    paths:
+      - 'crates/hub/src/**'
+      - 'docs/ops/dr.md'
+    acceptance:
+      - 'Owner-only route or cron that exports DO event logs to R2; restore path documented; live test'
+  - id: M2-015c
+    title: 'workers/workspace: env.production config + deploy workflow once the workspace image exists'
+    milestone: M2
+    phase: P4
+    status: "todo"
+    lane: ts
+    size: S
+    risk: medium
+    deps: [M2-015, M0-008c]
+    paths:
+      - 'workers/workspace/**'
+      - '.github/workflows/deploy-workspace.yml'
+      - 'docs/ops/hub.md'
+    acceptance:
+      - 'wrangler deploy --dry-run --env production passes; workflow skips cleanly without secrets; hub doc prerequisite updated'
+  - id: M2-015d
+    title: 'First real hub deploy: set Cloudflare secrets, HUB_URL, Worker secrets and production VAPID public key; run deploy-hub'
+    milestone: M2
+    phase: P2
+    status: "blocked"
+    blocked_on: "human"
+    howto: "In GitHub repo Settings > Secrets and variables > Actions add secrets CLOUDFLARE_API_TOKEN (token with Workers Scripts:Edit, D1:Edit, Workers R2 Storage:Edit, Queues:Edit) and CLOUDFLARE_ACCOUNT_ID, and variable HUB_URL (the hub origin, e.g. https://sm-hub-production.<subdomain>.workers.dev). Set Worker secrets with `wrangler secret put <NAME> --env production` from crates/hub (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY, ATTACHMENT_SIGNING_KEY; see docs/ops/hub.md). Deploy sm-workspace first (M2-015c) or the WORKSPACE binding fails. Then run the deploy-hub workflow (Actions tab > deploy-hub > Run workflow)."
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-015, M2-014a]
+    acceptance:
+      - 'deploy-hub run green with /healthz 200'
 
   - id: M2-review
     title: 'M2 exit review'

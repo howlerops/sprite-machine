@@ -301,3 +301,4 @@
 - 2026-10-29 leader: merged M3-011 (approval cards, 23 tests); filed M3-011a/b/c/d from its discovered work.
 - 2026-10-29 leader: disk hit 0 during verify; freed stale wasm dirs and an old in-repo target (9 GB free). Re-running runner+client-gpui verify. Assigned M2B-019h (haiku).
 - 2026-10-29 leader: verify on merged v2 (M2B-019e, M3-007, M3-011, M2B-006a): clippy clean, runner+client-gpui 360 passed 0 failed. Assigned M2-010h (sonnet).
+- 2026-10-29 leader: merged M2-015 (deploy-hub.yml skips green without secrets; env.production bindings; dr.md, alerts.md). Filed M2-015a/b/c and M2-015d (human: secrets + first deploy).
