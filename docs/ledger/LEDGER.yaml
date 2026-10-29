@@ -4205,7 +4205,9 @@ items:
     title: "client-core UserView keeps content parts; the transcript draws a user's own image parts inline (task::media::push_image_rows)"
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: low
@@ -4222,7 +4224,9 @@ items:
     title: 'desktop shell: ThreadComposer::set_upload_target on sign-in/link changes so thread-composer uploads work; CONVENTIONS.md notes DropZone for file drops'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: low
