@@ -7,6 +7,9 @@
 //! - Transient failures (transport errors, 408/425/429, 5xx) are retried with exponential
 //!   backoff and full jitter. Clock and randomness are injected, so the schedule is testable.
 //! - `409 already_resolved` is terminal and surfaces the resolver ([`Outbox::conflicts`]).
+//! - `409 task_started` on a [`Intent::RemovePending`] is terminal too: the task left the queue
+//!   before the removal arrived, so the caller should cancel instead
+//!   ([`Outbox::started_removals`]).
 //! - Other 4xx responses (and 410 `expired`) are terminal and surface as `Rejected`.
 
 use std::collections::{BTreeMap, HashSet};
@@ -130,6 +133,41 @@ pub enum Intent {
     },
     /// `POST /threads/{thread}/cancel`.
     Cancel { thread_id: String, task_id: String },
+    /// `POST /threads/{thread}/session` (client-api.md §5.5a): switch the session mode, change
+    /// one config option, or both. At least one of `mode_id` and `config` is set.
+    SetSession {
+        thread_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config: Option<SessionConfig>,
+    },
+    /// `DELETE /threads/{thread}/pending/{task}` (client-api.md §5.3): drop a queued prompt.
+    /// `409 task_started` means it already started; see [`Outbox::started_removals`].
+    RemovePending { thread_id: String, task_id: String },
+}
+
+/// One session config option change: `{ "id": "model", "value": "opus" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionConfig {
+    pub id: String,
+    pub value: String,
+}
+
+/// The HTTP method of an outbox request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Post,
+    Delete,
+}
+
+impl Method {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Post => "POST",
+            Self::Delete => "DELETE",
+        }
+    }
 }
 
 impl Intent {
@@ -137,7 +175,17 @@ impl Intent {
         match self {
             Self::Prompt { thread_id, .. }
             | Self::Approval { thread_id, .. }
-            | Self::Cancel { thread_id, .. } => thread_id,
+            | Self::Cancel { thread_id, .. }
+            | Self::SetSession { thread_id, .. }
+            | Self::RemovePending { thread_id, .. } => thread_id,
+        }
+    }
+
+    /// The HTTP method.
+    pub fn method(&self) -> Method {
+        match self {
+            Self::RemovePending { .. } => Method::Delete,
+            _ => Method::Post,
         }
     }
 
@@ -151,10 +199,15 @@ impl Intent {
                 ..
             } => format!("/threads/{thread_id}/interrupts/{interrupt_id}"),
             Self::Cancel { thread_id, .. } => format!("/threads/{thread_id}/cancel"),
+            Self::SetSession { thread_id, .. } => format!("/threads/{thread_id}/session"),
+            Self::RemovePending { thread_id, task_id } => {
+                format!("/threads/{thread_id}/pending/{task_id}")
+            }
         }
     }
 
-    /// The JSON body (client-api.md §5.3 to §5.5, plus the MVP-000 fields when set).
+    /// The JSON body (client-api.md §5.3 to §5.5a, plus the MVP-000 fields when set).
+    /// `null` for a `DELETE`, which has none.
     pub fn body(&self) -> Value {
         match self {
             Self::Prompt {
@@ -189,6 +242,21 @@ impl Intent {
                 body
             }
             Self::Cancel { task_id, .. } => json!({ "task_id": task_id }),
+            Self::SetSession {
+                mode_id, config, ..
+            } => {
+                let mut body = json!({});
+                if let Some(object) = body.as_object_mut() {
+                    if let Some(mode_id) = mode_id {
+                        object.insert("mode_id".to_owned(), json!(mode_id));
+                    }
+                    if let Some(config) = config {
+                        object.insert("config".to_owned(), json!(config));
+                    }
+                }
+                body
+            }
+            Self::RemovePending { .. } => Value::Null,
         }
     }
 }
@@ -205,6 +273,9 @@ pub enum IntentState {
     Conflict {
         status: u16,
         resolved_by: Option<Actor>,
+        /// The hub's `error` code (`already_resolved`, `task_started`), when it sent one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     /// Refused for good (other 4xx, including `410 expired`).
     Rejected { status: u16, error: String },
@@ -236,6 +307,15 @@ pub struct QueuedIntent {
     pub last_error: Option<String>,
     pub last_status: Option<u16>,
     pub created_at_ms: u64,
+}
+
+/// A `409 task_started` for a pending-task removal this client sent: the task had already
+/// started, so removing it is too late (cancel it instead).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedRemoval {
+    pub local_id: i64,
+    pub thread_id: String,
+    pub task_id: String,
 }
 
 /// A `409` for an approval this client sent: the first answer won.
@@ -285,11 +365,13 @@ impl RetryPolicy {
 
 // ---- transport -----------------------------------------------------------------------------
 
-/// One POST to send.
+/// One request to send (a POST, or the DELETE of a pending task).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PostRequest {
+    pub method: Method,
     pub url: String,
     pub idempotency_key: String,
+    /// `null` for a DELETE: no body is sent.
     pub body: Value,
 }
 
@@ -331,11 +413,11 @@ impl HttpTransport {
 
 impl Transport for HttpTransport {
     async fn post(&self, request: PostRequest) -> Result<PostResponse, TransportError> {
-        let mut builder = self
-            .client
-            .post(&request.url)
-            .header("Idempotency-Key", &request.idempotency_key)
-            .json(&request.body);
+        let mut builder = match request.method {
+            Method::Post => self.client.post(&request.url).json(&request.body),
+            Method::Delete => self.client.delete(&request.url),
+        }
+        .header("Idempotency-Key", &request.idempotency_key);
         if let Some(token) = &self.token {
             builder = builder.bearer_auth(token);
         }
@@ -515,6 +597,23 @@ impl Outbox {
             .collect()
     }
 
+    /// Every pending-task removal that came too late (`409 task_started`).
+    pub fn started_removals(&self) -> Vec<StartedRemoval> {
+        self.entries
+            .values()
+            .filter_map(|entry| match (&entry.intent, &entry.state) {
+                (Intent::RemovePending { thread_id, task_id }, IntentState::Conflict { .. }) => {
+                    Some(StartedRemoval {
+                        local_id: entry.local_id,
+                        thread_id: thread_id.clone(),
+                        task_id: task_id.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Removes an entry (for example a rejected one the user dismissed, or a finished one).
     pub fn dismiss(&mut self, cache: &Cache, local_id: i64) -> Result<(), OutboxError> {
         if self.entries.remove(&local_id).is_none() {
@@ -548,6 +647,11 @@ impl Outbox {
                     .body
                     .get("resolved_by")
                     .and_then(|value| serde_json::from_value::<Actor>(value.clone()).ok()),
+                error: response
+                    .body
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             },
             408 | 425 | 429 | 500..=599 => {
                 return self.schedule_retry(
@@ -608,6 +712,7 @@ impl Outbox {
                 continue;
             };
             let request = PostRequest {
+                method: entry.intent.method(),
                 url: format!("{base}{}", entry.intent.path()),
                 idempotency_key: entry.idempotency_key.clone(),
                 body: entry.intent.body(),

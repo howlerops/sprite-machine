@@ -4,7 +4,7 @@
 //! composer asks for (client-api.md §5.3, §5.5, §5.5a).
 
 use client_core::outbox::Intent;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::new::mode_looseness;
 
@@ -210,61 +210,14 @@ pub fn accept_command(command: &SlashCommand) -> SlashAccept {
     }
 }
 
-/// A write to the hub other than a prompt or a cancel.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ThreadRequest {
-    /// `POST /threads/{thread}/session` with `mode_id`.
-    SetMode { thread_id: String, mode_id: String },
-    /// `POST /threads/{thread}/session` with `config`.
-    SetConfig {
-        thread_id: String,
-        id: String,
-        value: String,
-    },
-    /// `DELETE /threads/{thread}/pending/{task}`.
-    RemovePending { thread_id: String, task_id: String },
-}
-
-impl ThreadRequest {
-    pub fn method(&self) -> &'static str {
-        match self {
-            Self::SetMode { .. } | Self::SetConfig { .. } => "POST",
-            Self::RemovePending { .. } => "DELETE",
-        }
-    }
-
-    /// The path under the hub's base URL.
-    pub fn path(&self) -> String {
-        match self {
-            Self::SetMode { thread_id, .. } | Self::SetConfig { thread_id, .. } => {
-                format!("/threads/{thread_id}/session")
-            }
-            Self::RemovePending { thread_id, task_id } => {
-                format!("/threads/{thread_id}/pending/{task_id}")
-            }
-        }
-    }
-
-    pub fn body(&self) -> Option<Value> {
-        match self {
-            Self::SetMode { mode_id, .. } => Some(json!({ "mode_id": mode_id })),
-            Self::SetConfig { id, value, .. } => {
-                Some(json!({ "config": { "id": id, "value": value } }))
-            }
-            Self::RemovePending { .. } => None,
-        }
-    }
-}
-
 /// What the thread composer asks its owner (the shell) to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComposerEvent {
     /// Send `text` as a prompt (queued by the hub when a task is running).
-    Send {
-        thread_id: String,
-        text: String,
-    },
+    Send { thread_id: String, text: String },
     /// Stop the running task: `Intent::Cancel`.
     Cancel(Intent),
-    Request(ThreadRequest),
+    /// A session change (`Intent::SetSession`) or a queued-message removal
+    /// (`Intent::RemovePending`): enqueue it in the outbox.
+    Intent(Intent),
 }
