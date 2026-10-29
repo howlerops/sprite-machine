@@ -2196,6 +2196,45 @@ fn an_open_thread_shows_its_pending_card_and_a_click_posts_the_options_own_id(
     assert!(key.starts_with("idk_"), "{key}");
 }
 
+/// The deadline of the card `hub_with_pending_approval` raises (2026-10-27T22:10:00Z).
+const EXPIRES_MS: u64 = 1_793_139_000_000;
+
+#[gpui_kit::test]
+fn a_click_refused_as_expired_says_so_on_the_card(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_pending_approval();
+    cx.executor().allow_parking();
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        clock.clone(),
+    );
+    open_thread_a(cx, window, &view);
+    wait_for_label(cx, window, "approval-title", |label| !label.is_empty());
+
+    // The deadline passes before the next refresh, so the card still offers its answers.
+    clock.set(EXPIRES_MS);
+    cx.update_window(window, |_, window, cx| {
+        window.click("approval-option-yes_once", cx)
+    })
+    .expect("window");
+    let status = wait_for_label(cx, window, "approval-status", |label| {
+        label.contains("expired")
+    });
+    assert_eq!(
+        status,
+        "Your answer was not delivered: the request expired before your answer was sent"
+    );
+    assert!(
+        state.answers.lock().expect("lock").is_empty(),
+        "a refused answer never reaches the hub"
+    );
+}
+
 #[gpui_kit::test]
 fn time_left_repaints_every_second(cx: &mut TestAppContext) {
     let (_state, hub) = hub_with_pending_approval();

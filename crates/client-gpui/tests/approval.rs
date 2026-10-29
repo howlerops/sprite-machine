@@ -698,6 +698,122 @@ fn a_refused_answer_shows_the_failure_and_can_be_retried() {
     assert_eq!(outbox.entries().count(), 2);
 }
 
+// ---- criterion: a click refused on this device says why --------------------------------------
+
+/// An outbox whose writes fail: its cache's directory is removed after the cache is opened, so
+/// the write cannot create its journal next to the database.
+fn outbox_that_cannot_write(name: &str) -> (Cache, Outbox) {
+    let dir = std::env::temp_dir().join(format!("m3-011g-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let cache = Cache::open(dir.join("cache.db")).expect("cache");
+    let outbox = Outbox::load(&cache, RetryPolicy::default()).expect("outbox");
+    std::fs::remove_dir_all(&dir).expect("remove");
+    (cache, outbox)
+}
+
+#[test]
+fn a_click_refused_as_expired_shows_why_on_the_card() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let (cache, mut outbox) = outbox();
+    // The deadline passes before the card is refreshed, so the click reaches the controller.
+    clock.set(EXPIRES_MS);
+    let refused = controller.answer(&mut thread, &mut outbox, &cache, "int_1", "allow");
+    assert!(matches!(refused, Err(AnswerError::Expired)), "{refused:?}");
+
+    let card = only_card(&mut controller, &thread);
+    assert_eq!(
+        card.state,
+        CardState::Failed {
+            message: "the request expired before your answer was sent".to_owned()
+        }
+    );
+    assert!(!card.is_answerable());
+    assert!(card.options.iter().all(|o| !o.enabled));
+    assert_eq!(outbox.entries().count(), 0);
+}
+
+#[test]
+fn a_click_refused_as_not_open_shows_that_it_was_already_answered() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let (cache, mut outbox) = outbox();
+    thread
+        .apply(&envelope(
+            3,
+            resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
+        ))
+        .expect("resolved");
+
+    let refused = controller.answer(&mut thread, &mut outbox, &cache, "int_1", "reject");
+    assert!(matches!(refused, Err(AnswerError::NotOpen)), "{refused:?}");
+
+    let card = only_card(&mut controller, &thread);
+    assert_eq!(
+        card.state,
+        CardState::Failed {
+            message: "the request was already answered".to_owned()
+        }
+    );
+    assert!(!card.is_answerable());
+    assert_eq!(outbox.entries().count(), 0);
+}
+
+#[test]
+fn an_answer_the_outbox_cannot_queue_is_shown_and_the_next_answer_clears_it() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let (bad_cache, mut bad_outbox) = outbox_that_cannot_write("cannot-queue");
+
+    let refused = controller.answer(&mut thread, &mut bad_outbox, &bad_cache, "int_1", "allow");
+    assert!(
+        matches!(refused, Err(AnswerError::Outbox(_))),
+        "{refused:?}"
+    );
+    assert_eq!(bad_outbox.entries().count(), 0);
+    let card = only_card(&mut controller, &thread);
+    match &card.state {
+        CardState::Failed { message } => assert!(
+            message.starts_with("the answer could not be queued on this device"),
+            "{message}"
+        ),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+    assert!(card.is_answerable(), "the card still offers its answers");
+
+    // The next answer goes through, and the failure is gone.
+    let (cache, mut outbox) = outbox();
+    controller
+        .answer(&mut thread, &mut outbox, &cache, "int_1", "allow")
+        .expect("queued");
+    let card = only_card(&mut controller, &thread);
+    assert_eq!(card.state, CardState::Sending);
+}
+
+#[test]
+fn a_refusal_clears_when_the_card_closes() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let (cache, mut outbox) = outbox();
+    clock.set(EXPIRES_MS);
+    let refused = controller.answer(&mut thread, &mut outbox, &cache, "int_1", "allow");
+    assert!(matches!(refused, Err(AnswerError::Expired)), "{refused:?}");
+    assert!(matches!(
+        only_card(&mut controller, &thread).state,
+        CardState::Failed { .. }
+    ));
+
+    controller.clear_refusals();
+    assert_eq!(
+        only_card(&mut controller, &thread).state,
+        CardState::Expired
+    );
+}
+
 // ---- criterion: allow_always offers the workspace preset -------------------------------------
 
 #[test]

@@ -94,18 +94,21 @@ pub struct ApprovalCard {
     /// `None` once answered or when `expires_at` does not parse.
     pub remaining_ms: Option<u64>,
     pub remaining_text: Option<String>,
+    /// What the card says. A refused click shows as [`CardState::Failed`] here, while the
+    /// buttons follow the state the request is really in (see [`Self::is_answerable`]).
     pub state: CardState,
+    pub answerable: bool,
 }
 
 impl ApprovalCard {
-    /// `true` while the buttons work.
+    /// `true` while the buttons work: the request is still open, whatever the card says.
     pub fn is_answerable(&self) -> bool {
-        self.state == CardState::Open
+        self.answerable
     }
 }
 
 /// Inputs that are not in the interrupt itself.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CardContext {
     /// Injected current time (ms since the epoch).
     pub now_ms: u64,
@@ -115,6 +118,9 @@ pub struct CardContext {
     pub remember_preset: bool,
     /// The preset was recorded locally for this interrupt.
     pub preset_saved: bool,
+    /// Why this device's last answer to the card was refused, already worded for the user.
+    /// It replaces the card's status until the next answer succeeds or the card closes.
+    pub refused: Option<String>,
 }
 
 /// Builds the card for an approval interrupt; `None` for form and auth interrupts.
@@ -133,8 +139,14 @@ pub fn build_card(
         (Some(at), true) => Some(at.saturating_sub(context.now_ms)),
         _ => None,
     };
-    let state = card_state(view, expired, context);
-    let answerable = state == CardState::Open;
+    let underlying = card_state(view, expired, &context);
+    let answerable = underlying == CardState::Open;
+    let state = match &context.refused {
+        Some(message) => CardState::Failed {
+            message: sanitize(message),
+        },
+        None => underlying,
+    };
     let options: Vec<OptionButton> = view
         .options()
         .iter()
@@ -177,10 +189,11 @@ pub fn build_card(
         remaining_ms,
         remaining_text: remaining_ms.map(format_remaining),
         state,
+        answerable,
     })
 }
 
-fn card_state(view: &InterruptView, expired: bool, context: CardContext) -> CardState {
+fn card_state(view: &InterruptView, expired: bool, context: &CardContext) -> CardState {
     if let Some(resolution) = &view.resolution {
         let who = actor_text(&resolution.resolved_by);
         let choice = match &resolution.outcome {

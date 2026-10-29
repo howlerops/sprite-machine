@@ -183,6 +183,11 @@ impl SessionLink {
         })
     }
 
+    /// The followed thread's cards closed: forget the refusals they show.
+    pub fn forget_refusals(&self) {
+        drop(self.with_thread(|access| access.approvals.clear_refusals()));
+    }
+
     /// Ticks or clears "save as this workspace's preset" on one card.
     pub fn set_remember_preset(&self, interrupt_id: &str, checked: bool) {
         let interrupt_id = interrupt_id.to_owned();

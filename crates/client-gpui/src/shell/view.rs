@@ -273,6 +273,9 @@ impl AppShell {
     /// Back to the thread list. The link keeps following the thread it has.
     pub fn close_thread(&mut self, cx: &mut Context<Self>) {
         if self.open_thread.take().is_some() {
+            if let Some(link) = &self.link {
+                link.forget_refusals();
+            }
             cx.notify();
         }
     }
