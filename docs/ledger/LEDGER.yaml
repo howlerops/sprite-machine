@@ -4836,7 +4836,8 @@ items:
     title: 'clients show failed and cancelled: desktop Status parses cancelled; web sessions.js labels failed/cancelled'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: inbox 33 passed, client-gpui all, web unit 4/4 (3 fail on old). Leader added web chip colours + test:unit script (node --test 4/4). Desktop verify with M3-006."
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4855,7 +4856,9 @@ items:
     title: "desktop inbox: refresh on a timer (and on tab focus) so notifications fire without user action; feed the open thread's snapshot status once the hub reports failed"
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: low
