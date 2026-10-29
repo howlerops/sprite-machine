@@ -167,6 +167,10 @@ fn clicking_the_button_updates_the_status(cx: &mut TestAppContext) {
   same `div().id(…)`, before `.test_support()`.
 - Rust 2024 `impl IntoElement` return types capture borrowed arguments; row builders should take
   their data by value (or clone) to avoid E0515.
+- **File drops**: use `compose::attach_bar::DropZone`, not `on_drop` or `capture_any_mouse_up`.
+  At this gpui pin a file drag does not count as mouse input, so after the user types, those
+  hover-gated handlers silently lose the drop. **Absence checks**: `window.find(id)` panics for
+  an absent element; use `find_all(id).is_empty()` or `try_find(id).is_none()`.
 - Drive views from `client-core` fixtures (TurnEvent examples in
   `crates/protocol/schemas/turn-event/examples/`), not from a live hub.
 - Tests run on the GPUI test platform (no display, no GPU). Pixel output is checked only by

@@ -94,7 +94,14 @@ struct HubState {
     list_delay_ms: AtomicUsize,
     /// The status `GET /v1/threads` answers (0 means 200).
     list_status: AtomicUsize,
+    /// `POST /v1/attachments` (§5.6): the Authorization header, Idempotency-Key and body.
+    attachment_creates: Mutex<Vec<AttachmentCreate>>,
+    /// The signed `PUT`: path, whether an Authorization header came with it, Content-Type, bytes.
+    attachment_puts: Mutex<Vec<AttachmentPut>>,
 }
+
+type AttachmentCreate = (Option<String>, Option<String>, Value);
+type AttachmentPut = (String, bool, Option<String>, Vec<u8>);
 
 #[derive(Debug, Clone)]
 struct Write {
@@ -347,6 +354,57 @@ async fn list_threads(State(state): State<Arc<HubState>>) -> Response {
     Json(json!({ "threads": threads, "next_cursor": null })).into_response()
 }
 
+/// §5.6 step one: records the call and answers a signed upload URL on this hub.
+async fn create_attachment(
+    State(hub): State<Arc<HubState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let text = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let n = {
+        let mut creates = hub.attachment_creates.lock().expect("lock");
+        creates.push((text("authorization"), text("idempotency-key"), body.clone()));
+        creates.len()
+    };
+    let origin = format!("http://{}", text("host").unwrap_or_default());
+    let url = format!("{origin}/v1/attachments/org_1/att_{n}?exp=9&sig=get");
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "upload_url": format!("{origin}/v1/attachments/org_1/att_{n}/upload?size=1&mime=x&exp=9&sig=put"),
+            "url": url,
+            "expires_at": "2099-01-01T00:00:00.000Z",
+            "part": { "type": "file", "url": url, "name": body["name"],
+                      "mime_type": body["mime_type"], "size": body["size"] },
+        })),
+    )
+        .into_response()
+}
+
+/// §5.6 step two: the signed `PUT` to storage, which must not carry the bearer token.
+async fn put_attachment(
+    State(hub): State<Arc<HubState>>,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> StatusCode {
+    hub.attachment_puts.lock().expect("lock").push((
+        uri.path().to_owned(),
+        headers.contains_key("authorization"),
+        headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        body.to_vec(),
+    ));
+    StatusCode::NO_CONTENT
+}
+
 fn spawn_hub(state: Arc<HubState>) -> String {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -363,6 +421,11 @@ fn spawn_hub(state: Arc<HubState>) -> String {
                 .route("/v1/threads", get(list_threads))
                 .route("/v1/threads/{thread_id}/subscribe", get(session_subscribe))
                 .route("/v1/machines", get(list_machines))
+                .route("/v1/attachments", post(create_attachment))
+                .route(
+                    "/v1/attachments/{org}/{id}/upload",
+                    axum::routing::put(put_attachment),
+                )
                 .route("/v1/threads/{thread_id}/prompts", post(record_write))
                 .route("/v1/threads/{thread_id}/session", post(record_write))
                 .route(
@@ -3857,4 +3920,101 @@ fn the_open_threads_snapshot_notifies_and_the_list_does_not_repeat_it(cx: &mut T
     set_status(&state, "th_a", "failed");
     refresh_inbox(cx, window, &view);
     assert_eq!(toasts(cx, &view), 1);
+}
+
+/// Picks a fixed list of files, as the system dialog would.
+struct FakeChooser(Vec<std::path::PathBuf>);
+
+impl client_gpui::compose::FileChooser for FakeChooser {
+    fn choose(&self, _: &mut gpui_kit::App) -> gpui_kit::Task<Vec<std::path::PathBuf>> {
+        gpui_kit::Task::ready(self.0.clone())
+    }
+}
+
+#[gpui_kit::test]
+fn the_thread_composer_uploads_through_the_session_and_stops_after_sign_out(
+    cx: &mut TestAppContext,
+) {
+    let (state, hub) = hub_with_a_session(false);
+    let (window, view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-plan");
+    let dir = unique_dir("thread-upload");
+    let file = dir.join("notes.md");
+    std::fs::write(&file, b"# notes").expect("write");
+    let bar = cx.update(|cx| {
+        view.read(cx)
+            .thread_composer()
+            .read(cx)
+            .attachments()
+            .clone()
+    });
+    cx.update(|cx| {
+        bar.update(cx, |bar, _| {
+            bar.set_chooser(std::rc::Rc::new(FakeChooser(vec![file.clone()])));
+        });
+    });
+    cx.update_window(window, |_, window, cx| window.click("attach-add", cx))
+        .expect("window");
+    pump_until(cx, "the chip", |cx| {
+        cx.update(|cx| bar.read(cx).set().items().len() == 1)
+    });
+    type_into(cx, window, &view, "see notes");
+    cx.update_window(window, |_, window, cx| window.click("thread-send", cx))
+        .expect("window");
+    // The uploads run first, then the shell's outbox posts the prompt.
+    pump_until(cx, "the prompt to reach the hub", |_| {
+        !writes_to(&state, "POST", "/prompts").is_empty()
+    });
+    // POST /v1/attachments: bearer token, an idempotency key and the file's description.
+    let creates = state.attachment_creates.lock().expect("lock").clone();
+    assert_eq!(creates.len(), 1, "{creates:?}");
+    assert_eq!(creates[0].0.as_deref(), Some("Bearer sm_session_token"));
+    assert!(creates[0].1.is_some());
+    assert_eq!(creates[0].2["name"], "notes.md");
+    assert_eq!(creates[0].2["size"], 7);
+    // The PUT goes to the signed URL with the bytes and without the token.
+    let puts = state.attachment_puts.lock().expect("lock").clone();
+    assert_eq!(puts.len(), 1, "{puts:?}");
+    assert_eq!(puts[0].0, "/v1/attachments/org_1/att_1/upload");
+    assert!(
+        !puts[0].1,
+        "the signed URL is the credential, not the token"
+    );
+    assert_eq!(puts[0].3, b"# notes");
+    // The prompt carries the text and the file part.
+    let prompts = writes_to(&state, "POST", "/prompts");
+    assert_eq!(prompts.len(), 1, "{prompts:?}");
+    let parts = &prompts[0].body["parts"];
+    assert_eq!(parts[0]["text"], "see notes");
+    assert_eq!(parts[1]["type"], "file");
+    assert_eq!(parts[1]["name"], "notes.md");
+    assert!(
+        parts[1]["url"]
+            .as_str()
+            .is_some_and(|url| url.contains("/v1/attachments/org_1/att_1"))
+    );
+    // Signed out, the composer has no hub to upload to.
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.sign_out(cx))
+    })
+    .expect("window");
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .expect("window");
+    cx.update(|cx| {
+        bar.update(cx, |bar, cx| {
+            bar.add_bytes("later.txt", "text/plain", b"x".to_vec(), cx);
+            bar.request_send(cx);
+        });
+    });
+    pump_until(cx, "the refusal", |cx| {
+        cx.update(|cx| bar.read(cx).is_blocked())
+    });
+    cx.update(|cx| {
+        let item = bar.read(cx).set().items()[0].clone();
+        assert_eq!(
+            item.state,
+            client_gpui::compose::attach::State::Failed("Sign in to attach files.".into())
+        );
+    });
+    assert_eq!(state.attachment_creates.lock().expect("lock").len(), 1);
 }
