@@ -6386,3 +6386,50 @@ items:
     verify:
       - 'cargo test -p hub -p runner'
       - 'bash scripts/hub-test.sh machine_do'
+
+  - id: M3-004a
+    title: 'Spec + runner + composer: a remotely requested permission mode is capped by the machine local mode (never looser; plan §4.10 "the local permission mode applies"); the composer only offers modes the machine allows and says when it was capped'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: high
+    deps: [M3-004]
+    paths:
+      - 'docs/specs/client-api.md'
+      - 'docs/specs/tunnel.md'
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/tests/server_mode.rs'
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/tests/compose.rs'
+    context:
+      - 'docs/ledger/reports/M3-004.md'
+      - 'docs/PLAN-v2-ade.md §4.10 (Security)'
+      - 'crates/runner/src/server/router.rs (initial_mode from ctx.permission_mode only)'
+    acceptance:
+      - 'Spec: a requested mode is applied only if it is the same or stricter than the local mode (order: plan < default < acceptEdits < bypassPermissions); otherwise the local mode applies and the session reports the effective mode'
+      - 'Runner test: a remote bypassPermissions request on a default-mode machine runs in default; a remote plan request runs in plan'
+      - 'Composer: modes looser than the machine allows are not offered (machine advertises its local mode); test'
+    verify:
+      - 'cargo test -p runner --test server_mode'
+      - 'cargo test -p client-gpui --test compose'
+
+  - id: M3-004b
+    title: 'client-core: fetch_machines (GET /v1/machines) helper; the composer and the web page use it'
+    milestone: M3
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-004]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/src/compose/**'
+    context:
+      - 'docs/ledger/reports/M3-004.md (Discovered work)'
+    acceptance:
+      - 'Typed helper with a fake-hub test; compose/new.rs uses it'
+    verify:
+      - 'cargo test -p client-core'
+      - 'cargo test -p client-gpui --test compose'
