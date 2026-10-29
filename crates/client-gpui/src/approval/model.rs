@@ -121,6 +121,9 @@ pub struct CardContext {
     /// Why this device's last answer to the card was refused, already worded for the user.
     /// It replaces the card's status until the next answer succeeds or the card closes.
     pub refused: Option<String>,
+    /// This device's last answer failed over HTTP (refused, or transient failures used up), and
+    /// the hub has not closed the request, so a new answer may be sent from the card.
+    pub retryable: bool,
 }
 
 /// Builds the card for an approval interrupt; `None` for form and auth interrupts.
@@ -140,7 +143,14 @@ pub fn build_card(
         _ => None,
     };
     let underlying = card_state(view, expired, &context);
-    let answerable = underlying == CardState::Open;
+    // The buttons follow the request, not the status line: a failed answer on a request that is
+    // still open for this device can be sent again. A 409 (answered elsewhere) or an expiry
+    // cannot.
+    let answerable = match underlying {
+        CardState::Open => true,
+        CardState::Failed { .. } => context.retryable && view.is_open() && !expired,
+        _ => false,
+    };
     let state = match &context.refused {
         Some(message) => CardState::Failed {
             message: sanitize(message),
