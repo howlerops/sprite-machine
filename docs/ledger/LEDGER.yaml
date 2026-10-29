@@ -7075,6 +7075,9 @@ items:
     title: 'desktop task view: incremental row updates (no full rebuild per event), so the 200 events/s workload stays within the frame budget'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: medium
