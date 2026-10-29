@@ -6241,7 +6241,8 @@ items:
     title: 'client-core: step and subagent view models (StepStarted/Finished, SubagentStarted/Finished/Error) and a Raw item, so clients can render them'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged together on 6ee8503; leader: clippy client-gpui+runner+client-core clean, tests 337/0"
     assignee: "haiku"
     attempt: 1
     lane: rust
@@ -6263,7 +6264,8 @@ items:
     title: 'desktop task view: render steps, subagents and Raw (after M3-001m); flip known_gaps_are_still_gaps; expandable capped bodies'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged together on 6ee8503; leader: clippy client-gpui+runner+client-core clean, tests 337/0; all 32 examples render; expandable bodies"
     assignee: "sonnet"
     attempt: 1
     lane: client
