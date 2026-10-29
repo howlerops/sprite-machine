@@ -65,6 +65,9 @@ pub struct ThreadSnapshot {
     pub plan: PlanModel,
     /// The usage figures, from the link's [`UsageTracker`], which has seen every applied state.
     pub usage: UsageModel,
+    /// Tasks of this thread whose queued message this device tried to remove but had already
+    /// started (`409 task_started`, [`Outbox::started_removals`]): the composer offers Stop.
+    pub started_removals: Vec<String>,
 }
 
 /// What a job run by [`SessionLink::with_thread`] can reach. Everything is borrowed from the
@@ -425,6 +428,13 @@ impl Core {
             cards: approvals.cards(view),
             plan: PlanModel::from_thread(view),
             usage: self.usage.observe(view),
+            started_removals: self
+                .outbox
+                .started_removals()
+                .into_iter()
+                .filter(|removal| removal.thread_id == view.thread_id())
+                .map(|removal| removal.task_id)
+                .collect(),
             view: view.clone(),
         };
         self.snapshots.send_if_modified(|current| {
@@ -434,6 +444,7 @@ impl Core {
                         && last.cards == snapshot.cards
                         && last.plan == snapshot.plan
                         && last.usage == snapshot.usage
+                        && last.started_removals == snapshot.started_removals
                 });
             if !same {
                 *current = Some(snapshot);

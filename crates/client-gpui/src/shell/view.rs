@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use client_core::Connectivity;
-use client_core::outbox::Clock;
+use client_core::outbox::{Clock, Intent};
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -15,6 +15,7 @@ use gpui_kit::component::{ActiveTheme as _, Selectable as _, Theme, ThemeMode, *
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use gpui_kit::{Task, black, white};
+use protocol::tunnel::ContentPart;
 use tokio::sync::watch;
 
 use super::browser::Browser;
@@ -28,6 +29,7 @@ use super::prefs::{Appearance, Preferences, ThemeChoice};
 use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
+use crate::compose::{ComposerEvent, ThreadComposer};
 use crate::inbox::InboxEvent;
 use crate::palette::{
     self, CommandId, NextThread, OpenPalette, PaletteEvent, PaletteView, PreviousThread, ShortcutId,
@@ -108,6 +110,15 @@ pub struct AppShell {
     /// The thread shown in the Inbox page, if one was opened.
     open_thread: Option<String>,
     pane: Entity<TranscriptPane>,
+    /// The composer under the open thread's transcript.
+    composer: Entity<ThreadComposer>,
+    _composer_events: Subscription,
+    /// Re-derives the composer's runner cap when the machines list arrives.
+    _machines_observer: Subscription,
+    /// The thread the composer's prompt text belongs to; the text is cleared when it changes.
+    composer_thread: Option<String>,
+    /// The machine hosting the open thread, from its last snapshot.
+    thread_machine: Option<String>,
     /// The open thread's plan and usage widgets, as of its last snapshot.
     plan: PlanModel,
     usage: UsageModel,
@@ -166,6 +177,9 @@ impl AppShell {
         let palette_events = cx.subscribe_in(&palette, window, Self::on_palette_event);
         let pane = cx.new(|_| TranscriptPane::new());
         let pane_events = Self::subscribe_pane(&pane, cx);
+        let composer = cx.new(|cx| ThreadComposer::new(window, cx));
+        let composer_events = cx.subscribe(&composer, Self::on_composer_event);
+        let machines_observer = cx.observe(&compose, |this, _, cx| this.sync_runner_cap(cx));
         let mut shell = Self {
             model,
             driver,
@@ -186,6 +200,11 @@ impl AppShell {
             presets_path,
             open_thread: None,
             pane,
+            composer,
+            _composer_events: composer_events,
+            _machines_observer: machines_observer,
+            composer_thread: None,
+            thread_machine: None,
             plan: PlanModel::default(),
             usage: UsageModel::default(),
             last_open_file: None,
@@ -363,6 +382,11 @@ impl AppShell {
         self.open_thread.as_deref()
     }
 
+    /// The composer under the open thread's transcript.
+    pub fn thread_composer(&self) -> &Entity<ThreadComposer> {
+        &self.composer
+    }
+
     /// The pane that shows the open thread and its approval cards.
     pub fn thread_pane(&self) -> &Entity<TranscriptPane> {
         &self.pane
@@ -410,6 +434,11 @@ impl AppShell {
             self._pane_events = Self::subscribe_pane(&self.pane, cx);
             self.plan = PlanModel::default();
             self.usage = UsageModel::default();
+            self.thread_machine = None;
+            self.composer.update(cx, |composer, cx| {
+                composer.clear_thread(cx);
+                composer.set_runner_mode(None, cx);
+            });
             // The link may already hold this thread (opened again after going back).
             let current = self
                 .link
@@ -473,11 +502,70 @@ impl AppShell {
         });
         self.plan = snapshot.plan;
         self.usage = snapshot.usage;
+        self.thread_machine = snapshot.view.machine_id().map(str::to_owned);
+        self.composer.update(cx, |composer, cx| {
+            composer.set_thread(&snapshot.view, cx);
+            composer.set_started_removals(snapshot.started_removals.clone(), cx);
+        });
+        self.sync_runner_cap(cx);
         self.pane.update(cx, |pane, cx| {
             pane.set_thread(&snapshot.view, cx);
             pane.set_approvals(snapshot.cards, Some(handler), cx);
         });
         cx.notify();
+    }
+
+    /// The runner's permission mode for the open thread: from the `features`
+    /// (`permission_mode:<mode>`) of the machine that hosts it, as the new-task composer's
+    /// machines list knows them. Unset while the machine or its list is not known.
+    fn sync_runner_cap(&mut self, cx: &mut Context<Self>) {
+        let cap = self.thread_machine.as_deref().and_then(|machine_id| {
+            self.compose
+                .read(cx)
+                .model()
+                .machines()
+                .iter()
+                .find(|machine| machine.machine_id == machine_id)
+                .and_then(|machine| machine.permission_mode.clone())
+        });
+        self.composer
+            .update(cx, |composer, cx| composer.set_runner_mode(cap, cx));
+    }
+
+    /// The composer asked for something: it all goes through the link's outbox.
+    fn on_composer_event(
+        &mut self,
+        _: Entity<ThreadComposer>,
+        event: &ComposerEvent,
+        _: &mut Context<Self>,
+    ) {
+        let Some(link) = &self.link else { return };
+        match event {
+            ComposerEvent::Send { thread_id, text } => link.enqueue(Intent::Prompt {
+                thread_id: thread_id.clone(),
+                task_id: format!("tk_{:032x}", rand::random::<u128>()),
+                message_id: format!("msg_{:032x}", rand::random::<u128>()),
+                parts: vec![ContentPart::Text { text: text.clone() }],
+                machine_id: None,
+                author: None,
+            }),
+            ComposerEvent::Intent(intent) => link.enqueue(intent.clone()),
+            ComposerEvent::Cancel(intent) => {
+                // Stopping answers a refused removal: forget the conflict so Stop goes away
+                // once the task finishes.
+                if let Intent::Cancel { task_id, .. } = intent {
+                    let task_id = task_id.clone();
+                    drop(link.with_thread(move |access| {
+                        for removal in access.outbox.started_removals() {
+                            if removal.task_id == task_id {
+                                let _ = access.outbox.dismiss(access.cache, removal.local_id);
+                            }
+                        }
+                    }));
+                }
+                link.enqueue(intent.clone());
+            }
+        }
     }
 
     /// A click on a card: the answer goes through the link's outbox (and is flushed there).
@@ -843,7 +931,15 @@ impl AppShell {
                     .flex_1()
                     .min_h_0()
                     .gap_3()
-                    .child(div().flex_1().min_w_0().h_full().child(self.pane.clone()))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .gap_2()
+                            .child(div().flex_1().min_h_0().child(self.pane.clone()))
+                            .child(self.composer.clone()),
+                    )
                     .child(
                         v_flex()
                             .id("thread-side")
@@ -993,6 +1089,11 @@ impl Render for AppShell {
         // The shell takes focus only when nothing has it, so a field the user is typing in keeps it.
         if window.focused(cx).is_none() {
             window.focus(&self.focus, cx);
+        }
+        if self.composer_thread != self.open_thread {
+            self.composer_thread = self.open_thread.clone();
+            self.composer
+                .update(cx, |composer, cx| composer.clear_prompt(window, cx));
         }
         let target = self.model.session().map(|session| crate::compose::Target {
             api: format!("{}/v1", session.hub.trim_end_matches('/')),

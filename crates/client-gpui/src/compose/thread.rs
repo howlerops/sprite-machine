@@ -17,7 +17,7 @@ use super::commands::{
     ComposerEvent, SessionOptions, SlashAccept, SlashCommand, accept_command, filter_commands,
     slash_query,
 };
-use super::queue::{QueuedChip, queued_chips, remove_request, stop_intent};
+use super::queue::{QueuedChip, queued_chips, remove_request, stoppable_intent};
 use super::{send_shortcut_label, tr, tr_args};
 
 actions!(
@@ -51,6 +51,8 @@ pub struct ThreadComposer {
     thread: Option<ThreadView>,
     /// The runner's local mode: the loosest mode offered.
     cap: Option<String>,
+    /// Tasks whose queued message could not be removed because they had started.
+    started: Vec<String>,
     prompt: Entity<TextareaState>,
     slash_selected: usize,
     focus: FocusHandle,
@@ -78,6 +80,7 @@ impl ThreadComposer {
         Self {
             thread: None,
             cap: None,
+            started: Vec::new(),
             prompt,
             slash_selected: 0,
             focus: cx.focus_handle(),
@@ -89,6 +92,30 @@ impl ThreadComposer {
     pub fn set_thread(&mut self, thread: &ThreadView, cx: &mut Context<Self>) {
         self.thread = Some(thread.clone());
         cx.notify();
+    }
+
+    /// Forget the thread (the owner switched to another one).
+    pub fn clear_thread(&mut self, cx: &mut Context<Self>) {
+        self.thread = None;
+        self.started.clear();
+        cx.notify();
+    }
+
+    /// Empty the prompt field (the owner switched to another thread).
+    pub fn clear_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prompt
+            .update(cx, |state, cx| state.set_value("", window, cx));
+    }
+
+    /// Tasks whose queued message the hub refused to remove with `409 task_started`
+    /// ([`client_core::Outbox::started_removals`]). While one of them has not finished, the
+    /// composer says so and offers Stop for it, even if the thread's events have not yet shown
+    /// the task running.
+    pub fn set_started_removals(&mut self, started: Vec<String>, cx: &mut Context<Self>) {
+        if self.started != started {
+            self.started = started;
+            cx.notify();
+        }
     }
 
     /// The host machine's local permission mode (`capabilities.features`
@@ -119,7 +146,7 @@ impl ThreadComposer {
     pub fn is_running(&self) -> bool {
         self.thread
             .as_ref()
-            .is_some_and(|thread| stop_intent(thread).is_some())
+            .is_some_and(|thread| stoppable_intent(thread, &self.started).is_some())
     }
 
     /// The commands the list shows right now (empty when the text is not a `/` command).
@@ -237,7 +264,11 @@ impl ThreadComposer {
 
     /// Stop the running task.
     pub fn stop(&mut self, cx: &mut Context<Self>) {
-        if let Some(intent) = self.thread.as_ref().and_then(stop_intent) {
+        if let Some(intent) = self
+            .thread
+            .as_ref()
+            .and_then(|thread| stoppable_intent(thread, &self.started))
+        {
             cx.emit(ComposerEvent::Cancel(intent));
         }
     }
@@ -371,6 +402,7 @@ impl Render for ThreadComposer {
         let options = self.options();
         let chips = self.queued();
         let running = self.is_running();
+        let started_notice = running && !self.started.is_empty();
         let matches = self.slash_matches(cx);
         let slash_open = !matches.is_empty();
         let modes: Vec<_> = options
@@ -414,6 +446,16 @@ impl Render for ThreadComposer {
             )
             .on_action(cx.listener(|this, _: &SlashNext, _, cx| this.move_slash(1, cx)))
             .on_action(cx.listener(|this, _: &SlashPrevious, _, cx| this.move_slash(-1, cx)))
+            .when(started_notice, |el| {
+                el.child(
+                    div()
+                        .id("thread-started-notice")
+                        .role(Role::Status)
+                        .test_support()
+                        .aria_label(tr("compose-thread-started-a11y"))
+                        .child(tr("compose-thread-started")),
+                )
+            })
             .when(!chips.is_empty(), |el| {
                 el.child(self.render_chips(chips, cx))
             })

@@ -68,3 +68,5 @@ compose-thread-queued-remove = Remove
 compose-thread-queued-remove-a11y = Remove queued message: { $preview }
 compose-thread-stop = Stop
 compose-thread-stop-a11y = Stop the running task
+compose-thread-started = That message already started, so it could not be removed. Stop it instead.
+compose-thread-started-a11y = The queued message had already started; use Stop to cancel it

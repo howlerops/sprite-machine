@@ -59,3 +59,21 @@ pub fn remove_request(thread: &ThreadView, task_id: &str) -> Option<Intent> {
             task_id: task_id.to_owned(),
         })
 }
+
+/// The cancel Stop sends: the running task, else (after a `409 task_started` on a removal) the
+/// task that started before the removal arrived, unless the thread already shows it finished.
+pub fn stoppable_intent(thread: &ThreadView, started: &[String]) -> Option<Intent> {
+    if let Some(intent) = stop_intent(thread) {
+        return Some(intent);
+    }
+    let task_id = started.iter().find(|task_id| {
+        !thread
+            .tasks()
+            .iter()
+            .any(|task| &task.task_id == *task_id && task.status().is_finished())
+    })?;
+    Some(Intent::Cancel {
+        thread_id: thread.thread_id().to_owned(),
+        task_id: task_id.clone(),
+    })
+}
