@@ -6309,7 +6309,8 @@ items:
     title: 'tunnel/hub: a runner-typed prompt in a shared session is enqueued at the hub (up frame) and comes back as a prompt command, so the hub alone orders local and phone prompts; remove the TUI settle window'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; clean-target verify: clippy workspace + wasm, workspace tests 1024/0, live machine_do + thread_do PASS, e2e rc PASS"
     assignee: "sonnet"
     attempt: 1
     lane: rust

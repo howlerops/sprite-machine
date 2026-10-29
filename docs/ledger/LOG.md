@@ -283,3 +283,4 @@
 2026-10-29T00:14Z M3-001m, M3-008a done (337/0, clippy clean). Disk 1.6 GB during M2B-019d builds → pruned again
 2026-10-29T00:28Z M2B-019d back (sonnet): tunnel.md §3.6b prompt_submit up frame; Thread DO queues runner-typed prompts like phone prompts (author local:<machine>, idempotent per task_id); settle window removed; worker: machine_do 14/14 incl. 2 live, thread_do, e2e rc, both clippys → merged; full merged-tree verify running. Added M2B-019e, M2B-019f (P3)
 2026-10-29T00:46Z full verify after M2B-019d hit 11 MB free (workspace test build). No workers running → wiped the shared target (23 GB free); ledger env adds CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only for all builds; full verify re-running from clean
+2026-10-29T01:20Z clean-target verify green (1024/0, live suites, e2e rc; disk stayed >= 13 GB with line-tables-only) → M2B-019d done
