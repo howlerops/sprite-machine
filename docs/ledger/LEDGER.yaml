@@ -4199,7 +4199,8 @@ items:
     title: 'client-gpui shell: wire ApprovalController into the app connection (ThreadView, Outbox, Cache, 1 s tick, flush after answer)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 118 passed 0 failed (twice), clippy clean. Opening a thread from the inbox UI is M3-011f."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4241,6 +4242,52 @@ items:
       - 'crates/runner/tests/tui.rs'
     acceptance:
       - 'Answered approval line shows who and when (envelope time); test'
+  - id: M3-011f
+    title: 'desktop inbox: clicking a thread row opens it (calls AppShell::open_thread)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011c]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/src/shell/view.rs'
+      - 'crates/client-gpui/tests/inbox.rs'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'A row click (and Enter on a focused row) emits an event the shell turns into open_thread; the transcript pane shows that thread (window test with the fake hub)'
+  - id: M3-011g
+    title: 'approval card: show why an answer was refused (Expired, NotOpen, Outbox) instead of dropping AnswerError'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011c]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/approval/**'
+      - 'crates/client-gpui/locales/en/approval.ftl'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'A refused click shows a Fluent message on the card; test per error kind'
+  - id: M3-011h
+    title: 'client-core: Connection exposes view_mut/outbox_mut and swap_subscription so the desktop link can use it again'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011c]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-gpui/src/shell/link.rs'
+    acceptance:
+      - 'SessionLink holds a Connection again; tests unchanged and green'
 
   - id: M3-012
     title: 'client: agent registry + launch managed agent form'
@@ -6439,7 +6486,8 @@ items:
     title: 'client-core: an idle outbox must not hold the combined Connection at Connecting once the subscription is live'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader fix: rule moved to client_core::banner_state and used by the desktop SessionLink too (M3-011c bypassed Connection); client-core 50 passed incl. new banner_state test; client-gpui 118 passed x2; clippy client-core/gpui/runner clean"
     attempt: 1
     assignee: "sonnet"
     lane: client
