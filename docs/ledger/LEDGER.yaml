@@ -4473,7 +4473,8 @@ items:
     title: 'client-gpui tests: the_banner_follows_a_client_core_connection waits on conditions, not fixed sleeps (flaked once)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: shell 20/20 runs, clippy clean. Leader verify with M3-014."
     attempt: 1
     assignee: "haiku"
     lane: client
