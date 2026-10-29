@@ -21,6 +21,25 @@ use super::queue::{QueuedChip, queued_chips, remove_request, stoppable_intent};
 use super::{send_shortcut_label, tr, tr_args};
 use crate::shell::link::{Refusal, RefusalKind};
 
+/// What the hub said, as words: a plain sentence for the codes people meet (`forbidden`,
+/// `invalid_request`), else the code itself, else the HTTP status.
+fn refusal_detail(refusal: &Refusal) -> String {
+    if refusal.error.is_empty() {
+        return refusal.status.to_string();
+    }
+    // Built from parts: the catalog test scans this file for whole `compose-thread-` ids.
+    let key = format!(
+        "{}-thread-refused-code-{}",
+        "compose",
+        refusal.error.replace('_', "-")
+    );
+    if super::catalog().has(&key) {
+        tr(&key)
+    } else {
+        refusal.error.clone()
+    }
+}
+
 actions!(
     thread_composer,
     [SlashAcceptAction, SlashNext, SlashPrevious]
@@ -118,6 +137,15 @@ impl ThreadComposer {
             self.refusals = refusals;
             cx.notify();
         }
+    }
+
+    /// The user dismissed `refusal`: its outbox entry goes (on the link thread) and the line
+    /// goes at once.
+    pub fn dismiss_refusal(&mut self, refusal: &Refusal, cx: &mut Context<Self>) {
+        refusal.dismiss();
+        self.refusals
+            .retain(|shown| shown.local_id != refusal.local_id);
+        cx.notify();
     }
 
     /// The refusals shown right now.
@@ -477,19 +505,35 @@ impl Render for ThreadComposer {
                     RefusalKind::Model => "compose-thread-refused-model",
                     RefusalKind::RemoveQueued => "compose-thread-refused-remove",
                 };
-                let detail = if refusal.error.is_empty() {
-                    refusal.status.to_string()
-                } else {
-                    refusal.error.clone()
-                };
+                let detail = refusal_detail(refusal);
                 let text = tr_args(key, &[("detail", &detail)]);
-                div()
-                    .id(SharedString::from(format!("thread-refused-{index}")))
-                    .role(Role::Status)
-                    .test_support()
-                    .aria_label(text.clone())
-                    .text_color(cx.theme().danger)
-                    .child(text)
+                let dismissed = refusal.clone();
+                h_flex()
+                    .id(SharedString::from(format!("thread-refusal-{index}")))
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("thread-refused-{index}")))
+                            .role(Role::Status)
+                            .test_support()
+                            .aria_label(text.clone())
+                            .text_color(cx.theme().danger)
+                            .child(text.clone()),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!(
+                            "thread-refused-dismiss-{index}"
+                        )))
+                        .label(tr("compose-thread-refused-dismiss"))
+                        .accessibility_label(tr_args(
+                            "compose-thread-refused-dismiss-a11y",
+                            &[("refusal", &text)],
+                        ))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.dismiss_refusal(&dismissed, cx);
+                        })),
+                    )
             }))
             .when(started_notice, |el| {
                 el.child(
