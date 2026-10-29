@@ -3629,13 +3629,25 @@ items:
     title: 'Dispatch: start a task on a chosen machine (+ client Where picker, machines list)'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M2B-002, M2B-007, M3-004]
     paths:
-      - 'crates/hub/src/dispatch/**'
-      - 'crates/client-gpui/src/machines/**'
-      - 'crates/client-gpui/src/compose/where*'
-      - 'crates/hub/tests/dispatch.rs'
+      - "crates/hub/src/dispatch/**"
+      - "crates/hub/src/threads/**"
+      - "crates/hub/src/machines/**"
+      - "crates/hub/tests/dispatch.rs"
+      - "scripts/hub-test.sh"
+      - "crates/client-gpui/src/machines/**"
+      - "crates/client-gpui/src/compose/**"
+      - "crates/client-gpui/src/inbox/**"
+      - "crates/client-gpui/src/task/**"
+      - "crates/client-gpui/src/shell/**"
+      - "crates/client-gpui/locales/en/*.ftl"
+      - "crates/client-gpui/tests/machines.rs"
+      - "docs/specs/client-api.md"
     context:
       - 'docs/PLAN-v2-ade.md §4.10 (Dispatch), §3 (surface 8)'
       - 'crates/client-gpui/CONVENTIONS.md'
