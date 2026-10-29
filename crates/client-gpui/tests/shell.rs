@@ -33,7 +33,11 @@ use client_gpui::shell::pkce::{self, Callback, GithubSignIn, LoopbackListener, P
 use client_gpui::shell::prefs::{Appearance, Preferences, ThemeChoice};
 use client_gpui::shell::session::{FileStore, MemoryStore, Session, SessionStore};
 use client_gpui::shell::{AppConfig, AppShell};
+use client_gpui::task::plan::{PLAN_EMPTY_ID, PLAN_ROW_ID, PLAN_SUMMARY_ID};
 use client_gpui::task::transcript::VIEW_DIFF_ID;
+use client_gpui::task::usage::{
+    CONTEXT_ID, TOTAL_COST_ID, TOTAL_TOKENS_ID, TURN_COST_ID, TURN_TOKENS_ID, USAGE_ID,
+};
 use gpui_kit::Focusable as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::test::TestWindowExt as _;
@@ -65,6 +69,8 @@ struct HubState {
     cancels: AtomicUsize,
     /// Event frames the subscribe endpoint replays for a thread (after `hello`, before `live`).
     frames: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// Event frames a test pushes to a subscribed thread after `live`, sent by its socket.
+    pushed: Mutex<std::collections::HashMap<String, Vec<String>>>,
     /// The threads subscribed to, in order.
     subscribed: Mutex<Vec<String>>,
     /// POSTs to an interrupt endpoint: thread, interrupt, Idempotency-Key, body.
@@ -186,7 +192,8 @@ async fn session_subscribe(
         .get(&thread_id)
         .cloned()
         .unwrap_or_default();
-    upgrade.on_upgrade(|mut socket| async move {
+    let hub = hub.clone();
+    upgrade.on_upgrade(move |mut socket| async move {
         if !frames.is_empty() {
             let hello = json!({ "type": "hello", "head_seq": frames.len(), "replay_from": 1 });
             let _ = socket.send(WsMessage::Text(hello.to_string().into())).await;
@@ -197,8 +204,35 @@ async fn session_subscribe(
         let _ = socket
             .send(WsMessage::Text(r#"{"type":"live"}"#.into()))
             .await;
-        while let Some(Ok(_)) = socket.recv().await {}
+        // Send what a test pushes for this thread, and watch for the client closing.
+        loop {
+            let pushed = hub
+                .pushed
+                .lock()
+                .expect("lock")
+                .remove(&thread_id)
+                .unwrap_or_default();
+            for frame in pushed {
+                let _ = socket.send(WsMessage::Text(frame.into())).await;
+            }
+            match tokio::time::timeout(Duration::from_millis(20), socket.recv()).await {
+                Ok(Some(Ok(_))) => {}
+                Ok(_) => break,
+                Err(_) => {}
+            }
+        }
     })
+}
+
+/// Pushes an event frame to the subscription of `thread` (it is sent once the socket is live).
+fn push_live(state: &HubState, thread: &str, frame: String) {
+    state
+        .pushed
+        .lock()
+        .expect("lock")
+        .entry(thread.to_owned())
+        .or_default()
+        .push(frame);
 }
 
 async fn session_cancel(State(hub): State<Arc<HubState>>) -> Json<Value> {
@@ -2370,4 +2404,177 @@ fn time_left_repaints_every_second(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(1));
     let third = wait_for_label(cx, window, "approval-time-left", |label| label != second);
     assert_ne!(second, third);
+}
+
+/// The labels of every element `id` the window shows, after a frame.
+fn labels_shown(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    id: &'static str,
+) -> Vec<String> {
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window
+            .find_all(id)
+            .iter()
+            .map(|found| found.label().unwrap_or_default().to_owned())
+            .collect()
+    })
+    .expect("window")
+}
+
+fn plan_frame(seq: u64, entries: Value) -> String {
+    event_frame(
+        seq,
+        "th_a",
+        json!({
+            "type": "Activity", "activity_id": "plan", "activity_type": "plan",
+            "mode": "snapshot", "content": { "entries": entries },
+        }),
+    )
+}
+
+fn usage_frame(seq: u64, document: Value) -> String {
+    event_frame(
+        seq,
+        "th_a",
+        json!({ "type": "StateSnapshot", "scope": "usage", "snapshot": document }),
+    )
+}
+
+#[gpui_kit::test]
+fn an_open_thread_shows_its_plan_and_usage_and_follows_new_events(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    state.frames.lock().expect("lock").insert(
+        "th_a".to_owned(),
+        vec![
+            plan_frame(
+                1,
+                json!([
+                    { "content": "Add route", "priority": "high", "status": "in_progress" },
+                    { "content": "Add test", "priority": "medium", "status": "pending" },
+                ]),
+            ),
+            usage_frame(
+                2,
+                json!({ "context_used": 10_000, "context_size": 200_000,
+                        "cost": { "amount": 0.01, "currency": "USD" } }),
+            ),
+        ],
+    );
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    open_thread_a(cx, window, &view);
+
+    // The initial frame: the plan's rows and the usage figures.
+    assert_eq!(
+        wait_for_label(cx, window, PLAN_SUMMARY_ID, |label| !label.is_empty()),
+        "0 of 2 done"
+    );
+    assert_eq!(
+        labels_shown(cx, window, PLAN_ROW_ID),
+        [
+            "Add route: In progress, High priority",
+            "Add test: Pending, Medium priority"
+        ]
+    );
+    assert_eq!(
+        wait_for_label(cx, window, TOTAL_TOKENS_ID, |label| !label.is_empty()),
+        "Total: 10k tokens"
+    );
+    assert_eq!(
+        labels_shown(cx, window, TURN_TOKENS_ID),
+        ["This turn: 10k tokens"]
+    );
+    assert_eq!(labels_shown(cx, window, TOTAL_COST_ID), ["Total: 0.01 USD"]);
+
+    // The hub sends a new plan and a new usage state; both widgets change.
+    push_live(
+        &state,
+        "th_a",
+        plan_frame(
+            3,
+            json!([
+                { "content": "Add route", "priority": "high", "status": "completed" },
+                { "content": "Add test", "priority": "medium", "status": "in_progress" },
+            ]),
+        ),
+    );
+    push_live(
+        &state,
+        "th_a",
+        usage_frame(
+            4,
+            json!({ "context_used": 30_000, "context_size": 200_000,
+                    "cost": { "amount": 0.03, "currency": "USD" } }),
+        ),
+    );
+    assert_eq!(
+        wait_for_label(cx, window, PLAN_SUMMARY_ID, |label| label == "1 of 2 done"),
+        "1 of 2 done"
+    );
+    assert_eq!(
+        labels_shown(cx, window, PLAN_ROW_ID),
+        [
+            "Add route: Completed, High priority",
+            "Add test: In progress, Medium priority"
+        ]
+    );
+    assert_eq!(
+        wait_for_label(cx, window, TOTAL_TOKENS_ID, |label| label
+            == "Total: 30k tokens"),
+        "Total: 30k tokens"
+    );
+    assert_eq!(
+        labels_shown(cx, window, TURN_TOKENS_ID),
+        ["This turn: 30k tokens"]
+    );
+    assert_eq!(labels_shown(cx, window, TOTAL_COST_ID), ["Total: 0.03 USD"]);
+}
+
+#[gpui_kit::test]
+fn a_thread_without_a_plan_or_usage_shows_the_widgets_empty_states(cx: &mut TestAppContext) {
+    let (_state, hub) = hub_with_a_diff();
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    open_thread_a(cx, window, &view);
+    wait_for_shown(cx, window, VIEW_DIFF_ID);
+
+    assert_eq!(
+        labels_shown(cx, window, PLAN_EMPTY_ID),
+        ["No plan yet"],
+        "the plan widget says there is no plan"
+    );
+    assert!(labels_shown(cx, window, PLAN_ROW_ID).is_empty());
+    assert_eq!(labels_shown(cx, window, USAGE_ID), ["Usage"]);
+    for id in [
+        TURN_TOKENS_ID,
+        TOTAL_TOKENS_ID,
+        TURN_COST_ID,
+        TOTAL_COST_ID,
+        CONTEXT_ID,
+    ] {
+        assert!(
+            labels_shown(cx, window, id).is_empty(),
+            "{id} shows nothing without usage"
+        );
+    }
 }
