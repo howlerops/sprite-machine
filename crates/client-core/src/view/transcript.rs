@@ -108,6 +108,8 @@ pub struct UserView {
     pub message_id: String,
     /// Text parts joined; file parts are shown by name.
     pub text: String,
+    /// The message's content parts, as sent (text and file parts, in order).
+    pub parts: Vec<ContentPart>,
     pub author: Actor,
 }
 
@@ -286,6 +288,7 @@ impl Transcript {
                     let view = UserView {
                         message_id: message.message_id.clone(),
                         text: join_parts(&message.parts),
+                        parts: message.parts.clone(),
                         author: message.author.clone(),
                     };
                     self.push(key, Item::User(view));

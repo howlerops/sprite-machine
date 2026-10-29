@@ -908,3 +908,31 @@ fn every_turn_event_example_applies_and_no_step_subagent_or_raw_is_dropped() {
         assert!(kept, "{file} is dropped by the transcript");
     }
 }
+
+#[test]
+fn a_user_view_keeps_its_content_parts_and_the_joined_text() {
+    use protocol::tunnel::ContentPart;
+    let Event::UserMessage(mut prompt) = example("UserMessage.json").event else {
+        panic!("fixture is a user message");
+    };
+    prompt.parts = vec![
+        ContentPart::Text { text: "see".into() },
+        ContentPart::File {
+            name: "a.png".into(),
+            mime_type: "image/png".into(),
+            url: "https://h/a.png".into(),
+            size: Some(3),
+            sha256: None,
+        },
+    ];
+    let mut view = ThreadView::new("th_1");
+    let mut envelope = example("UserMessage.json");
+    envelope.event = Event::UserMessage(prompt.clone());
+    view.apply(&envelope).expect("apply");
+    let items = view.tasks()[0].transcript().items();
+    let Some(Item::User(user)) = items.first() else {
+        panic!("user item");
+    };
+    assert_eq!(user.parts, prompt.parts);
+    assert_eq!(user.text, "see\n[file: a.png]");
+}
