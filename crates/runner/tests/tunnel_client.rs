@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use protocol::tunnel::{Capabilities, CloseCode, Command, Workspace};
+use protocol::tunnel::{Capabilities, CloseCode, Command, ContentPart, Workspace};
 use protocol::turn_event::Envelope;
 use runner::tunnel::{
     Backoff, CredentialSource, Exit, Jitter, Timing, TunnelClient, TunnelCommands, TunnelConfig,
@@ -683,6 +683,61 @@ async fn a_nack_counts_as_an_ack_and_fails_the_task_locally() {
     // The stream keeps going.
     conn.ack(3).await;
     rig.wait_acked(3).await;
+}
+
+/// tunnel.md §3.6b: a `prompt_submit` the hub nacks is handed to the host with the task_id it
+/// was sent with. Two prompts go up; the hub nacks only the second, so the refusal must name
+/// `tk_loc3`, not the first line's task.
+#[tokio::test]
+async fn a_nacked_prompt_submit_reaches_the_host_with_its_task_id() {
+    let mut rig = Rig::new().await;
+    let mut conn = rig.connect(20_000).await;
+    let mut refusals = rig.sink.prompt_refusals().expect("the refusals");
+    let text = |text: &str| {
+        vec![ContentPart::Text {
+            text: text.to_owned(),
+        }]
+    };
+    rig.sink
+        .prompt_submit("th_1", "tk_loc2", "msg_loc2", &text("first"))
+        .unwrap();
+    rig.sink
+        .prompt_submit("th_1", "tk_loc3", "msg_loc3", &text("and run the tests"))
+        .unwrap();
+    let first = conn.recv().await;
+    let second = conn.recv().await;
+    assert_eq!(first["t"], "prompt_submit", "{first}");
+    assert_eq!(second["t"], "prompt_submit", "{second}");
+    assert_eq!(second["task_id"], "tk_loc3");
+    let first_seq = first["seq"].as_u64().unwrap();
+    let nacked_seq = second["seq"].as_u64().unwrap();
+    // The hub processed the first line and acks it, then refuses the second. A nack is
+    // cumulative (it counts as an ack through its seq), so the order matters.
+    conn.ack(first_seq).await;
+    rig.wait_acked(first_seq).await;
+    conn.send(json!({
+        "t": "nack", "seq": nacked_seq, "code": "forbidden",
+        "message": "thread th_1 is not hosted by this machine",
+    }))
+    .await;
+
+    // The host side of the real client loop receives the refusal, with the frame's task_id.
+    let refusal = tokio::time::timeout(WAIT, refusals.recv())
+        .await
+        .expect("the host received no refusal")
+        .expect("the refusal channel closed");
+    assert_eq!(refusal.task_id, "tk_loc3");
+    assert!(
+        refusal
+            .message
+            .contains("thread th_1 is not hosted by this machine"),
+        "{refusal:?}"
+    );
+    // The nack counts as an ack for the refused frame, so the outbox is empty; the refusal
+    // was sent once.
+    rig.wait_acked(nacked_seq).await;
+    assert!(rig.store.outbox_state().unwrap().unacked.is_empty());
+    assert!(refusals.try_recv().is_err());
 }
 
 #[tokio::test]
