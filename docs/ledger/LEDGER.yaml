@@ -4085,7 +4085,8 @@ items:
     title: 'client inbox: read pending_interrupts[].kind; quick Allow/Deny uses the first approval, row detail shows the first pending title'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: inbox 28 passed, fail-check 2 tests fail on old logic; leader verify with M3-005c"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4097,6 +4098,21 @@ items:
       - 'crates/client-gpui/tests/inbox.rs'
     acceptance:
       - 'A row whose first pending entry is a form still offers quick Allow/Deny for its approval; a row with only form/auth shows no quick buttons and the form title (tests)'
+  - id: M2-010l
+    title: 'client inbox: form and auth rows say "answer in thread" (no approval-style detail)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M2-010k]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/locales/en/inbox.ftl'
+      - 'crates/client-gpui/tests/inbox.rs'
+    acceptance:
+      - 'A form/auth-only row shows a Fluent hint to answer in the thread (test)'
   - id: M3-005c
     title: "desktop composer: surface Rejected SetSession/RemovePending outbox entries; disable Send until the thread's first snapshot; prune started-removal conflicts for finished tasks"
     milestone: M3
