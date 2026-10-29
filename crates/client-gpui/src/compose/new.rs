@@ -21,6 +21,18 @@ pub const AGENTS: [&str; 6] = ["claude", "codex", "opencode", "pi", "gemini", "g
 /// Permission modes offered by the composer; `None` leaves the agent's default.
 pub const MODES: [&str; 4] = ["default", "acceptEdits", "plan", "bypassPermissions"];
 
+/// How loose a permission mode is (plan §4.10): `plan` < `default` < `acceptEdits` <
+/// `bypassPermissions`. `None` for a name that is not a mode.
+pub fn mode_looseness(mode: &str) -> Option<u8> {
+    match mode {
+        "plan" => Some(0),
+        "default" => Some(1),
+        "acceptEdits" => Some(2),
+        "bypassPermissions" => Some(3),
+        _ => None,
+    }
+}
+
 /// How the runner starts the session in the workspace directory (client-api.md §5.2).
 pub const SPAWNS: [&str; 2] = ["same_dir", "worktree"];
 
@@ -36,6 +48,9 @@ pub struct MachineOption {
     /// Harness names the machine advertises; empty means it did not say.
     pub harnesses: Vec<String>,
     pub spawn: Vec<String>,
+    /// The machine's local permission mode, the loosest a remote request can get; `None` when
+    /// the machine did not say (any mode is offered).
+    pub permission_mode: Option<String>,
 }
 
 /// Parse the `GET /v1/machines` answer. Entries without a `machine_id` are skipped.
@@ -71,6 +86,11 @@ pub fn parse_machines(body: &Value) -> Vec<MachineOption> {
                         online,
                         harnesses: strings(machine.pointer("/capabilities/harnesses")),
                         spawn: strings(machine.pointer("/capabilities/spawn")),
+                        permission_mode: machine
+                            .pointer("/capabilities/permission_mode")
+                            .and_then(Value::as_str)
+                            .filter(|mode| mode_looseness(mode).is_some())
+                            .map(str::to_owned),
                     })
                 })
                 .collect()
@@ -160,6 +180,7 @@ pub struct NewTaskModel {
     path: Option<PathBuf>,
     pending: Option<PreparedSend>,
     save_error: Option<String>,
+    capped_from: Option<String>,
 }
 
 impl NewTaskModel {
@@ -186,6 +207,7 @@ impl NewTaskModel {
             path,
             pending: None,
             save_error: None,
+            capped_from: None,
         }
     }
 
@@ -223,6 +245,27 @@ impl NewTaskModel {
             Some(machine) if !machine.spawn.is_empty() => machine.spawn.clone(),
             _ => SPAWNS.iter().map(|spawn| (*spawn).to_owned()).collect(),
         }
+    }
+
+    /// The chosen machine's local permission mode, if it advertises one.
+    pub fn local_mode(&self) -> Option<&str> {
+        self.selected_machine()?.permission_mode.as_deref()
+    }
+
+    /// Permission modes offered for the chosen machine: none looser than its local mode.
+    pub fn modes(&self) -> Vec<&'static str> {
+        let cap = self.local_mode().and_then(mode_looseness);
+        MODES
+            .iter()
+            .copied()
+            .filter(|mode| cap.is_none_or(|cap| mode_looseness(mode).is_some_and(|m| m <= cap)))
+            .collect()
+    }
+
+    /// The mode the user chose before the machine's cap lowered it, while that is the case: the
+    /// composer says so. Cleared when the user picks a mode again.
+    pub fn capped_from(&self) -> Option<&str> {
+        self.capped_from.as_deref()
     }
 
     /// Replace the machines list. A saved choice that is still listed is kept; otherwise the
@@ -268,8 +311,9 @@ impl NewTaskModel {
 
     /// `None` leaves the agent's default mode.
     pub fn set_mode(&mut self, mode: Option<&str>) {
-        if mode.is_none_or(|mode| MODES.contains(&mode)) {
+        if mode.is_none_or(|mode| self.modes().contains(&mode)) {
             self.draft.mode = mode.map(str::to_owned);
+            self.capped_from = None;
             self.changed();
         }
     }
@@ -304,6 +348,19 @@ impl NewTaskModel {
         let spawns = self.spawns();
         if !spawns.contains(&self.draft.spawn) {
             self.draft.spawn = spawns.first().cloned().unwrap_or_default();
+        }
+        // A chosen mode looser than the machine allows is lowered to the machine's own mode.
+        let modes = self.modes();
+        if let Some(mode) = self
+            .draft
+            .mode
+            .clone()
+            .filter(|mode| !modes.contains(&mode.as_str()))
+        {
+            self.draft.mode = self.local_mode().map(str::to_owned);
+            self.capped_from = Some(mode);
+        } else if self.draft.mode.is_some() {
+            self.capped_from = None;
         }
     }
 

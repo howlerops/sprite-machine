@@ -276,7 +276,10 @@ impl Router {
         thread_id: &str,
     ) -> Result<(), Reject> {
         let Command::Dispatch {
-            agent, workspace, ..
+            agent,
+            workspace,
+            permission_mode,
+            ..
         } = &incoming.command
         else {
             return Ok(());
@@ -315,7 +318,9 @@ impl Router {
                 }
             };
             let store = open_store(&self.ctx.state_dir, thread_id)?;
-            self.start_session(thread_id, &found, cwd.clone(), worktree, store)
+            // A remote request is never looser than the machine's own mode.
+            let mode = self.ctx.permission_mode.capped(permission_mode);
+            self.start_session(thread_id, &found, cwd.clone(), worktree, store, mode)
                 .await?;
             let last = LastSession {
                 thread_id: thread_id.to_owned(),
@@ -466,8 +471,15 @@ impl Router {
             }
             Some(worktree)
         };
-        self.start_session(thread_id, &found, cwd, worktree, store)
-            .await
+        self.start_session(
+            thread_id,
+            &found,
+            cwd,
+            worktree,
+            store,
+            self.ctx.permission_mode,
+        )
+        .await
     }
 
     /// `-c`: the last session of the current directory is started again and registered with the
@@ -527,8 +539,15 @@ impl Router {
                     },
                 )
                 .map_err(|e| e.to_string())?;
-            self.spawn_session(&last.thread_id, &found, cwd, None, store)
-                .map_err(|(_, m)| m)
+            self.spawn_session(
+                &last.thread_id,
+                &found,
+                cwd,
+                None,
+                store,
+                self.ctx.permission_mode,
+            )
+            .map_err(|(_, m)| m)
         })();
         if let Err(message) = started {
             tracing::warn!("could not continue the last session: {message}");
@@ -542,6 +561,7 @@ impl Router {
         cwd: PathBuf,
         worktree: Option<Worktree>,
         store: Arc<Store>,
+        mode: PermissionMode,
     ) -> Result<(), Reject> {
         // The record lets a prompt after the session ends add the worktree back.
         let started = match &worktree {
@@ -555,7 +575,7 @@ impl Router {
                 }),
             None => Ok(()),
         }
-        .and_then(|()| self.spawn_session(thread_id, found, cwd, worktree.clone(), store));
+        .and_then(|()| self.spawn_session(thread_id, found, cwd, worktree.clone(), store, mode));
         match started {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -574,12 +594,13 @@ impl Router {
         cwd: PathBuf,
         worktree: Option<Worktree>,
         store: Arc<Store>,
+        mode: PermissionMode,
     ) -> Result<(), Reject> {
         let mut config = Config::new(self.ctx.machine_id.clone(), found.harness, cwd.clone());
-        // The runner's mode is in force before the first prompt (the bridge fails the task if
+        // The effective mode is in force before the first prompt (the bridge fails the task if
         // the agent does not take it). `default` is what an agent starts in.
-        if self.ctx.permission_mode != PermissionMode::Default {
-            config.initial_mode = Some(self.ctx.permission_mode.as_str().to_owned());
+        if mode != PermissionMode::Default {
+            config.initial_mode = Some(mode.as_str().to_owned());
         }
         config.file_policy = self.ctx.file_policy.clone();
         // http / sse servers need the agent's `mcp_capabilities`, known after `initialize`.

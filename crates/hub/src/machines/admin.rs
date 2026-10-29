@@ -102,17 +102,29 @@ impl MachineRow {
     }
 }
 
-/// The §5.1 `capabilities` object: the three fields the client API names, or `null` before the
+/// The §5.1 `capabilities` object: the fields the client API names, or `null` before the
 /// runner's first `hello`.
 fn client_capabilities(stored: Option<&str>) -> Value {
     let Some(stored) = stored.and_then(|text| serde_json::from_str::<Value>(text).ok()) else {
         return Value::Null;
     };
-    json!({
+    let mut capabilities = json!({
         "harnesses": stored["harnesses"],
         "spawn": stored["spawn"],
         "max_sessions": stored["max_sessions"],
-    })
+    });
+    // The machine's local permission mode rides in `features` as `permission_mode:<mode>`
+    // (tunnel.md §3.1); clients get it as a field so the composer can cap its choices.
+    let mode = stored["features"].as_array().and_then(|features| {
+        features
+            .iter()
+            .filter_map(Value::as_str)
+            .find_map(|feature| feature.strip_prefix("permission_mode:"))
+    });
+    if let Some(mode) = mode {
+        capabilities["permission_mode"] = json!(mode);
+    }
+    capabilities
 }
 
 const COLUMNS: &str = "id, org_id, name, kind, created_at, revoked_at, last_seen_at, presence, \

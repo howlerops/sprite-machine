@@ -88,6 +88,9 @@ Sequenced frames (`event`, `thread_open`, `command_result`, `interrupt_answer`, 
 - `resume_token`: the token from the last `welcome`, or `null` on first connect / after the
   runner lost its state.
 - `last_down_seq`: the highest command `seq` the runner has **durably processed** (0 if none).
+- `capabilities.features` carries `permission_mode:<mode>` (`plan`, `default`, `acceptEdits` or
+  `bypassPermissions`): the machine's **local** permission mode (`sm rc --permission-mode`),
+  the loosest mode a remote request can get (see `dispatch`). Absent means the runner did not say.
 - The runner sends nothing else until it receives `welcome`. If no `welcome` arrives within
   10 s it closes and reconnects with backoff.
 
@@ -250,6 +253,14 @@ code:"invalid"}`.
   "author": { "kind": "user", "id": "usr_1", "device_id": "dev_phone" }
 }
 ```
+
+**Permission mode cap** (plan §4.10, "the local permission mode applies"). `permission_mode`
+is a request. Modes are ordered from strictest to loosest: `plan` < `default` < `acceptEdits` <
+`bypassPermissions`. The runner applies the requested mode only if it is the **same or stricter**
+than its local mode; otherwise (looser, or not a known mode) its local mode applies. The session
+runs in that effective mode from before the first prompt (ACP `session/set_mode`) and reports it
+as `StateDelta{session}` `current_mode_id`, like any mode change. The dispatch does not fail
+because it was capped. A runner reopening an idle-closed session uses its local mode.
 
 MCP servers for the thread's ACP session (`session/new`, `session/resume`, `session/load`) are
 **not** carried by `dispatch` (SPEC-004): until loadouts (plan §4.6, M5) they come from the
