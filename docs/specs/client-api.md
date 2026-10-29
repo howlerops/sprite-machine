@@ -122,7 +122,7 @@ ids (so an offline client can render its own message before the hub answers); th
 them when absent. Threads started on the runner itself (TUI, `/rc`) appear through tunnel
 `thread_open` instead; clients learn about them from `GET /v1/threads`.
 
-**`GET /v1/threads?machine_id=&status=&agent=&workspace=&q=&archived=&cursor=`** → 200 `{ "threads": [ { "thread_id", "title", "machine_id", "agent", "status": "idle|running|needs_you|done", "updated_at", "last_seq", "workspace", "archived", "pending_interrupts" } ], "next_cursor": null }`
+**`GET /v1/threads?machine_id=&status=&agent=&workspace=&q=&archived=&cursor=`** → 200 `{ "threads": [ { "thread_id", "title", "machine_id", "agent", "status": "idle|running|needs_you|done|failed|cancelled", "updated_at", "last_seq", "workspace", "archived", "pending_interrupts" } ], "next_cursor": null }`
 (the D1 task index; `q` is FTS search, M2-\*).
 
 - `workspace`: the thread's workspace path (the `workspace.path` it was created with), or `null`
@@ -141,10 +141,14 @@ them when absent. Threads started on the runner itself (TUI, `/rc`) appear throu
   written in the same upsert as `status`, so it is as fresh as `status` and costs no per-row
   lookup. Answer with `POST /v1/threads/{thread_id}/interrupts/{interrupt_id}` (§5.4).
 
-- `status`: `idle` (no task started, or the last run ended in an error or cancel), `running`,
+- `status`: `idle` (no task started), `running`,
   `needs_you` (an approval is open), `done` (the last task ended in `RunFinished{success}` and
-  no task is running or queued). `done` lasts until the next prompt, which makes the thread
-  `running` again.
+  no task is running or queued), `failed` (the last task ended in an error) and `cancelled`
+  (the last task was cancelled). `done` lasts until the next prompt, which makes the thread
+  `running` again. `failed` and `cancelled` are reported as themselves, never folded into
+  `done`, and `status=done` does not include them. The `status=` filter accepts all six
+  values; any other value is `400 invalid_request`. A client that does not know `failed` or
+  `cancelled` should treat it like `done` (nothing is waiting on the user and nothing runs).
 - `updated_at` and `last_seq` are the time and the event sequence of the **last index-changing
   event**, not of the last event: a new prompt, a run start or end, an approval opening or
   being answered, a title change, archive or delete. Streamed output and session-state changes
