@@ -6367,7 +6367,8 @@ items:
     title: 'hub: a task the runner started before /rc counts as busy, so the first shared prompt queues behind it instead of being refused by the bridge'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; clippy hub/runner/protocol/cli + wasm clean, tests 732/0, live machine_do PASS, e2e rc PASS on merged tree"
     assignee: "sonnet"
     attempt: 1
     lane: rust
