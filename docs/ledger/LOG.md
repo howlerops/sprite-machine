@@ -329,3 +329,4 @@
 - 2026-10-29 leader: merged M3-012a (+M3-005d): agents page + shell machines feed; client-gpui 273 passed. Leader fix for racy send_waits test (15/15).
 - 2026-10-29 leader: merged M2-010n; M2-010m + M2-010n verified (hub 339 passed, tasks/thread_do live, e2e rc). Assigned M2-010o (haiku).
 - 2026-10-29 leader: merged M2-010o; leader added web .status-failed/.status-cancelled and test:unit script. Assigned M3-013d (sonnet).
+- 2026-10-29 leader: merged M3-013d (inbox refresh 20 s + on activate; snapshot status to notifier, deduped). Filed M3-013e.

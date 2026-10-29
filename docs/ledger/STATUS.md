@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 178/346 (4 dropped) · in-flight M3-006,M2-010o,M3-013d · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 170/200
+done 178/347 (4 dropped) · in-flight M3-006,M2-010o,M3-013d · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 170/200
 
 ## Per phase
 
@@ -12,7 +12,7 @@ done 178/346 (4 dropped) · in-flight M3-006,M2-010o,M3-013d · blocked 13 (huma
 | P1 | 37 | 37 | 0 |
 | P2 | 71 | 66 | 0 |
 | P3 | 62 | 55 | 3 |
-| P4 | 84 | 4 | 0 |
+| P4 | 85 | 4 | 0 |
 | P5 | 31 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
 | P7 | 17 | 0 | 0 |

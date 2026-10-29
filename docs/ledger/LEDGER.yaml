@@ -4856,7 +4856,8 @@ items:
     title: "desktop inbox: refresh on a timer (and on tab focus) so notifications fire without user action; feed the open thread's snapshot status once the hub reports failed"
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: shell 79 x3, client-gpui all, clippy clean; mutation check. Leader verify with M3-006."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4872,6 +4873,21 @@ items:
       - 'crates/client-gpui/tests/inbox.rs'
     acceptance:
       - 'A status change on the fake hub produces a toast within the refresh interval with no user action (injected clock); no duplicate notification from list + snapshot for one run'
+  - id: M3-013e
+    title: 'desktop notifications while a filter or search is active (second unfiltered baseline fetch or hub push)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-013d]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'With a status filter on, a status change still notifies once (test)'
 
   - id: M3-014
     title: 'client: command palette + shortcuts'
