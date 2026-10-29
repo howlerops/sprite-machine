@@ -3975,10 +3975,20 @@ items:
     title: 'client: onboarding + empty states'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-002, M2B-005]
     paths:
-      - 'crates/client-gpui/src/onboarding/**'
+      - "crates/client-gpui/src/onboarding/**"
+      - "crates/client-gpui/src/lib.rs"
+      - "crates/client-gpui/src/shell/**"
+      - "crates/client-gpui/src/inbox/**"
+      - "crates/client-gpui/src/agents/**"
+      - "crates/client-gpui/src/compose/**"
+      - "crates/client-gpui/locales/en/*.ftl"
+      - "crates/client-gpui/tests/onboarding.rs"
     context:
       - 'docs/PLAN-v2-ade.md §3 (surface 0)'
       - 'apps/mobile/app/_layout.tsx (v1 no-token redirect)'
