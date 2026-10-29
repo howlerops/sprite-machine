@@ -46,6 +46,9 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
 
 // ---- the fake thread host ----------------------------------------------------------------
 
+/// A local prompt as the fake host records it: thread, task id, message id, text, actor id.
+type LocalPrompt = (String, String, String, String, String);
+
 #[derive(Default)]
 struct FakeHost {
     appended: RefCell<Vec<(HostKind, String, Value)>>,
@@ -62,7 +65,7 @@ struct FakeHost {
     /// Each interrupt answer passed to the thread host: thread, answer id, interrupt id, actor id.
     answers: RefCell<Vec<(String, String, String, String)>>,
     /// Each local prompt passed to the thread host: thread, task id, message id, text, actor id.
-    prompts: RefCell<Vec<(String, String, String, String, String)>>,
+    prompts: RefCell<Vec<LocalPrompt>>,
     /// The verdicts the Thread DO gives, oldest first; `accepted` when empty.
     verdicts: RefCell<VecDeque<AnswerVerdict>>,
 }
