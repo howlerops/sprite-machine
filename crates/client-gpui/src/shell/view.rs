@@ -2,10 +2,12 @@
 //! [`ShellModel`]; every decision lives there.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use client_core::Connectivity;
+use client_core::outbox::Clock;
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -17,7 +19,7 @@ use tokio::sync::watch;
 
 use super::browser::Browser;
 use super::i18n::{tr, tr_args};
-use super::link::{LinkConfig, SessionLink};
+use super::link::{LinkConfig, SessionLink, ThreadSnapshot};
 use super::login::{LoginDriver, LoginEvent, LoginMethod, LoginStage};
 use super::model::{FocusSlot, HubOutcome, Screen, ShellModel, theme_a11y};
 use super::nav::Section;
@@ -25,9 +27,15 @@ use super::pairing::QrMatrix;
 use super::prefs::{Appearance, Preferences, ThemeChoice};
 use super::session::SessionStore;
 
+use crate::approval::{CardAction, CardHandler};
+use crate::task::TranscriptPane;
+
 actions!(shell, [GoNewTask, NextSection, PreviousSection]);
 
 const CONTEXT: &str = "Shell";
+
+/// How often the open thread's approval cards are recomputed (time left).
+pub const APPROVAL_TICK: Duration = Duration::from_secs(1);
 
 /// Register the shell's key bindings. Call once, after `gpui_kit::init`.
 pub fn init(cx: &mut App) {
@@ -53,8 +61,11 @@ pub struct AppConfig {
     pub prefs_path: Option<PathBuf>,
     /// Divides the polling sleeps; 1 for a real launch, larger in tests against a local hub.
     pub poll_speedup: u32,
-    /// The thread whose subscription the session's connection follows.
+    /// The thread the session's connection follows from the start; empty for none. It follows
+    /// whatever thread the screens open from then on ([`AppShell::open_thread`]).
     pub link_thread: String,
+    /// Time for the outbox and the approval cards.
+    pub clock: Arc<dyn Clock>,
 }
 
 pub struct AppShell {
@@ -70,6 +81,13 @@ pub struct AppShell {
     /// The signed-in session's hub link; present exactly while a session is.
     link: Option<SessionLink>,
     link_thread: String,
+    clock: Arc<dyn Clock>,
+    presets_path: Option<PathBuf>,
+    /// The thread shown in the Inbox page, if one was opened.
+    open_thread: Option<String>,
+    pane: Entity<TranscriptPane>,
+    snapshot_task: Option<Task<()>>,
+    tick_task: Option<Task<()>>,
     link_retry: Duration,
     cache_path: Option<PathBuf>,
     /// What the last Save of the hub field did, shown under the field.
@@ -90,6 +108,11 @@ impl AppShell {
             .as_deref()
             .and_then(|p| p.parent())
             .map(|dir| dir.join("cache.sqlite"));
+        let presets_path = config
+            .prefs_path
+            .as_deref()
+            .and_then(|p| p.parent())
+            .map(|dir| dir.join("approval-presets.json"));
         let link_retry =
             Duration::from_millis((1000 / u64::from(config.poll_speedup.max(1))).max(5));
         let model = ShellModel::new(config.store, config.prefs, config.prefs_path, &config.hub);
@@ -104,6 +127,7 @@ impl AppShell {
         let hub_input_events = cx.subscribe_in(&hub_input, window, Self::on_hub_event);
         let compose = cx.new(|cx| crate::compose::ComposeView::new(draft_dir, window, cx));
         let inbox = cx.new(|cx| crate::inbox::InboxView::new(window, cx));
+        let pane = cx.new(|_| TranscriptPane::new());
         let mut shell = Self {
             model,
             driver,
@@ -116,6 +140,12 @@ impl AppShell {
             connectivity_task: None,
             link: None,
             link_thread: config.link_thread,
+            clock: config.clock,
+            presets_path,
+            open_thread: None,
+            pane,
+            snapshot_task: None,
+            tick_task: None,
             link_retry,
             cache_path,
             hub_feedback: None,
@@ -155,6 +185,9 @@ impl AppShell {
         let Some(session) = self.model.session() else {
             if self.link.take().is_some() {
                 self.connectivity_task = None;
+                self.snapshot_task = None;
+                self.tick_task = None;
+                self.open_thread = None;
                 self.set_connectivity(Connectivity::Connecting, cx);
             }
             return;
@@ -167,16 +200,144 @@ impl AppShell {
             token: session.grant.token.clone(),
             thread_id: self.link_thread.clone(),
             cache_path: self.cache_path.clone(),
+            presets_path: self.presets_path.clone(),
             retry: self.link_retry,
+            clock: self.clock.clone(),
         };
         match SessionLink::open(config) {
             Ok(link) => {
                 let feed = link.connectivity_feed();
+                let snapshots = link.snapshot_feed();
                 self.link = Some(link);
                 self.follow_connectivity(feed, cx);
+                self.follow_snapshots(snapshots, cx);
+                self.start_tick(cx);
             }
             Err(_) => self.set_connectivity(Connectivity::Offline, cx),
         }
+    }
+
+    /// The thread the Inbox page shows, if one was opened.
+    pub fn open_thread_id(&self) -> Option<&str> {
+        self.open_thread.as_deref()
+    }
+
+    /// The pane that shows the open thread and its approval cards.
+    pub fn thread_pane(&self) -> &Entity<TranscriptPane> {
+        &self.pane
+    }
+
+    /// Shows `thread_id` on the Inbox page and makes it the thread the session link follows
+    /// (the inbox calls this when a row is opened). `workspace` is the thread's workspace, for
+    /// `allow_always` presets. Does nothing while signed out.
+    pub fn open_thread(
+        &mut self,
+        thread_id: &str,
+        workspace: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(link) = &self.link else { return };
+        link.open_thread(thread_id, workspace.unwrap_or_default());
+        self.link_thread = thread_id.to_owned();
+        if self.open_thread.as_deref() != Some(thread_id) {
+            self.open_thread = Some(thread_id.to_owned());
+            self.pane = cx.new(|_| {
+                let mut pane = TranscriptPane::new();
+                pane.set_follow_tail(true);
+                pane
+            });
+            // The link may already hold this thread (opened again after going back).
+            let current = self
+                .link
+                .as_ref()
+                .and_then(|link| link.snapshot_feed().borrow().clone());
+            if let Some(snapshot) = current {
+                self.apply_snapshot(snapshot, cx);
+            }
+        }
+        self.model.nav.select(Section::Inbox);
+        cx.notify();
+    }
+
+    /// Back to the thread list. The link keeps following the thread it has.
+    pub fn close_thread(&mut self, cx: &mut Context<Self>) {
+        if self.open_thread.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Show every snapshot of the open thread in the pane: the transcript, and the approval
+    /// cards pinned above it with clicks routed to the link.
+    fn follow_snapshots(
+        &mut self,
+        mut feed: watch::Receiver<Option<ThreadSnapshot>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.snapshot_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let snapshot = feed.borrow_and_update().clone();
+                if let Some(snapshot) = snapshot
+                    && this
+                        .update(cx, |this, cx| this.apply_snapshot(snapshot, cx))
+                        .is_err()
+                {
+                    break;
+                }
+                if feed.changed().await.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn apply_snapshot(&mut self, snapshot: ThreadSnapshot, cx: &mut Context<Self>) {
+        if self.open_thread.as_deref() != Some(snapshot.thread_id.as_str()) {
+            return;
+        }
+        let shell = cx.weak_entity();
+        let handler: CardHandler = Rc::new(move |action, _, cx| {
+            let _ = shell.update(cx, |shell, _| shell.on_card_action(action));
+        });
+        self.pane.update(cx, |pane, cx| {
+            pane.set_thread(&snapshot.view, cx);
+            pane.set_approvals(snapshot.cards, Some(handler), cx);
+        });
+        cx.notify();
+    }
+
+    /// A click on a card: the answer goes through the link's outbox (and is flushed there).
+    fn on_card_action(&mut self, action: CardAction) {
+        let Some(link) = &self.link else { return };
+        match action {
+            CardAction::Answer {
+                interrupt_id,
+                option_id,
+            } => drop(link.answer(&interrupt_id, &option_id)),
+            CardAction::SetPreset {
+                interrupt_id,
+                checked,
+            } => link.set_remember_preset(&interrupt_id, checked),
+        }
+    }
+
+    /// Once per [`APPROVAL_TICK`], while a thread is open, ask the link to recompute the cards
+    /// so the time left repaints.
+    fn start_tick(&mut self, cx: &mut Context<Self>) {
+        self.tick_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(APPROVAL_TICK).await;
+                let alive = this
+                    .update(cx, |this, _| {
+                        if let (Some(link), Some(_)) = (&this.link, &this.open_thread) {
+                            link.refresh();
+                        }
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+            }
+        }));
     }
 
     /// Apply the chosen theme (or the system's) to every window.
@@ -444,6 +605,8 @@ impl AppShell {
             self.render_settings(slots, cx).into_any_element()
         } else if current == Section::NewTask {
             self.compose.clone().into_any_element()
+        } else if current == Section::Inbox && self.open_thread.is_some() {
+            self.render_thread(slots, cx).into_any_element()
         } else if current == Section::Inbox {
             self.inbox.clone().into_any_element()
         } else {
@@ -485,6 +648,20 @@ impl AppShell {
                             .child(content),
                     ),
             )
+    }
+
+    /// The open thread: a way back to the list, then the transcript with its approval cards.
+    fn render_thread(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .id("thread")
+            .size_full()
+            .gap_2()
+            .child(
+                Self::button(slots, "thread-back", Section::Inbox.title())
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.close_thread(cx))),
+            )
+            .child(div().flex_1().min_h_0().child(self.pane.clone()))
     }
 
     fn render_settings(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {

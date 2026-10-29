@@ -148,6 +148,11 @@ impl ApprovalController {
         &self.workspace
     }
 
+    /// Gives back the presets, to hand to the controller of the next thread.
+    pub fn into_presets(self) -> LocalPresets {
+        self.presets
+    }
+
     /// Ticks or unticks "save as this workspace's preset" on one card.
     pub fn set_remember_preset(&mut self, interrupt_id: &str, remember: bool) {
         if remember {
