@@ -3324,8 +3324,10 @@ fn send_waits_for_the_threads_first_snapshot_and_keeps_the_text(cx: &mut TestApp
         "",
         Arc::new(ManualClock::new(RAISED_MS)),
     );
+    // Hold the socket down so no snapshot can reach the composer until the text is typed (the
+    // link runs on its own thread, so "right after open" alone raced the first snapshot).
+    state.socket_up.store(false, Ordering::SeqCst);
     open_thread_a(cx, window, &view);
-    // Nothing has run since the thread was opened: no snapshot has reached the composer.
     cx.update_window(window, |_, window, cx| {
         let composer = view.read(cx).thread_composer().clone();
         assert!(!composer.read(cx).is_ready());
@@ -3337,6 +3339,7 @@ fn send_waits_for_the_threads_first_snapshot_and_keeps_the_text(cx: &mut TestApp
     .expect("window");
     assert!(writes_to(&state, "POST", "/prompts").is_empty());
     // Once the snapshot is in, the text is still there and Send delivers it.
+    state.socket_up.store(true, Ordering::SeqCst);
     wait_for_shown(cx, window, "thread-mode-plan");
     cx.update_window(window, |_, window, cx| {
         let composer = view.read(cx).thread_composer().clone();
