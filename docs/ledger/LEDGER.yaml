@@ -4782,7 +4782,8 @@ items:
     title: 'hub: GET /v1/threads reports failed (and cancelled) instead of folding them into done; status= filter accepts them; client-api.md §5.2 updated'
     milestone: M2
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: hub tests + tasks/thread_do live PASS. Leader scoped it without threads/core.rs, so the producer is M2-010n."
     attempt: 1
     assignee: "sonnet"
     lane: rust
@@ -4795,6 +4796,41 @@ items:
       - 'docs/specs/client-api.md'
     acceptance:
       - 'A failed run lists as failed and filters by status=failed; live test; desktop inbox already parses failed'
+  - id: M2-010n
+    title: 'hub: the Thread DO index row records failed and cancelled (last terminal outcome, cleared by the next user message); dev fixtures accept them'
+    milestone: M2
+    phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-010m]
+    paths:
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/tasks/**'
+      - 'crates/hub/src/dev_fixtures/**'
+      - 'crates/hub/tests/tasks.rs'
+    acceptance:
+      - 'A RunError lists as failed and a cancel as cancelled (live test); the next prompt moves the row back to running'
+  - id: M2-010o
+    title: 'clients show failed and cancelled: desktop Status parses cancelled; web sessions.js labels failed/cancelled'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M2-010n]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/tests/inbox.rs'
+      - 'crates/client-gpui/locales/en/inbox.ftl'
+      - 'web/src/sessions.js'
+      - 'web/tests/**'
+    acceptance:
+      - 'Desktop and web show Failed / Cancelled labels (unit tests; web test)'
   - id: M3-013d
     title: "desktop inbox: refresh on a timer (and on tab focus) so notifications fire without user action; feed the open thread's snapshot status once the hub reports failed"
     milestone: M3
@@ -4803,7 +4839,9 @@ items:
     lane: client
     size: S
     risk: low
-    deps: [M3-013a, M2-010m]
+    deps:
+      - "M3-013a"
+      - "M2-010n"
     paths:
       - 'crates/client-gpui/src/inbox/**'
       - 'crates/client-gpui/src/shell/**'
@@ -7109,7 +7147,8 @@ items:
     title: 'desktop task view: incremental row updates (no full rebuild per event), so the 200 events/s workload stays within the frame budget'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 268 passed 0 failed incl. transcript 21; clippy clean; fmt ok. Worker: per-frame median ~2.2 ms, p95 ~4 ms debug at 200 ev/s; <=3 items rebuilt per frame."
     attempt: 1
     assignee: "sonnet"
     lane: client

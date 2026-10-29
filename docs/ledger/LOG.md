@@ -325,3 +325,4 @@
 - 2026-10-29 leader: M3-005e verified (runner 253 passed, e2e app + rc PASS).
 - 2026-10-29 leader: merged M3-012 (agents list from machines; BYO disabled; launch form behind injected client). Filed M3-012a/b/c (managed API is M4-007).
 - 2026-10-29 leader: merged M3-013a; verified with M3-012 (client 320 passed, shell 3/3). Filed M2-010m (hub reports failed) and M3-013d (inbox refresh timer). Assigned M2-010m (sonnet).
+- 2026-10-29 leader: merged M3-008b (incremental rows; client-gpui 268 passed) and M2-010m (list/filter side). Leader scoping miss: M2-010m paths lacked threads/core.rs, so failed/cancelled are never written; filed + assigned M2-010n (sonnet). Filed M2-010o (client labels).
