@@ -4123,10 +4123,17 @@ items:
     title: 'client: diff viewer'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-008]
     paths:
-      - 'crates/client-gpui/src/diff/**'
+      - "crates/client-gpui/src/diff/**"
+      - "crates/client-gpui/src/lib.rs"
+      - "crates/client-gpui/locales/en/diff.ftl"
+      - "crates/client-gpui/tests/diff.rs"
+      - "crates/client-gpui/Cargo.toml"
     context:
       - 'docs/PLAN-v2-ade.md §3 (Task view: diffs)'
       - 'spikes/gpui/src/diff*'
@@ -4246,7 +4253,9 @@ items:
     title: 'desktop inbox: clicking a thread row opens it (calls AppShell::open_thread)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
