@@ -4799,8 +4799,8 @@ items:
     title: 'hub: GET /v1/threads reports failed (and cancelled) instead of folding them into done; status= filter accepts them; client-api.md §5.2 updated'
     milestone: M2
     phase: P3
-    status: "review"
-    evidence: "merged; worker: hub tests + tasks/thread_do live PASS. Leader scoped it without threads/core.rs, so the producer is M2-010n."
+    status: "done"
+    evidence: "merged; with M2-010n verified on v2: hub 339 passed, live tasks (failed/cancelled filters + producer) PASS"
     attempt: 1
     assignee: "sonnet"
     lane: rust
@@ -4817,7 +4817,8 @@ items:
     title: 'hub: the Thread DO index row records failed and cancelled (last terminal outcome, cleared by the next user message); dev fixtures accept them'
     milestone: M2
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: clippy hub clean; cargo test -p hub 339 passed 0 failed; hub-test tasks + thread_do PASS; e2e rc PASS 32.6s"
     attempt: 1
     assignee: "sonnet"
     lane: rust
@@ -4835,7 +4836,9 @@ items:
     title: 'clients show failed and cancelled: desktop Status parses cancelled; web sessions.js labels failed/cancelled'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
