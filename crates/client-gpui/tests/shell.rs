@@ -86,6 +86,8 @@ struct HubState {
     session_status: AtomicUsize,
     /// The `machines` array `GET /v1/machines` answers with.
     machines: Mutex<Vec<Value>>,
+    /// How many times `GET /v1/machines` was asked.
+    machine_gets: AtomicUsize,
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +320,7 @@ async fn record_cancel(
 }
 
 async fn list_machines(State(state): State<Arc<HubState>>) -> Json<Value> {
+    state.machine_gets.fetch_add(1, Ordering::SeqCst);
     Json(json!({ "machines": state.machines.lock().expect("lock").clone() }))
 }
 
@@ -2987,6 +2990,160 @@ fn without_machine_features_every_mode_is_offered(cx: &mut TestAppContext) {
     let (_state, hub) = hub_with_a_session(true);
     let (window, _view) = open_composer_shell(cx, &hub);
     wait_for_shown(cx, window, "thread-mode-bypassPermissions");
+}
+
+fn laptop(presence: &str) -> Value {
+    json!({
+        "machine_id": "mch_laptop", "name": "Laptop",
+        "presence": { "state": presence },
+        "capabilities": {
+            "harnesses": ["claude", "opencode"],
+            "features": ["permission_mode:acceptEdits"],
+        },
+    })
+}
+
+/// Opens a signed-in shell on `hub` (no thread open) with the Agents page selected.
+fn open_agents_shell(
+    cx: &mut TestAppContext,
+    hub: &str,
+) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        hub,
+        stored_session_on(hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    cx.update_window(window, |_, window, cx| window.click("nav-agents", cx))
+        .expect("window");
+    (window, view)
+}
+
+/// Advances the test clock in small steps (the shell polls its fetch on a 50 ms timer) until the
+/// label of `id` satisfies `ok`.
+fn pump_for_label(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    id: &'static str,
+    ok: impl Fn(&str) -> bool,
+) -> String {
+    let mut last = None;
+    for _ in 0..400 {
+        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.run_until_parked();
+        last = label_of(cx, window, id);
+        if let Some(label) = &last
+            && ok(label)
+        {
+            return label.clone();
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("{id} never matched; last label {last:?}");
+}
+
+#[gpui_kit::test]
+fn the_agents_page_lists_the_harnesses_the_hub_reports(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.machines.lock().expect("lock").push(laptop("online"));
+    let (window, _view) = open_agents_shell(cx, &hub);
+    let first = pump_for_label(cx, window, "agents-row-0", |l| l.contains("Laptop"));
+    assert!(first.contains("Online"), "{first}");
+    let second = pump_for_label(cx, window, "agents-row-1", |l| l.contains("Laptop"));
+    let both = format!("{first} {second}");
+    assert!(
+        both.contains("claude") && both.contains("opencode"),
+        "{both}"
+    );
+}
+
+#[gpui_kit::test]
+fn a_timer_refresh_updates_presence_on_the_agents_page(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.machines.lock().expect("lock").push(laptop("online"));
+    let (window, _view) = open_agents_shell(cx, &hub);
+    pump_for_label(cx, window, "agents-row-0", |l| l.contains("Online"));
+    let gets = state.machine_gets.load(Ordering::SeqCst);
+    state.machines.lock().expect("lock")[0] = laptop("offline");
+    // The refresh timer fires after its period on the test clock.
+    cx.executor()
+        .advance_clock(client_gpui::shell::machines::REFRESH_EVERY);
+    let label = pump_for_label(cx, window, "agents-row-0", |l| l.contains("Offline"));
+    assert!(!label.contains("Online"), "{label}");
+    assert!(state.machine_gets.load(Ordering::SeqCst) > gets);
+}
+
+#[gpui_kit::test]
+fn opening_the_agents_page_refreshes_presence(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.machines.lock().expect("lock").push(laptop("online"));
+    let (window, _view) = open_agents_shell(cx, &hub);
+    pump_for_label(cx, window, "agents-row-0", |l| l.contains("Online"));
+    cx.update_window(window, |_, window, cx| window.click("nav-inbox", cx))
+        .expect("window");
+    state.machines.lock().expect("lock")[0] = laptop("offline");
+    cx.update_window(window, |_, window, cx| window.click("nav-agents", cx))
+        .expect("window");
+    pump_for_label(cx, window, "agents-row-0", |l| l.contains("Offline"));
+}
+
+#[gpui_kit::test]
+fn the_shell_owns_one_machines_feed_for_the_agents_page_the_composer_and_the_runner_cap(
+    cx: &mut TestAppContext,
+) {
+    let (state, hub) = hub_with_a_session(true);
+    state.machines.lock().expect("lock").push(laptop("online"));
+    let (window, view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-default");
+    let mut gone = false;
+    for _ in 0..400 {
+        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.run_until_parked();
+        gone = cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find("thread-mode-bypassPermissions").is_none()
+            })
+            .expect("window");
+        if gone {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(gone, "the cap never applied");
+    // The new-task composer never fetched on its own: its list came from the shell's feed, and
+    // the hub was asked once for all of it.
+    assert_eq!(state.machine_gets.load(Ordering::SeqCst), 1);
+    let (shell_count, composer_count, agent_rows) = cx.update(|cx| {
+        let shell = view.read(cx);
+        (
+            shell.machines().len(),
+            shell.compose().read(cx).model().machines().len(),
+            shell.agents().read(cx).rows().len(),
+        )
+    });
+    assert_eq!((shell_count, composer_count, agent_rows), (1, 1, 2));
+}
+
+#[gpui_kit::test]
+fn byo_and_launch_stay_disabled_with_their_reasons(cx: &mut TestAppContext) {
+    let (_state, hub) = hub_with_a_session(false);
+    let (window, view) = open_agents_shell(cx, &hub);
+    wait_for_shown(cx, window, "agents-byo-reason");
+    wait_for_shown(cx, window, "agents-launch-reason");
+    let byo = label_of(cx, window, "agents-byo-reason").expect("byo reason");
+    let launch = label_of(cx, window, "agents-launch-reason").expect("launch reason");
+    assert!(!byo.is_empty() && !launch.is_empty());
+    assert_ne!(byo, launch);
+    cx.update(|cx| {
+        let agents = view.read(cx).agents().read(cx);
+        assert!(!agents.byo_enabled());
+        assert!(!agents.launch_enabled());
+    });
 }
 
 fn task_event_frame(seq: u64, task: &str, event: Value) -> String {

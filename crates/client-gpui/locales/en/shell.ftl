@@ -167,3 +167,5 @@ transcript-raw-acp = Agent event: { $detail }
 transcript-raw-peer = A2A event: { $detail }
 transcript-raw-flow = Flow event: { $detail }
 transcript-raw-unknown = unknown event
+
+content-machines-error = Could not load machines: { $detail }

@@ -231,6 +231,34 @@ impl ComposeView {
         cx.notify();
     }
 
+    /// Point the composer at a hub for sending only: the machines list comes from the owner
+    /// ([`ComposeView::apply_machines`]), so nothing is fetched here.
+    pub fn set_send_target(&mut self, target: Option<Target>, cx: &mut Context<Self>) {
+        if self.target != target {
+            self.target = target;
+            cx.notify();
+        }
+    }
+
+    /// The owner is fetching the machines list.
+    pub fn machines_loading(&mut self, cx: &mut Context<Self>) {
+        self.machines_state = MachinesState::Loading;
+        cx.notify();
+    }
+
+    /// The owner's machines list arrived.
+    pub fn apply_machines(&mut self, machines: Vec<MachineOption>, cx: &mut Context<Self>) {
+        self.model.set_machines(machines);
+        self.machines_state = MachinesState::Idle;
+        cx.notify();
+    }
+
+    /// The owner's machines fetch failed.
+    pub fn machines_failed(&mut self, detail: String, cx: &mut Context<Self>) {
+        self.machines_state = MachinesState::Failed(detail);
+        cx.notify();
+    }
+
     fn load_machines(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self.target.clone() else {
             return;

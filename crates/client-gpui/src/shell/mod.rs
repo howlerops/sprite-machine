@@ -12,6 +12,7 @@ pub mod browser;
 pub mod i18n;
 pub mod link;
 pub mod login;
+pub mod machines;
 pub mod model;
 pub mod nav;
 pub mod pairing;

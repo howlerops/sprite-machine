@@ -247,6 +247,19 @@ impl ManagedAgentClient for FakeManagedClient {
     }
 }
 
+/// The client the shell passes until the managed-agent route exists (M4-007): every launch fails
+/// with a clear "not available yet" error.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnavailableManagedClient;
+
+impl ManagedAgentClient for UnavailableManagedClient {
+    fn launch(&self, _: &ManagedLaunchRequest) -> Result<LaunchedAgent, LaunchError> {
+        Err(LaunchError(
+            "Launching managed agents is not available yet.".to_owned(),
+        ))
+    }
+}
+
 /// Launch configuration. `model_key_configured` is an injected flag until settings (model keys)
 /// can answer it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
