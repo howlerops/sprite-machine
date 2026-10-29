@@ -13,6 +13,10 @@
 //!   bridge's output and the answers typed here) also go up to it, after a `thread_open`; what
 //!   happened before `/rc` goes first, in order. `/rc` again stops sending; the next `/rc` sends
 //!   what was missed.
+//! - **The hub orders prompts.** While the session is shared, a line typed here goes up as a
+//!   `prompt_submit` (tunnel.md §3.6b) and is not given to the bridge; the Thread DO queues it
+//!   like a phone's prompt and the `prompt` command that comes back is what the bridge runs. A
+//!   session that is not shared sends its lines straight to the bridge.
 //! - **First answer wins.** While the session is shared the hub decides (tunnel.md §3.6a): an
 //!   answer typed here goes up as an `interrupt_answer` and is applied only after the hub accepts
 //!   it, through the `approval` command the hub sends back like it does for a phone's answer.
@@ -56,6 +60,17 @@ pub trait Upstream: Send + Sync {
 
     /// Sends envelopes (producer side, `seq` 0) in order.
     fn send<'a>(&'a self, envelopes: Vec<Envelope>) -> UpstreamFuture<'a>;
+
+    /// Sends a prompt typed here up (`prompt_submit`, tunnel.md §3.6b). Nothing is applied
+    /// here: the hub queues it with the phones' prompts and sends it back as a `prompt` command
+    /// in queue order. `Ok` means it is queued for sending, not that it ran.
+    fn prompt(
+        &self,
+        thread_id: &str,
+        task_id: &str,
+        message_id: &str,
+        parts: &[ContentPart],
+    ) -> Result<(), String>;
 
     /// Sends an interrupt answer typed here and waits for the hub's verdict (tunnel.md §3.6a).
     /// `Err` is "no verdict"; the answer then is not applied here.
@@ -471,6 +486,20 @@ impl Backend for Session {
         message_id: String,
         text: String,
     ) -> Result<(), String> {
+        // Shared: the hub orders every prompt of the thread. The line goes up and comes back as
+        // a `prompt` command; the bridge never sees it from here.
+        let (upstream, thread_id) = {
+            let inner = self.handle.inner.lock().await;
+            (inner.upstream.clone(), inner.thread_id.clone())
+        };
+        if let Some(upstream) = upstream {
+            return upstream.prompt(
+                &thread_id,
+                &task_id,
+                &message_id,
+                &[ContentPart::Text { text }],
+            );
+        }
         self.send_command(Some(task_id.clone()), |thread_id| Command::Prompt {
             thread_id: thread_id.to_owned(),
             task_id,

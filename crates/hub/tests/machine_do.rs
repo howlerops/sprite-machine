@@ -1586,3 +1586,148 @@ fn a_runner_answer_that_loses_to_the_phone_is_refused_and_the_agent_runs_the_pho
     assert_eq!(resolved[0]["event"]["resolved_by"]["id"], "usr_dev");
     assert_eq!(resolved[0]["event"]["outcome"]["option_id"], "allow");
 }
+
+// ---- a prompt typed on the runner (M2B-019d, tunnel.md §3.6b) -------------------------------
+
+fn prompt_up(runner: &mut Runner, task: &str, text: &str) {
+    runner.next_event += 1;
+    let event_id = format!("evt_prompt_{task}_{}", runner.next_event);
+    runner.up_frame(json!({
+        "t": "prompt_submit",
+        "event_id": event_id,
+        "thread_id": runner.thread.clone(),
+        "task_id": task,
+        "message_id": format!("msg_{task}"),
+        "parts": [{"type": "text", "text": text}],
+    }));
+}
+
+/// A task as the runner reports it: `RunStarted` then `RunFinished`.
+fn run_task(runner: &mut Runner, thread: &str, task: &str) {
+    for event in [started(), finished()] {
+        runner.event(envelope(thread, Some(task), Some("run_x"), event));
+    }
+    runner.read_acks();
+    assert!(runner.nacks.is_empty(), "nacks: {:?}", runner.nacks);
+}
+
+/// A line typed on the runner while a phone's task runs goes up, is queued by the Thread DO
+/// between the phone's prompts, and comes back down as a `prompt` command in queue order, with
+/// the machine's local user as the author. The runner never decides the order.
+#[test]
+fn a_runner_typed_prompt_is_queued_by_the_hub_with_the_phones_and_comes_back_in_queue_order() {
+    let machine = unique("mch", "localprompt");
+    let thread = unique("th", "localprompt");
+    let credential = dev_credential(&machine);
+    let mut runner = Runner::first(&machine, &credential);
+    runner.thread = thread.clone();
+    runner.open_thread(&thread);
+    runner.read_acks();
+
+    // The phone starts a task; the runner gets its prompt.
+    let started_reply = prompt(&thread, "tk_ph1", "idk_localprompt_1");
+    assert_eq!(started_reply.status, 202, "{}", started_reply.body);
+    runner.read_commands(1);
+    runner.ack_down();
+
+    // The line typed on the runner goes up while that task runs; then the phone queues another.
+    prompt_up(&mut runner, "tk_loc", "typed on the runner");
+    runner.read_acks();
+    assert!(runner.nacks.is_empty(), "nacks: {:?}", runner.nacks);
+    let queued = prompt(&thread, "tk_ph2", "idk_localprompt_2");
+    assert_eq!(queued.status, 202, "{}", queued.body);
+    assert_eq!(queued.json()["status"], "pending");
+    assert_eq!(queued.json()["position"], 2, "behind the runner's line");
+    assert_eq!(
+        runner.commands.len(),
+        1,
+        "nothing else is sent while a task runs"
+    );
+
+    // The first task ends: the hub sends the runner's own line, authored by the local user.
+    run_task(&mut runner, &thread, "tk_ph1");
+    runner.read_commands(2);
+    runner.ack_down();
+    let local = &runner.commands[1]["command"];
+    assert_eq!(local["kind"], "prompt");
+    assert_eq!(local["task_id"], "tk_loc");
+    assert_eq!(local["message_id"], "msg_tk_loc");
+    assert_eq!(local["parts"][0]["text"], "typed on the runner");
+    let local_user = format!("local:{machine}");
+    assert_eq!(local["author"]["id"], local_user.as_str());
+    assert_eq!(
+        runner.commands.len(),
+        2,
+        "the phone's second prompt waits its turn"
+    );
+
+    // It ends: now the phone's second prompt.
+    run_task(&mut runner, &thread, "tk_loc");
+    runner.read_commands(3);
+    assert_eq!(runner.commands[2]["command"]["task_id"], "tk_ph2");
+
+    // The hub's log has each prompt once, in the hub's order.
+    let messages: Vec<(String, String)> = thread_events(&thread)
+        .iter()
+        .filter(|e| type_of(e) == "UserMessage")
+        .map(|e| {
+            (
+                e["task_id"].as_str().unwrap_or_default().to_owned(),
+                e["event"]["author"]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            ("tk_ph1".to_owned(), "usr_dev".to_owned()),
+            ("tk_loc".to_owned(), local_user),
+            ("tk_ph2".to_owned(), "usr_dev".to_owned()),
+        ]
+    );
+}
+
+/// A prompt for a thread the machine does not host is nacked, and a retransmit of an accepted
+/// one on a fresh stream (same `event_id`) queues one task.
+#[test]
+fn a_runner_prompt_for_a_foreign_thread_is_nacked_and_a_retransmit_queues_one_task() {
+    let machine = unique("mch", "localnack");
+    let thread = unique("th", "localnack");
+    let credential = dev_credential(&machine);
+    let mut runner = Runner::first(&machine, &credential);
+    runner.thread = unique("th", "foreign");
+    prompt_up(&mut runner, "tk_x", "nobody hosts me");
+    runner.read_acks();
+    assert_eq!(runner.nacks.len(), 1, "{:?}", runner.nacks);
+    assert_eq!(runner.nacks[0]["code"], "forbidden");
+
+    runner.thread = thread.clone();
+    runner.open_thread(&thread);
+    prompt_up(&mut runner, "tk_once", "only once");
+    // The hub processes both frames (and sends the prompt down), but the runner never reads
+    // the acks.
+    wait_state(&machine, "three frames processed", |s| s["up_last"] == 3);
+    let saved = runner.crash(None);
+    wait_state(&machine, "the loss to be noticed", |s| {
+        s["connected"] == false
+    });
+
+    // Restarted from an old backup: no token, the outbox still holds both frames.
+    let restarted = Persisted {
+        token: None,
+        last_down: 0,
+        ..saved
+    };
+    let mut runner = Runner::connect(&machine, &credential, restarted);
+    assert!(!runner.resumed(), "welcome: {}", runner.welcome);
+    runner.read_acks();
+    let tasks: Vec<String> = thread_events(&thread)
+        .iter()
+        .filter(|e| type_of(e) == "UserMessage")
+        .map(|e| e["task_id"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(tasks, ["tk_once"]);
+}

@@ -1285,12 +1285,6 @@ async fn ui_loop(
                     return;
                 }
             }
-            () = tokio::time::sleep(app.settle_window()), if app.settling() => {
-                let actions = app.settled();
-                if !execute(actions, app, session).await {
-                    return;
-                }
-            }
             feed = session.next() => {
                 let Some(feed) = feed else { return };
                 match feed {
@@ -1339,6 +1333,19 @@ impl Upstream for TunnelUpstream {
                 .await
                 .map_err(|error| error.to_string())
         })
+    }
+
+    fn prompt(
+        &self,
+        thread_id: &str,
+        task_id: &str,
+        message_id: &str,
+        parts: &[ContentPart],
+    ) -> Result<(), String> {
+        self.0
+            .prompt_submit(thread_id, task_id, message_id, parts)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     fn answer<'a>(

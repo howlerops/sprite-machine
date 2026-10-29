@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
-use protocol::tunnel::{AnswerStatus, Command, CommandErrorCode, Outcome, Workspace};
+use protocol::tunnel::{AnswerStatus, Command, CommandErrorCode, ContentPart, Outcome, Workspace};
 use protocol::turn_event::Envelope;
 use sidecar::bridge::{
     Bridge, CommandFailure, CommandSource, Config, EventSink, IdGenerator, McpProvider, UlidIds,
@@ -335,6 +335,19 @@ impl Upstream for TunnelUpstream {
                 .await
                 .map_err(|error| error.to_string())
         })
+    }
+
+    fn prompt(
+        &self,
+        thread_id: &str,
+        task_id: &str,
+        message_id: &str,
+        parts: &[ContentPart],
+    ) -> Result<(), String> {
+        self.0
+            .prompt_submit(thread_id, task_id, message_id, parts)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     fn answer<'a>(

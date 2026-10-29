@@ -817,12 +817,11 @@ fn a_line_typed_while_a_task_runs_is_queued_behind_it() {
     assert_eq!(text, "third");
 }
 
-/// In a shared session a task ends with a local line queued and a phone prompt the hub had
-/// queued: the local line is held for the settle window, the hub's prompt runs first, and the
-/// local line goes after it. (Without the hold the local line was sent at once and the bridge
-/// refused whichever of the two came second.)
+/// In a shared session every line goes up at once, whether or not a task runs: the hub queues it
+/// with the phones' prompts and is the only source of order, so the TUI holds nothing back (no
+/// settle window) and keeps no queue of its own.
 #[test]
-fn a_shared_session_lets_the_hubs_queued_prompt_go_before_the_local_line() {
+fn a_shared_session_sends_every_line_up_at_once_and_holds_nothing() {
     let mut app = new_app(true);
     app.start();
     app.registered(Ok(URL.to_owned()));
@@ -833,29 +832,24 @@ fn a_shared_session_lets_the_hubs_queued_prompt_go_before_the_local_line() {
     };
     let first = task_id.clone();
     feed(&mut app, hub.prompt(&first, "first", &terminal_actor()));
-    assert!(send_line(&mut app, "local next").is_empty());
 
-    // The task ends: the local line waits for the hub.
-    let actions = app.incoming(hub.finish(&first));
-    assert!(actions.is_empty(), "held for the hub: {actions:?}");
-    assert!(app.settling());
-    assert!(screen(&app).contains("pending: local next"));
-
-    // The hub's queued prompt arrives inside the window and runs; the line still waits.
-    for message in hub.prompt("tk_phone1", "phone next", &phone_actor()) {
-        assert!(app.incoming(message).is_empty());
-    }
-    assert!(!app.settling());
-    assert!(app.settled().is_empty(), "a task runs, nothing is sent");
-
-    // It ends: the hub has nothing else, so the window passes and the local line runs.
-    assert!(app.incoming(hub.finish("tk_phone1")).is_empty());
-    assert!(app.settling());
-    let actions = app.settled();
+    // A task runs: the next line still goes up now, in typed order, and nothing is pending here.
+    let actions = send_line(&mut app, "local next");
     let [Action::Prompt { text, .. }] = actions.as_slice() else {
-        panic!("the local line is sent after the hub's prompt, got {actions:?}");
+        panic!("sent at once while a task runs, got {actions:?}");
     };
     assert_eq!(text, "local next");
+    let actions = send_line(&mut app, "local after");
+    let [Action::Prompt { text, .. }] = actions.as_slice() else {
+        panic!("sent at once, got {actions:?}");
+    };
+    assert_eq!(text, "local after");
+    assert_eq!(app.queued().count(), 0);
+    assert!(!screen(&app).contains("pending:"), "{}", screen(&app));
+
+    // The task ends: nothing is sent, nothing is held; the hub's `prompt` commands decide.
+    let actions = app.incoming(hub.finish(&first));
+    assert!(actions.is_empty(), "{actions:?}");
 }
 
 /// A prompt the bridge refuses (a task was running) is queued again, with a notice, and is sent
@@ -1466,6 +1460,8 @@ mod session {
     struct Recording {
         opened: Mutex<Vec<(String, String)>>,
         sent: Mutex<Vec<Envelope>>,
+        /// The prompts typed here that went up (task id, message id, text), in order.
+        prompts: Mutex<Vec<(String, String, String)>>,
         /// The answers typed here that went up (interrupt id, outcome).
         answers: Mutex<Vec<(String, Outcome)>>,
         /// What the hub says to the next answer: `Ok(verdict)`, or `Err` for no verdict.
@@ -1493,6 +1489,28 @@ mod session {
         fn send<'a>(&'a self, envelopes: Vec<Envelope>) -> UpstreamFuture<'a> {
             self.sent.lock().expect("lock").extend(envelopes);
             Box::pin(async { Ok(()) })
+        }
+
+        fn prompt(
+            &self,
+            _thread_id: &str,
+            task_id: &str,
+            message_id: &str,
+            parts: &[ContentPart],
+        ) -> Result<(), String> {
+            let text = parts
+                .iter()
+                .map(|part| match part {
+                    ContentPart::Text { text } => text.as_str(),
+                    ContentPart::File { .. } => "",
+                })
+                .collect::<String>();
+            self.prompts.lock().expect("lock").push((
+                task_id.to_owned(),
+                message_id.to_owned(),
+                text,
+            ));
+            Ok(())
         }
 
         fn answer<'a>(
@@ -1537,6 +1555,11 @@ mod session {
     }
 
     impl Recording {
+        /// The `n`th prompt typed here that went up: task id, message id, text.
+        fn submitted(&self, n: usize) -> (String, String, String) {
+            self.prompts.lock().expect("lock")[n].clone()
+        }
+
         fn kinds(&self) -> Vec<String> {
             self.sent
                 .lock()
@@ -1653,6 +1676,22 @@ mod session {
             assert!(execute(actions, &mut self.app, &mut self.session).await);
         }
 
+        /// Types a line in a shared session and plays the hub: the line went up, the hub (idle)
+        /// starts it and sends it back as a `prompt` command with this `seq`.
+        async fn say_shared(&mut self, text: &str, seq: u64) {
+            let before = self.hub.prompts.lock().expect("lock").len();
+            self.say(text).await;
+            assert_eq!(
+                self.hub.prompts.lock().expect("lock").len(),
+                before + 1,
+                "the line went up to the hub"
+            );
+            let (task, message, text) = self.hub.submitted(before);
+            self.handle
+                .hub_command(hub_prompt_as(seq, (&task, &message, &text), local_actor()))
+                .await;
+        }
+
         async fn press(&mut self, key: Key) {
             let actions = self.app.key(key);
             assert!(execute(actions, &mut self.app, &mut self.session).await);
@@ -1666,16 +1705,6 @@ mod session {
         /// Shows what the session reports until `done` holds.
         async fn until(&mut self, what: &str, done: impl Fn(&App) -> bool) {
             while !done(&self.app) {
-                if self.app.settling() {
-                    let window = self.app.settle_window();
-                    let Ok(feed) = timeout(window, self.session.next()).await else {
-                        let actions = self.app.settled();
-                        assert!(execute(actions, &mut self.app, &mut self.session).await);
-                        continue;
-                    };
-                    self.apply(feed.expect("the session ended")).await;
-                    continue;
-                }
                 let feed = timeout(STEP, self.session.next())
                     .await
                     .unwrap_or_else(|_| {
@@ -1709,17 +1738,23 @@ mod session {
     }
 
     fn hub_prompt(seq: u64, task: &str, text: &str) -> IncomingCommand {
+        hub_prompt_as(seq, (task, &format!("msg_{task}"), text), phone_actor())
+    }
+
+    /// The `prompt` command the hub sends for a prompt (task id, message id, text) by `author`.
+    fn hub_prompt_as(seq: u64, prompt: (&str, &str, &str), author: Actor) -> IncomingCommand {
+        let (task, message, text) = prompt;
         IncomingCommand {
             seq,
-            idempotency_key: format!("idk_phone_{seq}"),
+            idempotency_key: format!("idk_hub_{seq}"),
             command: Command::Prompt {
                 thread_id: THREAD.to_owned(),
                 task_id: task.to_owned(),
-                message_id: format!("msg_{task}"),
+                message_id: message.to_owned(),
                 parts: vec![ContentPart::Text {
                     text: text.to_owned(),
                 }],
-                author: phone_actor(),
+                author,
             },
             origin: Origin::Hub,
         }
@@ -1891,11 +1926,14 @@ mod session {
         assert!(!shown.contains("pending:"), "{shown}");
     }
 
-    /// A task ends with a local line queued here and a phone prompt queued at the hub (which sends
-    /// it as soon as it sees the task end): the bridge refuses neither, and both run once, the
-    /// hub's prompt first and the local line after it.
+    /// Slow link, shared session. A phone prompt is queued at the hub and a line is typed here
+    /// while the first task runs. The line goes up to the hub and is not given to the bridge. The
+    /// hub's `prompt` for the phone's task reaches the runner 1.7 s after the task ended (longer
+    /// than the old 1.5 s settle window); nothing runs in the meantime. Then the hub sends the
+    /// phone's task and, after it, the local line, in its queue order. The bridge refuses neither
+    /// and each runs once.
     #[tokio::test]
-    async fn a_local_line_and_a_hub_queued_prompt_at_task_end_both_run_once() {
+    async fn a_slow_hub_prompt_and_a_local_line_both_run_once_in_hub_order() {
         let mut rig = rig(
             vec![
                 permission_turn("Running.", "All green."),
@@ -1905,15 +1943,38 @@ mod session {
             true,
         )
         .await;
-        rig.app.set_settle_window(Duration::from_millis(400));
         rig.start().await;
         rig.until("the session to be shared", |app| {
             matches!(app.remote(), runner::tui::Remote::On { .. })
         })
         .await;
+
+        // The first line goes up; the hub starts it at once (idle) and sends it down.
         rig.say("run the tests").await;
+        let (task, message, text) = rig.hub.submitted(0);
+        assert_eq!(text, "run the tests");
+        assert_eq!(
+            rig.handle.tracked_prompts().await,
+            0,
+            "not given to the bridge"
+        );
+        assert!(
+            rig.app.view().tasks().is_empty(),
+            "nothing is shown before the hub speaks"
+        );
+        rig.handle
+            .hub_command(hub_prompt_as(1, (&task, &message, &text), local_actor()))
+            .await;
         rig.until("the approval", open_approval).await;
+
+        // The phone's prompt reached the hub first; then this line is typed.
         rig.say("local line").await;
+        assert_eq!(rig.hub.submitted(1).2, "local line", "the line went up");
+        assert_eq!(
+            rig.handle.tracked_prompts().await,
+            0,
+            "not given to the bridge"
+        );
         let first = rig.app.view().tasks()[0].task_id.clone();
 
         *rig.hub.verdict.lock().expect("lock") = Some(Ok(HubVerdict::Accepted));
@@ -1921,9 +1982,23 @@ mod session {
         rig.press(Key::Enter).await;
         rig.until("the first task to end", |app| rig_done(app, &first))
             .await;
-        // The hub sends its queued prompt once it has seen the task end.
+
+        // The hub's prompt is slow: well past the old settle window nothing has run and the
+        // local line has not been sent to the bridge.
+        tokio::time::sleep(Duration::from_millis(1700)).await;
+        let shown = screen_sized(&rig.app, 60, 24);
+        assert!(!shown.contains("local line"), "{shown}");
+        assert_eq!(rig.app.view().tasks().len(), 1, "{shown}");
+
+        // The hub sends the phone's task, then, once it ended, the local line.
         rig.handle
-            .hub_command(hub_prompt(1, "tk_phone", "phone line"))
+            .hub_command(hub_prompt(8, "tk_phone", "phone line"))
+            .await;
+        rig.until("the phone task to finish", |app| rig_done(app, "tk_phone"))
+            .await;
+        let (task, message, text) = rig.hub.submitted(1);
+        rig.handle
+            .hub_command(hub_prompt_as(9, (&task, &message, &text), local_actor()))
             .await;
         rig.until("both to finish", |app| {
             app.view()
@@ -2079,7 +2154,7 @@ mod session {
             }
         );
 
-        rig.say("hi").await;
+        rig.say_shared("hi", 1).await;
         rig.until("the turn", |app| {
             app.view()
                 .tasks()
@@ -2087,11 +2162,14 @@ mod session {
                 .is_some_and(|t| t.status() == client_core::TaskStatus::Succeeded)
         })
         .await;
-        // The hub has the terminal's own prompt and the agent's turn, producer side (seq 0).
+        // The hub has the agent's turn, producer side (seq 0). The terminal's own prompt went up
+        // as a `prompt_submit` and the hub made its `UserMessage` itself.
         let kinds = rig.hub.kinds();
+        assert_eq!(rig.hub.submitted(0).2, "hi");
+        assert!(!kinds.iter().any(|kind| kind == "UserMessage"), "{kinds:?}");
         assert_eq!(
             kinds.first().map(String::as_str),
-            Some("UserMessage"),
+            Some("RunStarted"),
             "{kinds:?}"
         );
         assert_eq!(
@@ -2222,7 +2300,7 @@ mod session {
         rig.start().await;
         *rig.hub.verdict.lock().expect("lock") = Some(Ok(HubVerdict::Accepted));
         *rig.hub.approve_with.lock().expect("lock") = Some((rig.handle.clone(), 7));
-        rig.say("run the tests").await;
+        rig.say_shared("run the tests", 1).await;
         rig.until("the approval", open_approval).await;
         let interrupt = rig
             .app
@@ -2266,7 +2344,7 @@ mod session {
     async fn a_terminal_answer_that_loses_to_the_phone_at_the_hub_shows_already_answered() {
         let mut rig = rig(vec![permission_turn("Running.", "All green.")], true).await;
         rig.start().await;
-        rig.say("run the tests").await;
+        rig.say_shared("run the tests", 1).await;
         rig.until("the approval", open_approval).await;
         let interrupt = rig
             .app
@@ -2321,7 +2399,7 @@ mod session {
     async fn without_a_verdict_from_the_hub_a_shared_answer_is_not_applied() {
         let mut rig = rig(vec![permission_turn("Running.", "All green.")], true).await;
         rig.start().await;
-        rig.say("run the tests").await;
+        rig.say_shared("run the tests", 1).await;
         rig.until("the approval", open_approval).await;
         let interrupt = rig
             .app

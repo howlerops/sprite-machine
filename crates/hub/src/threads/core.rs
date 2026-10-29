@@ -1069,6 +1069,33 @@ impl<S: ThreadStore> ThreadCore<S> {
         ))
     }
 
+    /// A prompt that came up the tunnel from the machine's own terminal (tunnel.md §3.6b):
+    /// [`ThreadCore::submit_prompt`] with the machine's local user as the author, run under the
+    /// same idempotency as `POST /prompts` with the `task_id` as the key, so a retransmit queues
+    /// one task. The task starts or waits in the pending queue behind earlier prompts, and its
+    /// `prompt` command goes down in queue order.
+    pub fn prompt_from_machine(
+        &mut self,
+        actor: &Actor,
+        body: PromptBody,
+        now_ms: u64,
+    ) -> Result<Reply, ApiError> {
+        let key = body.task_id.clone().unwrap_or_default();
+        if !valid_idempotency_key(&key) {
+            return Err(ApiError::invalid_request(
+                "task_id must be 1-128 characters of [A-Za-z0-9_:.-], not starting with local:",
+            ));
+        }
+        let hash = request_hash(
+            "POST",
+            "local-prompts",
+            &serde_json::to_value((&body.message_id, &body.parts)).unwrap_or(Value::Null),
+        );
+        self.idempotent(actor, &key, &hash, now_ms, |core| {
+            core.submit_prompt(actor, &key, body, now_ms)
+        })
+    }
+
     /// `GET /pending`.
     pub fn list_pending(&self) -> Result<Reply, ApiError> {
         let pending: Vec<Value> = self

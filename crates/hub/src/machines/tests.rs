@@ -21,7 +21,9 @@ use serde_json::{Value, json};
 use super::admin::{self, MachineControl};
 use super::core::{Auth, Heartbeat, HelloInfo, MachineCore, Out, PresenceChange, PushBody};
 use super::credential;
-use super::driver::{self, AnswerVerdict, Core, HostError, MachineAnswer, ThreadHost, handle_text};
+use super::driver::{
+    self, AnswerVerdict, Core, HostError, MachineAnswer, MachinePrompt, ThreadHost, handle_text,
+};
 use super::store::{HostKind, MemoryStore};
 use crate::auth::{Principal, authenticate};
 use crate::db::{Db, DbError, MIGRATIONS, Param, Role, Row};
@@ -44,6 +46,9 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
 
 // ---- the fake thread host ----------------------------------------------------------------
 
+/// A local prompt as the fake host records it: thread, task id, message id, text, actor id.
+type LocalPrompt = (String, String, String, String, String);
+
 #[derive(Default)]
 struct FakeHost {
     appended: RefCell<Vec<(HostKind, String, Value)>>,
@@ -59,6 +64,8 @@ struct FakeHost {
     capabilities: RefCell<Vec<Value>>,
     /// Each interrupt answer passed to the thread host: thread, answer id, interrupt id, actor id.
     answers: RefCell<Vec<(String, String, String, String)>>,
+    /// Each local prompt passed to the thread host: thread, task id, message id, text, actor id.
+    prompts: RefCell<Vec<LocalPrompt>>,
     /// The verdicts the Thread DO gives, oldest first; `accepted` when empty.
     verdicts: RefCell<VecDeque<AnswerVerdict>>,
 }
@@ -138,6 +145,32 @@ impl ThreadHost for FakeHost {
             resolved_by: Some(answer.actor.clone()),
             message: "accepted".to_owned(),
         })))
+    }
+
+    fn submit_prompt(
+        &self,
+        thread_id: &str,
+        prompt: &MachinePrompt<'_>,
+    ) -> impl Future<Output = Result<(), HostError>> {
+        if let Some(error) = self.fail_next.borrow_mut().pop_front() {
+            return ready(Err(error));
+        }
+        let text = prompt
+            .parts
+            .iter()
+            .map(|part| match part {
+                ContentPart::Text { text } => text.as_str(),
+                ContentPart::File { .. } => "",
+            })
+            .collect::<String>();
+        self.prompts.borrow_mut().push((
+            thread_id.to_owned(),
+            prompt.task_id.to_owned(),
+            prompt.message_id.to_owned(),
+            text,
+            prompt.actor.id.clone(),
+        ));
+        ready(Ok(()))
     }
 
     fn thread_machine(
@@ -873,6 +906,85 @@ fn an_interrupt_answer_for_a_thread_the_machine_does_not_host_is_nacked_and_a_re
     again.up_frame(answer_frame("evt_b", THREAD, "ans_2"));
     world.pump_up(conn, &mut again, NOW + 1);
     assert_eq!(world.host.answers.borrow().len(), 1, "evt_b resolved once");
+}
+
+fn prompt_frame(event_id: &str, thread: &str, task_id: &str, text: &str) -> Value {
+    json!({
+        "t": "prompt_submit",
+        "event_id": event_id,
+        "thread_id": thread,
+        "task_id": task_id,
+        "message_id": format!("msg_{task_id}"),
+        "parts": [{ "type": "text", "text": text }],
+    })
+}
+
+#[test]
+fn a_runner_prompt_goes_to_the_thread_host_as_the_local_user_in_order_and_is_not_appended() {
+    let world = new_world();
+    let mut runner = Runner::new();
+    let conn = world.connect(&mut runner, NOW);
+    runner.up_frame(prompt_frame("evt_a", THREAD, "tk_1", "first"));
+    runner.up_frame(prompt_frame("evt_b", THREAD, "tk_2", "second"));
+    world.pump_up(conn, &mut runner, NOW);
+    let local = format!("local:{MACHINE}");
+    assert_eq!(
+        *world.host.prompts.borrow(),
+        vec![
+            (
+                THREAD.to_owned(),
+                "tk_1".to_owned(),
+                "msg_tk_1".to_owned(),
+                "first".to_owned(),
+                local.clone()
+            ),
+            (
+                THREAD.to_owned(),
+                "tk_2".to_owned(),
+                "msg_tk_2".to_owned(),
+                "second".to_owned(),
+                local
+            ),
+        ],
+        "the hub's Thread DO queues the prompts; the machine appends nothing itself"
+    );
+    assert!(world.host.types().is_empty());
+    assert!(runner.nacks.is_empty());
+}
+
+#[test]
+fn a_runner_prompt_for_a_foreign_thread_or_a_refused_one_is_nacked_and_a_retransmit_is_queued_once()
+{
+    let world = new_world();
+    let mut runner = Runner::new();
+    let conn = world.connect(&mut runner, NOW);
+    runner.up_frame(prompt_frame("evt_a", "th_other", "tk_1", "x"));
+    world.pump_up(conn, &mut runner, NOW);
+    assert_eq!(runner.nacks, vec![(1, NackCode::Forbidden)]);
+    assert!(world.host.prompts.borrow().is_empty());
+
+    // The Thread DO refuses it (for example an empty prompt): a nack, nothing queued.
+    world
+        .host
+        .fail_next
+        .borrow_mut()
+        .push_back(HostError::Rejected {
+            code: NackCode::InvalidEnvelope,
+            message: "parts must have at least one part".to_owned(),
+        });
+    runner.up_frame(prompt_frame("evt_b", THREAD, "tk_2", "x"));
+    world.pump_up(conn, &mut runner, NOW);
+    assert_eq!(runner.nacks[1], (2, NackCode::InvalidEnvelope));
+    assert!(world.host.prompts.borrow().is_empty());
+
+    // The same frame again on a fresh stream (same event_id): acked, queued once.
+    runner.up_frame(prompt_frame("evt_c", THREAD, "tk_3", "again"));
+    world.pump_up(conn, &mut runner, NOW);
+    let mut again = runner.restarted();
+    let conn = world.connect(&mut again, NOW + 1);
+    again.up_frame(prompt_frame("evt_c", THREAD, "tk_3", "again"));
+    world.pump_up(conn, &mut again, NOW + 1);
+    assert_eq!(world.host.prompts.borrow().len(), 1, "evt_c queued once");
 }
 
 #[test]
