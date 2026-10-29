@@ -1,6 +1,6 @@
 # Hub: Cloudflare resources
 
-Status: **not provisioned yet** (M2-014). The leader's attempt to create these from the cloud
+Status: **provisioned 2026-10-29** (M2-014) by the leader, after the user allowed the exact commands in `.claude/settings.json`. The leader's attempt to create these from the cloud
 session was refused by the session's permission check (creating resources in a shared
 Cloudflare account), so a human runs the commands below, or allows the leader to.
 
@@ -19,6 +19,18 @@ prefixed `sm-hub`; nothing existing is touched.
 Run from `crates/hub/` with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set. Then put
 the D1 `database_id` printed by `d1 create` into `wrangler.toml` under `[env.production]`
 (the leader does this once the id is known: `wrangler d1 list --json`).
+
+## Provisioned
+
+| Resource | Name | Id / note |
+| -------- | ---- | --------- |
+| D1 | `sm-hub` | `database_id = "6b65194f-4317-471b-a718-f89d8fdcfbeb"` (region ENAM) |
+| R2 | `sm-hub-blobs` | hub attachments (`BLOBS`) |
+| R2 | `sm-workspace-backups` | Workspace DO backups (`workers/workspace`, `BACKUPS`) |
+| Queue | `sm-hub-notify` | push notifications (`NOTIFY` producer + consumer) |
+
+The `[env.production]` section of `crates/hub/wrangler.toml` that binds these (bindings are not
+inherited by Wrangler environments) is part of the deploy item, M2-015.
 
 ## Secrets (after the first deploy, M2-014a)
 

@@ -3136,9 +3136,10 @@ items:
     title: 'Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler'
     milestone: M2
     phase: P2
-    status: "blocked"
+    status: "done"
+    evidence: "leader created D1 sm-hub (6b65194f-…), R2 sm-hub-blobs + sm-workspace-backups, queue sm-hub-notify after the user added allow rules (.claude/settings.json); recorded in docs/ops/hub.md"
     howto: "Chat consent is not enough: the auto-mode classifier refused wrangler d1 create even after the user said go (2026-10-28). Either run, from crates/hub with the Cloudflare token: wrangler d1 create sm-hub; wrangler r2 bucket create sm-hub-blobs; wrangler queues create sm-hub-notify; and (for M0-009) wrangler r2 bucket create sm-workspace-backups, then tell the leader; or add Bash allow rules for exactly those four commands to the Claude Code permission settings for this repo."
-    blocked_on: "human"
+    blocked_on: null
     owner: leader
     deps: [M0-018, M2-001, M2-016]
     paths:

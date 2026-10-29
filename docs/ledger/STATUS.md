@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 141/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 135/200
+done 142/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 135/200
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 141/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (huma
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 63 | 0 |
+| P2 | 69 | 64 | 0 |
 | P3 | 39 | 23 | 3 |
 | P4 | 61 | 2 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -65,7 +65,7 @@ done 141/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (huma
 | M2-010 | worker | rust | done | hub: titles, rename, archive/delete, D1 FTS5 search + deep links |
 | M2-011 | worker | rust | done | hub: notifications via Queues (Web Push, APNs, FCM) with prefs + actionable approvals |
 | CI-001 | human | rust | done | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
-| M2-014 | leader | rust | blocked | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
+| M2-014 | leader | rust | done | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
 | M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |

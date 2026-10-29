@@ -295,3 +295,4 @@
 2026-10-29T02:24Z M3-004c back (haiku): effective mode recorded per thread, reopen re-caps it; the -c path has the same gap and is in its paths → sent back to fix on the same attempt. Note: leader's exe prune during worker builds caused a 'can't find crate' rerun; prune only when no worker is building from now on
 2026-10-29T02:27Z M3-004c (with -c fix) merged, runner 249/0 → done
 2026-10-29T02:27Z client lane cap 1 → 2 (disk steady ~8 GB with line-tables-only). Assign M3-011 (sonnet, client), M2B-019e (haiku)
+2026-10-29T02:50Z user added .claude/settings.json allow rules → leader created D1 sm-hub, R2 sm-hub-blobs, R2 sm-workspace-backups, queue sm-hub-notify → M2-014 done (docs/ops/hub.md). M2-015 (deploy workflow) unblocked
