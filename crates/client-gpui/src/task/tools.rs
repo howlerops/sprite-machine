@@ -157,9 +157,9 @@ pub fn activity_rows(activity: &ActivityView, expanded: bool, out: &mut Vec<Row>
                         tr_args(
                             "transcript-diff-summary",
                             &[
-                                ("detail", &sanitize(&diff.path)),
-                                ("choice", &model.added.to_string()),
-                                ("code", &model.removed.to_string()),
+                                ("path", &sanitize(&diff.path)),
+                                ("added", &model.added.to_string()),
+                                ("removed", &model.removed.to_string()),
                             ],
                         ),
                     );

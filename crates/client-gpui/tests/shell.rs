@@ -21,6 +21,7 @@ use client_core::outbox::{
 use client_core::{
     Applied, Cache, Connection, Connectivity, Intent, Outbox, RetryPolicy, Subscription, ThreadSync,
 };
+use client_gpui::diff::view::{OPEN_ID as DIFF_OPEN_ID, PANE_ID as DIFF_PANE_ID};
 use client_gpui::shell::auth::{LoginFailure, SessionGrant, api_url};
 use client_gpui::shell::browser::{Browser, RecordingBrowser};
 use client_gpui::shell::i18n::{self, Catalog};
@@ -32,6 +33,7 @@ use client_gpui::shell::pkce::{self, Callback, GithubSignIn, LoopbackListener, P
 use client_gpui::shell::prefs::{Appearance, Preferences, ThemeChoice};
 use client_gpui::shell::session::{FileStore, MemoryStore, Session, SessionStore};
 use client_gpui::shell::{AppConfig, AppShell};
+use client_gpui::task::transcript::VIEW_DIFF_ID;
 use gpui_kit::Focusable as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::test::TestWindowExt as _;
@@ -424,6 +426,9 @@ fn catalog_formats_arguments_and_reports_missing_ids_visibly() {
                 ("org", "X"),
                 ("section", "X"),
                 ("choice", "X"),
+                ("path", "X"),
+                ("added", "X"),
+                ("removed", "X"),
                 ("uri", "X"),
                 ("minutes", "5"),
                 ("hub", "X"),
@@ -1971,6 +1976,24 @@ fn open_thread_a(
     .expect("window");
 }
 
+/// Pumps the window until `id` is laid out (the thread's snapshot arrives on the link's thread).
+fn wait_for_shown(cx: &mut TestAppContext, window: gpui_kit::AnyWindowHandle, id: &'static str) {
+    for _ in 0..400 {
+        cx.run_until_parked();
+        let shown = cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find(id).is_some()
+            })
+            .expect("window");
+        if shown {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("{id} never shown");
+}
+
 fn wait_until_true(what: &str, done: impl Fn() -> bool) {
     for _ in 0..400 {
         if done() {
@@ -2194,6 +2217,91 @@ fn an_open_thread_shows_its_pending_card_and_a_click_posts_the_options_own_id(
     );
     let key = answer.key.as_deref().expect("an Idempotency-Key");
     assert!(key.starts_with("idk_"), "{key}");
+}
+
+/// The hub replays one complete diff of `src/lib.rs` for `th_a`: twenty numbered lines with
+/// line 12 changed (the same fixture as the transcript tests).
+fn hub_with_a_diff() -> (Arc<HubState>, String) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    let old = (0..20)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let new = old.replace("line 12\n", "twelve\n");
+    state.frames.lock().expect("lock").insert(
+        "th_a".to_owned(),
+        vec![event_frame(
+            1,
+            "th_a",
+            json!({
+                "type": "Activity", "activity_id": "d", "activity_type": "diff",
+                "mode": "snapshot",
+                "content": { "path": "src/lib.rs", "old_text": old, "new_text": new },
+            }),
+        )],
+    );
+    (state, hub)
+}
+
+#[gpui_kit::test]
+fn a_diff_in_a_thread_with_a_workspace_asks_the_shell_to_open_its_file(cx: &mut TestAppContext) {
+    let (_state, hub) = hub_with_a_diff();
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    // open_thread_a opens th_a with the workspace /work/repo.
+    open_thread_a(cx, window, &view);
+    wait_for_shown(cx, window, VIEW_DIFF_ID);
+    cx.update_window(window, |_, window, cx| window.click(VIEW_DIFF_ID, cx))
+        .expect("window");
+    wait_for_shown(cx, window, DIFF_OPEN_ID);
+    assert!(cx.update(|cx| view.read(cx).last_open_file().is_none()));
+
+    cx.update_window(window, |_, window, cx| window.click(DIFF_OPEN_ID, cx))
+        .expect("window");
+    cx.update(|cx| {
+        assert_eq!(
+            view.read(cx).last_open_file(),
+            Some((std::path::Path::new("/work/repo/src/lib.rs"), 13))
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_diff_in_a_thread_without_a_workspace_offers_no_open_file(cx: &mut TestAppContext) {
+    let (_state, hub) = hub_with_a_diff();
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.open_thread("th_a", None, cx));
+    })
+    .expect("window");
+    wait_for_shown(cx, window, VIEW_DIFF_ID);
+    cx.update_window(window, |_, window, cx| window.click(VIEW_DIFF_ID, cx))
+        .expect("window");
+    wait_for_shown(cx, window, DIFF_PANE_ID);
+    cx.update_window(window, |_, window, _| {
+        assert!(window.find_all(DIFF_OPEN_ID).is_empty());
+    })
+    .expect("window");
+    assert!(cx.update(|cx| view.read(cx).last_open_file().is_none()));
 }
 
 /// The deadline of the card `hub_with_pending_approval` raises (2026-10-27T22:10:00Z).
