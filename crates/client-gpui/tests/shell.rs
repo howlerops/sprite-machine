@@ -1197,6 +1197,9 @@ fn open_shell_with(
     clock: Arc<dyn client_core::outbox::Clock>,
 ) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
     let link_thread = link_thread.to_owned();
+    // A shell with a session runs its session link (and machines and inbox fetches) on real
+    // threads; without this the test scheduler can flag their wake-ups as non-deterministic.
+    cx.executor().allow_parking();
     cx.update(|cx| {
         gpui_kit::init(cx);
         client_gpui::shell::init(cx);
@@ -1342,7 +1345,9 @@ fn pairing_shows_a_qr_and_the_code_then_signs_in_and_signs_out(cx: &mut TestAppC
     wait_until(cx, window, &view, |shell| {
         shell.model().screen() == Screen::Main
     });
-    assert!(state.polls.load(Ordering::SeqCst) >= 2);
+    // Sign-in came from polling. Whether a poll also ran before the approval is timing (the poll
+    // runs on a real thread), so only one poll is required.
+    assert!(state.polls.load(Ordering::SeqCst) >= 1);
     assert_eq!(
         store.load().expect("stored").grant.token,
         "sm_session_token"
@@ -3347,6 +3352,9 @@ fn send_waits_for_the_threads_first_snapshot_and_keeps_the_text(cx: &mut TestApp
     open_thread_a(cx, window, &view);
     cx.update_window(window, |_, window, cx| {
         let composer = view.read(cx).thread_composer().clone();
+        // Even offline the link may already have published an empty first snapshot; put the
+        // composer back in its before-the-first-snapshot state so the check does not race it.
+        composer.update(cx, |composer, cx| composer.clear_thread(cx));
         assert!(!composer.read(cx).is_ready());
         let input = composer.read(cx).prompt_input().clone();
         input.update(cx, |state, cx| state.set_value("early words", window, cx));
