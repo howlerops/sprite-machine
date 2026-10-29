@@ -4001,7 +4001,7 @@ items:
     milestone: M3
     phase: P3
     status: "done"
-    evidence: "merged b18c18e; 21 inbox tests; quick Allow/Deny needs M2-010h"
+    evidence: "merged b18c18e; leader verify on merged v2 (with M3-011): client-gpui inbox tests pass, clippy clean; quick Allow/Deny needs M2-010h"
     assignee: "sonnet"
     attempt: 1
     lane: client
@@ -4084,7 +4084,7 @@ items:
     milestone: M3
     phase: P3
     status: "done"
-    evidence: "merged a1d04ee; worker: 23 approval tests, client-gpui tests + clippy green; leader re-verify on merged tree pending in this batch"
+    evidence: "merged a1d04ee; leader verify on merged v2: clippy runner+client-gpui -D warnings clean; cargo test -p runner -p client-gpui 360 passed 0 failed (23 targets incl. approval, inbox, discovery, tui)"
     assignee: "sonnet"
     attempt: 1
     lane: client
@@ -5657,7 +5657,9 @@ items:
     title: 'hub: GET /v1/threads rows carry pending_interrupts, workspace and archived'
     milestone: M2
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: rust
     size: S
     risk: medium

@@ -300,3 +300,4 @@
 - 2026-10-29 leader: M2B-006a done: five harness ACP entry points answer initialize; gemini row changed to --acp; goose left to M2B-006b (human).
 - 2026-10-29 leader: merged M3-011 (approval cards, 23 tests); filed M3-011a/b/c/d from its discovered work.
 - 2026-10-29 leader: disk hit 0 during verify; freed stale wasm dirs and an old in-repo target (9 GB free). Re-running runner+client-gpui verify. Assigned M2B-019h (haiku).
+- 2026-10-29 leader: verify on merged v2 (M2B-019e, M3-007, M3-011, M2B-006a): clippy clean, runner+client-gpui 360 passed 0 failed. Assigned M2-010h (sonnet).
