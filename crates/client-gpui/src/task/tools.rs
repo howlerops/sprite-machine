@@ -12,6 +12,10 @@ use protocol::turn_event::{
     StepOutcome, ToolKind,
 };
 
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use crate::diff::{DiffInput, DiffModel};
 use crate::shell::i18n::{tr, tr_args};
 use crate::task::transcript::{
@@ -132,8 +136,57 @@ pub fn tool_rows(tool: &ToolView, expanded: bool, out: &mut Vec<Row>) {
     }
 }
 
+/// `+added -removed` counts of complete diffs, computed once per diff content: the key is the
+/// activity id and a hash of the diff's path and texts, so a rebuild of an unchanged diff (or of
+/// the rows of another item) never runs [`DiffModel::build`] again.
+#[derive(Debug, Default)]
+pub struct DiffStats {
+    counts: HashMap<String, (u64, usize, usize)>,
+    builds: usize,
+}
+
+impl DiffStats {
+    /// How many times a [`DiffModel`] was built to get counts.
+    pub fn builds(&self) -> usize {
+        self.builds
+    }
+
+    /// `(added, removed)` of `diff`, from the cache when its content is the one last counted.
+    pub fn counts(
+        &mut self,
+        activity_id: &str,
+        diff: &protocol::turn_event::DiffContent,
+    ) -> (usize, usize) {
+        let mut hasher = DefaultHasher::new();
+        diff.path.hash(&mut hasher);
+        diff.old_text.hash(&mut hasher);
+        diff.new_text.hash(&mut hasher);
+        let hash = hasher.finish();
+        if let Some(&(known, added, removed)) = self.counts.get(activity_id)
+            && known == hash
+        {
+            return (added, removed);
+        }
+        let model = DiffModel::build(&DiffInput::from(diff));
+        self.builds += 1;
+        self.counts
+            .insert(activity_id.to_owned(), (hash, model.added, model.removed));
+        (model.added, model.removed)
+    }
+}
+
 /// A diff, plan, terminal or policy activity.
 pub fn activity_rows(activity: &ActivityView, expanded: bool, out: &mut Vec<Row>) {
+    activity_rows_with(activity, expanded, &mut DiffStats::default(), out);
+}
+
+/// Like [`activity_rows`], taking the diff counts from `stats`.
+pub fn activity_rows_with(
+    activity: &ActivityView,
+    expanded: bool,
+    stats: &mut DiffStats,
+    out: &mut Vec<Row>,
+) {
     match activity.activity_type {
         ActivityType::Diff => match activity.diff() {
             Some(diff) => {
@@ -149,7 +202,7 @@ pub fn activity_rows(activity: &ActivityView, expanded: bool, out: &mut Vec<Row>
                     tr_args(id, &[("detail", &sanitize(&diff.path))]),
                 ));
                 if activity.complete {
-                    let model = DiffModel::build(&DiffInput::from(&diff));
+                    let (added, removed) = stats.counts(&activity.activity_id, &diff);
                     let mut summary = Row::new(
                         RowKind::DiffSummary,
                         Tone::Muted,
@@ -158,8 +211,8 @@ pub fn activity_rows(activity: &ActivityView, expanded: bool, out: &mut Vec<Row>
                             "transcript-diff-summary",
                             &[
                                 ("path", &sanitize(&diff.path)),
-                                ("added", &model.added.to_string()),
-                                ("removed", &model.removed.to_string()),
+                                ("added", &added.to_string()),
+                                ("removed", &removed.to_string()),
                             ],
                         ),
                     );

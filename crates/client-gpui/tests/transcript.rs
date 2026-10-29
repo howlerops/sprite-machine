@@ -18,9 +18,9 @@ use client_gpui::task::tools::{activity_rows, tool_rows};
 use client_gpui::task::transcript::{
     CLOSE_DIFF_ID, DIFF_PANEL_ID, MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, MORE_ID,
     PANE_ID, ROW_HEIGHT, ROW_ID, VIEW_DIFF_ID, WRAP_COLS, sanitize, thread_rows,
-    thread_rows_expanded, wrap_lines,
+    thread_rows_expanded, thread_rows_with_cards, wrap_lines,
 };
-use client_gpui::task::{Row, RowKind, TranscriptEvent, TranscriptPane};
+use client_gpui::task::{Row, RowCache, RowKind, TranscriptEvent, TranscriptPane};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
     AppContext, Bounds, Entity, Point, ScrollDelta, TestAppContext, WindowBounds, WindowOptions,
@@ -957,4 +957,241 @@ fn without_a_workspace_root_the_diff_offers_no_open_file(cx: &mut TestAppContext
     })
     .expect("window is open");
     assert!(log.borrow().is_empty());
+}
+
+// ---- incremental rows (M3-008b) ---------------------------------------------------------------
+
+fn push_event(thread: &mut ThreadView, seq: &mut u64, event: serde_json::Value) {
+    *seq += 1;
+    let envelope: Envelope = serde_json::from_value(json!({
+        "v": 1, "seq": *seq, "thread_id": "th_1", "task_id": "tk_1", "run_id": "run_1",
+        "ts": "2026-10-27T22:00:00.000Z", "event": event
+    }))
+    .expect("envelope");
+    thread.apply(&envelope).expect("apply");
+}
+
+fn text_delta(message: &str, delta: &str) -> serde_json::Value {
+    json!({"type": "TextMessageContent", "message_id": message, "delta": delta})
+}
+
+/// A thread of `count` one-line messages, and the last seq used.
+fn message_thread(count: usize) -> (ThreadView, u64) {
+    let mut thread = ThreadView::new("th_1");
+    let mut seq = 0;
+    for n in 0..count {
+        push_event(&mut thread, &mut seq, text_delta(&format!("m{n}"), "hello"));
+    }
+    (thread, seq)
+}
+
+fn full_rows(thread: &ThreadView, expanded: &BTreeSet<usize>) -> Vec<Row> {
+    thread_rows_with_cards(thread, expanded, &[])
+}
+
+#[test]
+fn one_appended_text_delta_rebuilds_one_items_rows() {
+    let (mut thread, mut seq) = message_thread(200);
+    let none = BTreeSet::new();
+    let mut cache = RowCache::new();
+    cache.sync(&thread, &none, &[]);
+    let first = cache.last_update();
+    // Everything is built the first time: 200 items.
+    assert_eq!(first.items_rebuilt, 200, "{first:?}");
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+
+    // One delta for one message: one item, one row.
+    push_event(&mut thread, &mut seq, text_delta("m77", " world"));
+    cache.sync(&thread, &none, &[]);
+    let update = cache.last_update();
+    assert_eq!(update.items_visited, 200);
+    assert_eq!(update.items_rebuilt, 1, "{update:?}");
+    assert_eq!(update.rows_rebuilt, 1, "{update:?}");
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+    assert!(cache.rows().iter().any(|row| row.text == "hello world"));
+
+    // A new message adds its item only.
+    push_event(&mut thread, &mut seq, text_delta("new", "fresh"));
+    cache.sync(&thread, &none, &[]);
+    let update = cache.last_update();
+    assert_eq!(
+        (update.items_rebuilt, update.rows_rebuilt),
+        (1, 1),
+        "{update:?}"
+    );
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+
+    // The same thread again: nothing is built.
+    cache.sync(&thread, &none, &[]);
+    let update = cache.last_update();
+    assert_eq!(
+        (update.items_rebuilt, update.rows_rebuilt),
+        (0, 0),
+        "{update:?}"
+    );
+}
+
+#[test]
+fn expanding_an_item_rebuilds_that_item_alone() {
+    let long = numbered_lines(100);
+    let mut thread = ThreadView::new("th_1");
+    let mut seq = 0;
+    for n in 0..20 {
+        push_event(&mut thread, &mut seq, text_delta(&format!("m{n}"), "hello"));
+        push_event(
+            &mut thread,
+            &mut seq,
+            json!({"type": "ToolCallResult", "tool_call_id": format!("t{n}"),
+                   "content": [{"type": "text", "text": long}]}),
+        );
+    }
+    let none = BTreeSet::new();
+    let mut cache = RowCache::new();
+    cache.sync(&thread, &none, &[]);
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+
+    // Item 11 is the tool call of the sixth pair.
+    let open = BTreeSet::from([11]);
+    cache.refresh(&open, &[]);
+    let update = cache.last_update();
+    assert_eq!(update.items_rebuilt, 1, "{update:?}");
+    assert_eq!(cache.rows(), full_rows(&thread, &open));
+    assert!(cache.rows().iter().any(|row| row.text == "Show less"));
+
+    // A later sync keeps it expanded and rebuilds nothing.
+    cache.sync(&thread, &open, &[]);
+    assert_eq!(cache.last_update().items_rebuilt, 0);
+    cache.refresh(&none, &[]);
+    assert_eq!(cache.last_update().items_rebuilt, 1);
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+}
+
+#[test]
+fn diff_summary_counts_are_computed_once_per_diff_content() {
+    let long = numbered_lines(100);
+    let mut thread = ThreadView::new("th_1");
+    let mut seq = 0;
+    push_event(
+        &mut thread,
+        &mut seq,
+        json!({"type": "Activity", "activity_id": "d", "activity_type": "diff", "mode": "snapshot",
+               "content": {"path": "a.rs", "old_text": "x", "new_text": long}}),
+    );
+    let none = BTreeSet::new();
+    let mut cache = RowCache::new();
+    cache.sync(&thread, &none, &[]);
+    assert_eq!(cache.last_update().diff_builds, 1);
+    assert!(cache.rows().iter().any(|row| row.text == "a.rs: +100 -1"));
+
+    // Other items streaming in, and the diff expanded and collapsed: no new model.
+    for n in 0..10 {
+        push_event(&mut thread, &mut seq, text_delta(&format!("m{n}"), "hi"));
+        cache.sync(&thread, &none, &[]);
+        assert_eq!(cache.last_update().diff_builds, 0);
+    }
+    let open = BTreeSet::from([0]);
+    cache.refresh(&open, &[]);
+    assert_eq!(cache.last_update().items_rebuilt, 1);
+    assert_eq!(cache.last_update().diff_builds, 0);
+    cache.refresh(&none, &[]);
+    assert_eq!(cache.last_update().diff_builds, 0);
+
+    // New diff content for the same activity is counted again.
+    push_event(
+        &mut thread,
+        &mut seq,
+        json!({"type": "Activity", "activity_id": "d", "activity_type": "diff", "mode": "snapshot",
+               "content": {"path": "a.rs", "old_text": "x", "new_text": "y\nz"}}),
+    );
+    cache.sync(&thread, &none, &[]);
+    assert_eq!(cache.last_update().diff_builds, 1);
+    assert!(cache.rows().iter().any(|row| row.text == "a.rs: +2 -1"));
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+}
+
+/// The 10k fixture as a stream: batch `f` holds the envelopes of frame `f` at 200 events/s and
+/// 60 frames/s (3 or 4 events).
+fn frame_batches() -> Vec<Vec<Envelope>> {
+    let log = agui_fixture::complete_log(agui_fixture::Scenario::Transcript10k, "th_1")
+        .expect("transcript-10k log");
+    let mut batches = Vec::new();
+    let mut taken = 0;
+    let mut frame = 1usize;
+    while taken < log.len() {
+        let upto = (frame * 200 / 60).min(log.len());
+        batches.push(log[taken..upto].to_vec());
+        taken = upto;
+        frame += 1;
+    }
+    batches
+}
+
+#[gpui_kit::test]
+fn streaming_the_fixture_at_200_events_a_second_updates_few_rows_per_frame(
+    cx: &mut TestAppContext,
+) {
+    let batches = frame_batches();
+    let events: usize = batches.iter().map(Vec::len).sum();
+    assert!(events >= 10_000 && batches.iter().all(|b| (1..=4).contains(&b.len())));
+    let (_window, pane) = open_pane(cx, options(900., 600.));
+    cx.update(|cx| pane.update(cx, |pane, _| pane.set_follow_tail(true)));
+
+    let mut thread = ThreadView::new("th_1");
+    let mut times = Vec::new();
+    let mut first = Duration::ZERO;
+    let (mut max_items, mut max_rows, mut diff_builds) = (0, 0, 0);
+    let none = BTreeSet::new();
+    for (frame, batch) in batches.iter().enumerate() {
+        for envelope in batch {
+            thread.apply(envelope).expect("fixture event applies");
+        }
+        let started = Instant::now();
+        cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+        let elapsed = started.elapsed();
+        let update = cx.update(|cx| pane.read(cx).last_update());
+        if frame == 0 {
+            first = elapsed;
+        } else {
+            times.push(elapsed);
+            max_items = max_items.max(update.items_rebuilt);
+            max_rows = max_rows.max(update.rows_rebuilt);
+            diff_builds += update.diff_builds;
+            // Every event touches at most one item; never the whole thread.
+            assert!(
+                update.items_rebuilt <= batch.len(),
+                "frame {frame}: {update:?} for {} events",
+                batch.len()
+            );
+        }
+        if frame % 400 == 0 || frame + 1 == batches.len() {
+            let rows = cx.update(|cx| pane.read(cx).rows().to_vec());
+            assert_eq!(rows, full_rows(&thread, &none), "frame {frame}");
+        }
+    }
+    // The diff models are built once per diff, not once per frame.
+    let diffs = thread_rows(&thread)
+        .iter()
+        .filter(|row| row.kind == RowKind::DiffSummary)
+        .count();
+    assert!(
+        diff_builds <= diffs,
+        "{diff_builds} builds for {diffs} diffs"
+    );
+
+    times.sort();
+    let p95 = times[(times.len() * 95).div_ceil(100) - 1];
+    let budget = if cfg!(debug_assertions) {
+        FRAME_BUDGET_DEBUG
+    } else {
+        FRAME_BUDGET_RELEASE
+    };
+    eprintln!(
+        "streaming {events} events in {} frames (first frame {first:?}): per-frame row update \
+         median {:?}, p95 {p95:?}, max {:?} (budget {budget:?}); at most {max_items} items / {max_rows} rows rebuilt per \
+         frame, {diff_builds} diff models for {diffs} diffs",
+        times.len(),
+        times[times.len() / 2],
+        times[times.len() - 1],
+    );
+    assert!(p95 <= budget, "p95 {p95:?} exceeds {budget:?}");
 }
