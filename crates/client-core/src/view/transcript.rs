@@ -198,6 +198,9 @@ pub struct InterruptView {
     pub interrupt: Interrupt,
     /// The first accepted answer, from the hub's `InterruptResolved`.
     pub resolution: Option<InterruptResolved>,
+    /// The `ts` of the envelope that carried `resolution` (RFC 3339, producer time, display
+    /// only). `None` while open, and after a 409 alone, which carries no envelope of its own.
+    pub resolved_at: Option<String>,
     /// Set when the hub answered `409 already_resolved`: who won (client-api.md §4).
     pub conflict: Option<Actor>,
     /// This device's own answer, while it is queued.
@@ -273,8 +276,9 @@ impl Transcript {
         })
     }
 
-    /// Applies one TurnEvent. Events that are not transcript items are ignored.
-    pub fn apply(&mut self, event: &Event) -> Result<(), ViewError> {
+    /// Applies one TurnEvent, with the `ts` of the envelope that carried it. Events that are not
+    /// transcript items are ignored.
+    pub fn apply(&mut self, event: &Event, ts: &str) -> Result<(), ViewError> {
         match event {
             Event::UserMessage(message) => {
                 let key = Key::User(message.message_id.clone());
@@ -368,6 +372,7 @@ impl Transcript {
                     let view = InterruptView {
                         interrupt: (**interrupt).clone(),
                         resolution: None,
+                        resolved_at: None,
                         conflict: None,
                         local: None,
                     };
@@ -378,9 +383,10 @@ impl Transcript {
                 let key = Key::Interrupt(resolved.interrupt_id.clone());
                 let found = self.index.get(&key).map(|&slot| &mut self.items[slot]);
                 if let Some(Item::Interrupt(view)) = found {
-                    // The first accepted answer is the one that counts.
+                    // The first accepted answer is the one that counts, with its own envelope ts.
                     if view.resolution.is_none() {
                         view.resolution = Some(resolved.clone());
+                        view.resolved_at = Some(ts.to_owned());
                     }
                     view.local = None;
                 }
