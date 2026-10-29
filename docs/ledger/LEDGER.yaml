@@ -4642,8 +4642,8 @@ items:
     title: 'client: agent registry + launch managed agent form'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: agents 7 + 8 model tests; client-gpui all; clippy clean. Leader verify with M3-013a."
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-012 + M3-013a): client-core+client-gpui 320 passed 0 failed; shell 69 passed 3/3; clippy clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4731,7 +4731,8 @@ items:
     title: 'Wire Notifier, ToastSink and deep links into AppShell (seed on first inbox fetch, observe on refresh and open-thread snapshots, focus tracking, Open -> open_thread, settings view mounted)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-012 + M3-013a): client-core+client-gpui 320 passed 0 failed; shell 69 passed 3/3; clippy clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4750,7 +4751,7 @@ items:
       - 'Window test with the fake hub: a thread moving to needs_you shows one toast; the open thread does not notify; clicking/Open opens it; a hub link opens the thread'
       - 'inbox Status carries failed (client-api.md §5.2 string) so failed runs notify'
   - id: M3-013b
-    title: 'desktop: register an OS URL handler for hub links (macOS Info.plist, Linux .desktop) and verify toast click on a real desktop'
+    title: "desktop: register an OS URL handler for hub links (macOS Info.plist, Linux .desktop) and pass opened URLs to AppShell::open_url; verify toast click on a real desktop"
     milestone: M3
     phase: P4
     status: "todo"
@@ -4777,6 +4778,39 @@ items:
       - 'crates/client-gpui/tests/notify.rs'
     acceptance:
       - 'Toggles load from and save to the hub (fake hub test)'
+  - id: M2-010m
+    title: 'hub: GET /v1/threads reports failed (and cancelled) instead of folding them into done; status= filter accepts them; client-api.md §5.2 updated'
+    milestone: M2
+    phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-010i]
+    paths:
+      - 'crates/hub/src/tasks/**'
+      - 'crates/hub/tests/tasks.rs'
+      - 'docs/specs/client-api.md'
+    acceptance:
+      - 'A failed run lists as failed and filters by status=failed; live test; desktop inbox already parses failed'
+  - id: M3-013d
+    title: "desktop inbox: refresh on a timer (and on tab focus) so notifications fire without user action; feed the open thread's snapshot status once the hub reports failed"
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-013a, M2-010m]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/shell.rs'
+      - 'crates/client-gpui/tests/inbox.rs'
+    acceptance:
+      - 'A status change on the fake hub produces a toast within the refresh interval with no user action (injected clock); no duplicate notification from list + snapshot for one run'
 
   - id: M3-014
     title: 'client: command palette + shortcuts'
