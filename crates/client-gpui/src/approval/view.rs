@@ -75,7 +75,12 @@ pub fn render_card(card: ApprovalCard, handler: Option<CardHandler>) -> impl Int
         .children(card.pending.iter().cloned().map(pending_block))
         .child(options_row(&card, handler.clone()))
         .when_some(card.preset.clone(), |el, offer| {
-            el.child(preset_row(&card.interrupt_id, offer, &card.state, handler))
+            el.child(preset_row(
+                &card.interrupt_id,
+                offer,
+                card.is_answerable(),
+                handler,
+            ))
         })
         .child(status_line(&card.state))
 }
@@ -233,11 +238,10 @@ fn options_row(card: &ApprovalCard, handler: Option<CardHandler>) -> impl IntoEl
 fn preset_row(
     interrupt_id: &str,
     offer: super::model::PresetOffer,
-    state: &CardState,
+    enabled: bool,
     handler: Option<CardHandler>,
 ) -> impl IntoElement + use<> {
     let interrupt_id = interrupt_id.to_owned();
-    let enabled = *state == CardState::Open;
     v_flex()
         .id("approval-preset-offer")
         .test_support()

@@ -15,7 +15,7 @@ use protocol::turn_event::{InterruptKind, PermissionOptionKind};
 use serde::{Deserialize, Serialize};
 
 use super::model::{ApprovalCard, CardContext, build_card, parse_rfc3339_ms};
-use super::tr;
+use super::{tr, tr_args};
 
 /// Why [`ApprovalController::answer`] refused.
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +32,22 @@ pub enum AnswerError {
     AlreadyAnswering,
     #[error("could not queue the answer: {0}")]
     Outbox(#[from] OutboxError),
+}
+
+/// The card's words for a refusal made on this device, or `None` for refusals the card does not
+/// show (the request is unknown, the option is not offered, or an answer is already on its way).
+fn refusal_text(error: &AnswerError) -> Option<String> {
+    match error {
+        AnswerError::Expired => Some(tr("approval-refused-expired")),
+        AnswerError::NotOpen => Some(tr("approval-refused-not-open")),
+        AnswerError::Outbox(error) => Some(tr_args(
+            "approval-refused-outbox",
+            &[("detail", &error.to_string())],
+        )),
+        AnswerError::UnknownInterrupt(_)
+        | AnswerError::UnknownOption(_)
+        | AnswerError::AlreadyAnswering => None,
+    }
 }
 
 /// A workspace preset the user chose to save from an `allow_always` option.
@@ -118,6 +134,9 @@ pub struct ApprovalController {
     /// interrupt id -> when this client first saw it resolved (ms): the fallback when the
     /// envelope carries no parseable `ts`.
     first_seen: BTreeMap<String, u64>,
+    /// interrupt id -> why this device's last click on the card was refused locally (already
+    /// worded). Cleared by the next answer that goes through, or by [`Self::clear_refusals`].
+    refused: BTreeMap<String, String>,
 }
 
 impl ApprovalController {
@@ -137,6 +156,7 @@ impl ApprovalController {
             answers: BTreeMap::new(),
             resolved_at: BTreeMap::new(),
             first_seen: BTreeMap::new(),
+            refused: BTreeMap::new(),
         }
     }
 
@@ -175,7 +195,37 @@ impl ApprovalController {
     /// Queues the answer: `option_id` is sent exactly as the agent offered it. When the option
     /// is `allow_always` and the card's preset box is ticked, the preset is also recorded.
     /// Returns the outbox local id.
+    ///
+    /// A refusal that the card can explain (expired, already answered, not queued) is kept for
+    /// the card to show; a success clears the card's earlier refusal.
     pub fn answer(
+        &mut self,
+        view: &mut ThreadView,
+        outbox: &mut Outbox,
+        cache: &Cache,
+        interrupt_id: &str,
+        option_id: &str,
+    ) -> Result<i64, AnswerError> {
+        match self.queue_answer(view, outbox, cache, interrupt_id, option_id) {
+            Ok(local_id) => {
+                self.refused.remove(interrupt_id);
+                Ok(local_id)
+            }
+            Err(error) => {
+                if let Some(message) = refusal_text(&error) {
+                    self.refused.insert(interrupt_id.to_owned(), message);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// Forgets every refusal shown on the cards, for when the thread's cards close.
+    pub fn clear_refusals(&mut self) {
+        self.refused.clear();
+    }
+
+    fn queue_answer(
         &mut self,
         view: &mut ThreadView,
         outbox: &mut Outbox,
@@ -337,6 +387,7 @@ impl ApprovalController {
                     resolved_at_ms,
                     remember_preset: self.remember.contains(interrupt.id()),
                     preset_saved: self.saved.contains(interrupt.id()),
+                    refused: self.refused.get(interrupt.id()).cloned(),
                 };
                 if let Some(card) = build_card(interrupt, transcript, context) {
                     out.push(card);
