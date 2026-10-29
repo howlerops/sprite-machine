@@ -2,12 +2,14 @@
 //! plan, terminal activity); M3-009 adds the plan view and the usage meters; later items add
 //! the diff, approval and composer parts.
 
+pub mod media;
 pub mod plan;
 pub mod row_cache;
 pub mod tools;
 pub mod transcript;
 pub mod usage;
 
+pub use media::{HttpFetcher, ImageFetcher, LoadState, MediaCache, MediaRef};
 pub use plan::{PlanModel, PlanRow, render_plan};
 pub use row_cache::{RowCache, UpdateStats};
 pub use transcript::{

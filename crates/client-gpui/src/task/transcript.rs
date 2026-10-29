@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use client_core::TaskStatus;
 use client_core::view::{Item, TaskView, ThreadView};
@@ -28,6 +29,7 @@ use protocol::turn_event::MachinePresence;
 use crate::approval::{self, ApprovalCard, CardHandler};
 use crate::diff::{DiffEvent, DiffInput, DiffView};
 use crate::shell::i18n::{tr, tr_args};
+use crate::task::media::{self, HttpFetcher, ImageFetcher, MediaCache, MediaRef};
 use crate::task::row_cache::{RowCache, UpdateStats};
 use crate::task::tools::{self, DiffStats};
 
@@ -79,6 +81,8 @@ pub enum RowKind {
     Error,
     /// "... N more lines" after a capped body.
     More,
+    /// An inline image (see [`Row::media`]); taller than a text row.
+    Image,
 }
 
 /// Colour role of a row (resolved against the theme at draw time; no hex in views).
@@ -103,6 +107,8 @@ pub struct Row {
     pub expand: Option<usize>,
     /// For a [`RowKind::DiffSummary`] row: the id of the diff activity its "View diff" opens.
     pub view_diff: Option<String>,
+    /// For a [`RowKind::Image`] row: the image drawn as a thumbnail.
+    pub media: Option<MediaRef>,
 }
 
 impl Row {
@@ -114,6 +120,16 @@ impl Row {
             text: text.into(),
             expand: None,
             view_diff: None,
+            media: None,
+        }
+    }
+
+    /// The height this row is laid out at.
+    pub fn height(&self) -> Pixels {
+        if self.media.is_some() {
+            media::THUMB_ROW_HEIGHT
+        } else {
+            ROW_HEIGHT
         }
     }
 
@@ -250,7 +266,10 @@ pub fn item_rows_with(
                 1,
             );
         }
-        Item::Tool(tool) => tools::tool_rows(tool, expanded, out),
+        Item::Tool(tool) => {
+            tools::tool_rows(tool, expanded, out);
+            media::push_image_rows(&tool.content, 3, out);
+        }
         Item::Activity(activity) => tools::activity_rows_with(activity, expanded, stats, out),
         Item::Interrupt(interrupt) => {
             match cards
@@ -444,6 +463,12 @@ pub struct TranscriptPane {
     approval_handler: Option<CardHandler>,
     workspace_root: Option<PathBuf>,
     open_diff: Option<OpenDiff>,
+    media: MediaCache,
+    media_polling: bool,
+    /// `item_sizes` was built from row heights (some row holds an image).
+    image_sized: bool,
+    /// The image shown full size over the pane.
+    open_image: Option<MediaRef>,
 }
 
 /// What the pane asks its host to do.
@@ -483,7 +508,94 @@ impl TranscriptPane {
             approval_handler: None,
             workspace_root: None,
             open_diff: None,
+            media: MediaCache::new(Arc::new(HttpFetcher)),
+            media_polling: false,
+            image_sized: false,
+            open_image: None,
         }
+    }
+
+    /// Fetch images with `fetcher` instead of plain HTTP (tests inject a fake).
+    pub fn set_image_fetcher(&mut self, fetcher: Arc<dyn ImageFetcher>) {
+        self.media.set_fetcher(fetcher);
+    }
+
+    /// The load state of the image at `url`, once it was asked for.
+    pub fn image_state(&self, url: &str) -> Option<&media::LoadState> {
+        self.media.state(url)
+    }
+
+    /// The image open full size, if any.
+    pub fn open_image_ref(&self) -> Option<&MediaRef> {
+        self.open_image.as_ref()
+    }
+
+    /// Show `image` full size over the pane.
+    pub fn open_image(&mut self, image: &MediaRef, cx: &mut Context<Self>) {
+        self.media.ensure(&image.url);
+        self.open_image = Some(image.clone());
+        self.watch_media(cx);
+        cx.notify();
+    }
+
+    pub fn close_image(&mut self, cx: &mut Context<Self>) {
+        if self.open_image.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Start fetching the images the rows show, and poll until they are in.
+    fn fetch_images(&mut self, cx: &mut Context<Self>) {
+        let urls: Vec<String> = self
+            .cache
+            .rows()
+            .iter()
+            .filter_map(|row| row.media.as_ref().map(|media| media.url.clone()))
+            .collect();
+        let mut started = false;
+        for url in urls {
+            started |= self.media.ensure(&url);
+        }
+        if started {
+            self.watch_media(cx);
+        }
+    }
+
+    fn watch_media(&mut self, cx: &mut Context<Self>) {
+        if self.media_polling {
+            return;
+        }
+        self.media_polling = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(50))
+                    .await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        let (changed, loading) = this.media.pump();
+                        if changed {
+                            cx.notify();
+                        }
+                        this.media_polling = loading;
+                        loading
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Move finished image fetches into their states (the polling loop does this too).
+    pub fn pump_images(&mut self, cx: &mut Context<Self>) -> bool {
+        let (changed, loading) = self.media.pump();
+        if changed {
+            cx.notify();
+        }
+        loading
     }
 
     /// The workspace root of the open thread. "Open file" is offered by the diff viewer only
@@ -607,8 +719,20 @@ impl TranscriptPane {
     fn after_update(&mut self, cx: &mut Context<Self>) {
         self.refresh_open_diff(cx);
         let rows = self.cache.rows().len();
-        if self.item_sizes.len() != rows {
+        let has_images = self.cache.rows().iter().any(|row| row.media.is_some());
+        if has_images {
+            self.item_sizes = Rc::new(
+                self.cache
+                    .rows()
+                    .iter()
+                    .map(|row| size(px(100.), row.height()))
+                    .collect(),
+            );
+            self.image_sized = true;
+            self.fetch_images(cx);
+        } else if self.item_sizes.len() != rows || self.image_sized {
             self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); rows]);
+            self.image_sized = false;
         }
         cx.notify();
     }
@@ -676,8 +800,69 @@ impl TranscriptPane {
             .child(div().flex_1().min_h_0().child(open.view.clone()))
     }
 
-    fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_image_panel(
+        &self,
+        image: &MediaRef,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let theme = cx.theme();
+        let (background, border, foreground) = (theme.background, theme.border, theme.foreground);
+        let close = media::close_label();
+        v_flex()
+            .id(media::PANEL_ID)
+            .role(Role::Dialog)
+            .test_support()
+            .aria_label(crate::compose::tr_args(
+                "compose-media-panel-a11y",
+                &[("name", &image.name)],
+            ))
+            .absolute()
+            .size_full()
+            .bg(background)
+            .text_color(foreground)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .h(ROW_HEIGHT)
+                    .px_3()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(
+                        div()
+                            .truncate()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(image.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .id(media::CLOSE_ID)
+                            .test_support()
+                            .aria_label(SharedString::from(crate::compose::tr(
+                                "compose-media-close-a11y",
+                            )))
+                            .px_2()
+                            .cursor_pointer()
+                            .text_sm()
+                            .on_click(cx.listener(|pane, _, _, cx| pane.close_image(cx)))
+                            .child(close),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().p_3().child(media::render_image(
+                image,
+                self.media.state(&image.url),
+                media::FULL_MAX,
+            )))
+    }
+
+    fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let row = &self.cache.rows()[ix];
+        if let Some(image) = row.media.clone() {
+            return self.render_image_row(ix, row.indent, image, cx);
+        }
         let text = SharedString::from(row.text.clone());
         let theme = cx.theme();
         let color = match row.tone {
@@ -746,6 +931,42 @@ impl TranscriptPane {
                     })
                     .child(div().truncate().child(text)),
             )
+            .into_any_element()
+    }
+
+    /// A row that holds an image: the thumbnail (or the note that it is loading or could not
+    /// load), clickable to open the full-size panel.
+    fn render_image_row(
+        &self,
+        ix: usize,
+        indent: u8,
+        image: MediaRef,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = media::open_label(&image);
+        let muted = cx.theme().muted_foreground;
+        let content = media::render_image(&image, self.media.state(&image.url), media::THUMB_MAX);
+        let opened = image.clone();
+        div()
+            .id(("row", ix))
+            .test_support()
+            .w_full()
+            .h(media::THUMB_ROW_HEIGHT)
+            .px_3()
+            .pl(px(12. + 16. * f32::from(indent)))
+            .text_color(muted)
+            .child(
+                div()
+                    .id(media::THUMB_ID)
+                    .test_support()
+                    .aria_label(SharedString::from(label))
+                    .min_w(px(32.))
+                    .min_h(px(32.))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |pane, _, _, cx| pane.open_image(&opened, cx)))
+                    .child(content),
+            )
+            .into_any_element()
     }
 }
 
@@ -778,6 +999,12 @@ impl Render for TranscriptPane {
                         self.open_diff
                             .as_ref()
                             .map(|open| self.render_diff_panel(open, cx)),
+                        |el, panel| el.child(panel),
+                    )
+                    .when_some(
+                        self.open_image
+                            .clone()
+                            .map(|image| self.render_image_panel(&image, cx)),
                         |el, panel| el.child(panel),
                     )
                     .child(

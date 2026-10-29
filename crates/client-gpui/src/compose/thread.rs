@@ -4,6 +4,8 @@
 //! assumed done until the hub's `StateDelta` comes back and the owner calls
 //! [`ThreadComposer::set_thread`] again.
 
+use std::sync::Arc;
+
 use client_core::ThreadView;
 use client_core::outbox::{Intent, SessionConfig};
 use gpui_kit::TestSupportExt as _;
@@ -12,13 +14,16 @@ use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, *};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use protocol::tunnel::ContentPart;
 
+use super::attach::{Gate, HttpUploader, NoUploader, Uploader};
+use super::attach_bar::{AttachBar, AttachEvent, DropZone};
 use super::commands::{
     ComposerEvent, SessionOptions, SlashAccept, SlashCommand, accept_command, filter_commands,
     slash_query,
 };
 use super::queue::{QueuedChip, queued_chips, remove_request, stoppable_intent};
-use super::{send_shortcut_label, tr, tr_args};
+use super::{Target, send_shortcut_label, tr, tr_args};
 use crate::shell::link::{Refusal, RefusalKind};
 
 /// What the hub said, as words: a plain sentence for the codes people meet (`forbidden`,
@@ -76,6 +81,8 @@ pub struct ThreadComposer {
     /// Requests of this thread the hub refused, shown until the next one succeeds.
     refusals: Vec<Refusal>,
     prompt: Entity<TextareaState>,
+    attach: Entity<AttachBar>,
+    drop_zone: DropZone,
     slash_selected: usize,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -93,22 +100,48 @@ impl ThreadComposer {
                     &[("shortcut", &send_shortcut_label())],
                 ))
         });
-        let subscriptions = vec![cx.subscribe_in(&prompt, window, |this, _, event, _, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.slash_selected = 0;
-                cx.notify();
-            }
-        })];
+        let attach = cx.new(|_| AttachBar::new());
+        let subscriptions = vec![
+            cx.subscribe_in(&prompt, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.slash_selected = 0;
+                    cx.notify();
+                }
+            }),
+            cx.subscribe_in(&attach, window, |this, _, event, window, cx| {
+                let AttachEvent::ReadyToSend = event;
+                // The uploads a send was waiting for are done: send again, now with the parts.
+                this.send(window, cx);
+            }),
+        ];
         Self {
             thread: None,
             cap: None,
             started: Vec::new(),
             refusals: Vec::new(),
             prompt,
+            attach,
+            drop_zone: DropZone::new(),
             slash_selected: 0,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The attachments strip (tests add files through it and read its state).
+    pub fn attachments(&self) -> &Entity<AttachBar> {
+        &self.attach
+    }
+
+    /// Where attachments upload to: the hub the thread lives on. `None` (signed out) makes
+    /// every upload fail with a message. The shell calls this whenever its link changes.
+    pub fn set_upload_target(&mut self, target: Option<Target>, cx: &mut Context<Self>) {
+        let uploader: Arc<dyn Uploader> = match target {
+            Some(target) => Arc::new(HttpUploader::new(target.api, target.token)),
+            None => Arc::new(NoUploader),
+        };
+        self.attach
+            .update(cx, |attach, _| attach.set_uploader(uploader));
     }
 
     /// Show the thread's current state. Call it after every applied envelope.
@@ -122,6 +155,7 @@ impl ThreadComposer {
         self.thread = None;
         self.started.clear();
         self.refusals.clear();
+        self.attach.update(cx, |attach, cx| attach.clear(cx));
         cx.notify();
     }
 
@@ -224,10 +258,52 @@ impl ThreadComposer {
             .map(|thread| thread.thread_id().to_owned())
     }
 
-    /// Send the text as a prompt and clear the field.
+    /// Send the text (and the attachments, uploaded first) as a prompt and clear the field.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.prompt.read(cx).value().trim().to_owned();
-        self.send_text(&text, window, cx);
+        if self.attach.read(cx).is_empty() {
+            self.send_text(&text, window, cx);
+            return;
+        }
+        let Some(thread_id) = self.thread_id() else {
+            return;
+        };
+        // A failed upload blocks the send (the strip says so); uploads in progress send it
+        // when they finish.
+        if let Gate::Ready(files) = self.attach.update(cx, |attach, cx| attach.request_send(cx)) {
+            self.emit_with_files(thread_id, &text, files, window, cx);
+        }
+    }
+
+    /// A prompt that carries files: a text part (when there is text) and one file part each,
+    /// as the intent the owner enqueues unchanged.
+    fn emit_with_files(
+        &mut self,
+        thread_id: String,
+        text: &str,
+        files: Vec<ContentPart>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut parts = Vec::with_capacity(files.len() + 1);
+        if !text.is_empty() {
+            parts.push(ContentPart::Text {
+                text: text.to_owned(),
+            });
+        }
+        parts.extend(files);
+        cx.emit(ComposerEvent::Intent(Intent::Prompt {
+            thread_id,
+            task_id: format!("tk_{:032x}", rand::random::<u128>()),
+            message_id: format!("msg_{:032x}", rand::random::<u128>()),
+            parts,
+            machine_id: None,
+            author: None,
+        }));
+        self.attach.update(cx, |attach, cx| attach.clear(cx));
+        self.prompt
+            .update(cx, |state, cx| state.set_value("", window, cx));
+        cx.notify();
     }
 
     fn send_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -483,8 +559,10 @@ impl Render for ThreadComposer {
             })
             .collect();
         let shortcut = send_shortcut_label();
+        let paste_into = self.attach.clone();
         v_flex()
             .id("thread-composer")
+            .relative()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .role(Role::Form)
@@ -499,6 +577,26 @@ impl Render for ThreadComposer {
             )
             .on_action(cx.listener(|this, _: &SlashNext, _, cx| this.move_slash(1, cx)))
             .on_action(cx.listener(|this, _: &SlashPrevious, _, cx| this.move_slash(-1, cx)))
+            .on_drag_move::<ExternalPaths>(cx.listener(
+                |this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
+                    if this.drop_zone.moved(event, cx) {
+                        cx.notify();
+                    }
+                },
+            ))
+            .child(self.drop_zone.release_marker({
+                let this = cx.entity();
+                move |paths, _, cx| {
+                    this.update(cx, |this, cx| {
+                        this.attach
+                            .update(cx, |attach, cx| attach.add_paths(paths, cx));
+                        cx.notify();
+                    });
+                }
+            }))
+            .when(self.drop_zone.is_over(), |el| {
+                el.border_1().border_color(cx.theme().primary)
+            })
             .children(self.refusals.iter().enumerate().map(|(index, refusal)| {
                 let key = match refusal.kind {
                     RefusalKind::Mode => "compose-thread-refused-mode",
@@ -555,8 +653,11 @@ impl Render for ThreadComposer {
                     .when(slash_open, |el| el.key_context(SLASH_CONTEXT))
                     .test_support()
                     .aria_label(tr("compose-thread-prompt-a11y"))
-                    .child(Textarea::new(&self.prompt)),
+                    .child(Textarea::new(&self.prompt).on_paste(move |item, _, cx| {
+                        paste_into.update(cx, |attach, cx| attach.paste(item, cx))
+                    })),
             )
+            .child(self.attach.clone())
             .when(!modes.is_empty(), |el| {
                 el.child(self.picker(
                     "thread-mode",

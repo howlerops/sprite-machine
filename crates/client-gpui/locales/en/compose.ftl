@@ -77,3 +77,40 @@ compose-thread-refused-code-forbidden = You are not allowed to do that.
 compose-thread-refused-code-invalid-request = The request was not valid.
 compose-thread-refused-dismiss = Dismiss
 compose-thread-refused-dismiss-a11y = Dismiss: { $refusal }
+
+# Attachments (src/compose/attach*.rs): picker, paste, drag-drop, chips, upload states.
+compose-attach-region-a11y = Attachments
+compose-attach-add = Attach files
+compose-attach-add-a11y = Choose files to attach
+compose-attach-chip-a11y = { $name }, { $size }, { $status }
+compose-attach-status-pending = ready to upload
+compose-attach-status-uploading = uploading { $percent }%
+compose-attach-status-uploaded = uploaded
+compose-attach-status-failed = upload failed: { $detail }
+compose-attach-remove = Remove
+compose-attach-remove-a11y = Remove attachment { $name }
+compose-attach-retry = Retry
+compose-attach-retry-a11y = Retry uploading { $name }
+compose-attach-blocked = An attachment did not upload. Retry it or remove it, then send again.
+compose-attach-uploading-note = Uploading attachments before sending...
+compose-attach-rejected-too-large = { $name } is { $size }, over the { $limit } limit, so it was not attached.
+compose-attach-rejected-type = { $name } ({ $mime }) is a type that cannot be attached.
+compose-attach-rejected-empty = { $name } is empty, so it was not attached.
+compose-attach-rejected-unreadable = { $name } could not be read: { $detail }
+compose-attach-rejected-dismiss = Dismiss
+compose-attach-rejected-dismiss-a11y = Dismiss: { $message }
+compose-attach-error-no-hub = Sign in to attach files.
+compose-attach-error-transport = could not reach the hub ({ $detail })
+compose-attach-error-refused = the hub answered { $status } { $detail }
+compose-attach-error-too-large = the hub says the file is over its size limit
+compose-attach-error-malformed = the hub's answer was not understood
+compose-attach-pasted-name = pasted-image-{ $number }.{ $extension }
+
+# Inline images in the transcript (src/task/media.rs).
+compose-media-loading = Loading image { $name }...
+compose-media-unavailable = Image { $name } could not be loaded.
+compose-media-open-a11y = Open image { $name } full size
+compose-media-thumb-a11y = Image { $name }
+compose-media-panel-a11y = Image { $name }
+compose-media-close = Close
+compose-media-close-a11y = Close the image
