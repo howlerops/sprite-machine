@@ -137,6 +137,9 @@ pub struct ApprovalController {
     /// interrupt id -> why this device's last click on the card was refused locally (already
     /// worded). Cleared by the next answer that goes through, or by [`Self::clear_refusals`].
     refused: BTreeMap<String, String>,
+    /// Interrupt ids whose last answer failed over HTTP (refused, or transient failures used up)
+    /// while the request is still open, so a new answer may be sent from the card.
+    retryable: BTreeSet<String>,
 }
 
 impl ApprovalController {
@@ -157,6 +160,7 @@ impl ApprovalController {
             resolved_at: BTreeMap::new(),
             first_seen: BTreeMap::new(),
             refused: BTreeMap::new(),
+            retryable: BTreeSet::new(),
         }
     }
 
@@ -278,6 +282,7 @@ impl ApprovalController {
             now_ms,
         )?;
         self.answers.insert(interrupt_id.to_owned(), local_id);
+        self.retryable.remove(interrupt_id);
         view.set_local_answer(interrupt_id, Some(LocalAnswer::Pending));
         if option.kind == PermissionOptionKind::AllowAlways
             && self.remember.contains(interrupt_id)
@@ -311,9 +316,13 @@ impl ApprovalController {
         for (interrupt_id, local_id) in tracked {
             let Some(entry) = outbox.get(local_id) else {
                 self.answers.remove(&interrupt_id);
+                self.retryable.remove(&interrupt_id);
                 view.set_local_answer(&interrupt_id, None);
                 continue;
             };
+            // Only an HTTP failure that leaves the request open can be answered again from the
+            // card. Set below for those; every other state clears it.
+            self.retryable.remove(&interrupt_id);
             match &entry.state {
                 IntentState::Queued => {
                     view.set_local_answer(&interrupt_id, Some(LocalAnswer::Pending));
@@ -341,6 +350,11 @@ impl ApprovalController {
                     }
                 }
                 IntentState::Rejected { status, error } => {
+                    // 410 says the hub has expired the request, so there is nothing to answer.
+                    // Any other refusal leaves the request open on the hub.
+                    if *status != 410 {
+                        self.retryable.insert(interrupt_id.clone());
+                    }
                     view.set_local_answer(
                         &interrupt_id,
                         Some(LocalAnswer::Failed {
@@ -349,6 +363,8 @@ impl ApprovalController {
                     );
                 }
                 IntentState::Exhausted { last_error } => {
+                    // Transient failures used up: the hub never refused the request itself.
+                    self.retryable.insert(interrupt_id.clone());
                     view.set_local_answer(
                         &interrupt_id,
                         Some(LocalAnswer::Failed {
@@ -388,6 +404,7 @@ impl ApprovalController {
                     remember_preset: self.remember.contains(interrupt.id()),
                     preset_saved: self.saved.contains(interrupt.id()),
                     refused: self.refused.get(interrupt.id()).cloned(),
+                    retryable: self.retryable.contains(interrupt.id()),
                 };
                 if let Some(card) = build_card(interrupt, transcript, context) {
                     out.push(card);

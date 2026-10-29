@@ -669,7 +669,85 @@ fn a_409_shows_already_resolved_by_the_winner() {
 }
 
 #[test]
-fn a_refused_answer_shows_the_failure_and_can_be_retried() {
+fn a_refused_answer_on_an_open_request_leaves_the_card_answerable_and_a_retry_gets_a_new_key() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let (cache, mut outbox) = outbox();
+    controller
+        .answer(&mut thread, &mut outbox, &cache, "int_1", "allow")
+        .expect("queued");
+    let hub = Hub {
+        seen: Mutex::new(Vec::new()),
+        status: 400,
+        body: json!({ "error": "bad_outcome" }),
+    };
+    flush(&mut outbox, &cache, &hub, &clock);
+    controller.sync(&outbox, &mut thread);
+
+    let card = only_card(&mut controller, &thread);
+    assert_eq!(
+        card.state,
+        CardState::Failed {
+            message: "bad_outcome (HTTP 400)".to_owned()
+        }
+    );
+    assert!(
+        card.is_answerable(),
+        "the request is still open, so the card can be answered again"
+    );
+    assert!(card.options.iter().all(|o| o.enabled));
+
+    controller
+        .answer(&mut thread, &mut outbox, &cache, "int_1", "reject")
+        .expect("retry queues a new answer");
+    let entries: Vec<_> = outbox.entries().collect();
+    assert_eq!(entries.len(), 2);
+    assert_ne!(entries[0].idempotency_key, entries[1].idempotency_key);
+    assert_eq!(entries[1].state, IntentState::Queued);
+    let card = only_card(&mut controller, &thread);
+    assert_eq!(card.state, CardState::Sending);
+    assert!(!card.is_answerable());
+}
+
+#[test]
+fn a_transient_failure_that_runs_out_of_retries_leaves_the_card_answerable() {
+    let policy = RetryPolicy {
+        base_ms: 1,
+        cap_ms: 1,
+        max_failures: 1,
+    };
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let cache = Cache::open_in_memory().expect("cache");
+    let mut outbox = Outbox::load(&cache, policy).expect("outbox");
+    controller
+        .answer(&mut thread, &mut outbox, &cache, "int_1", "allow")
+        .expect("queued");
+    let hub = Hub {
+        seen: Mutex::new(Vec::new()),
+        status: 503,
+        body: json!({}),
+    };
+    flush(&mut outbox, &cache, &hub, &clock);
+    controller.sync(&outbox, &mut thread);
+
+    let card = only_card(&mut controller, &thread);
+    assert_eq!(
+        card.state,
+        CardState::Failed {
+            message: "HTTP 503".to_owned()
+        }
+    );
+    assert!(card.is_answerable());
+    controller
+        .answer(&mut thread, &mut outbox, &cache, "int_1", "reject")
+        .expect("retry queues a new answer");
+}
+
+#[test]
+fn an_expired_refusal_shows_the_failure_and_leaves_the_card_unanswerable() {
     let clock = Arc::new(ManualClock::new(RAISED_MS));
     let mut controller = controller(&clock, LocalPresets::in_memory());
     let mut thread = open_thread();
@@ -684,6 +762,7 @@ fn a_refused_answer_shows_the_failure_and_can_be_retried() {
     };
     flush(&mut outbox, &cache, &hub, &clock);
     controller.sync(&outbox, &mut thread);
+
     let card = only_card(&mut controller, &thread);
     assert_eq!(
         card.state,
@@ -691,11 +770,31 @@ fn a_refused_answer_shows_the_failure_and_can_be_retried() {
             message: "expired (HTTP 410)".to_owned()
         }
     );
-    // The failed answer left the card unanswered on the hub, so a retry is allowed.
+    assert!(!card.is_answerable(), "the hub has expired the request");
+    assert!(card.options.iter().all(|o| !o.enabled));
+}
+
+#[test]
+fn a_409_without_a_winner_keeps_the_card_unanswerable() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    let (cache, mut outbox) = outbox();
     controller
-        .answer(&mut thread, &mut outbox, &cache, "int_1", "reject")
-        .expect("retry queues a new answer");
-    assert_eq!(outbox.entries().count(), 2);
+        .answer(&mut thread, &mut outbox, &cache, "int_1", "allow")
+        .expect("queued");
+    let hub = Hub {
+        seen: Mutex::new(Vec::new()),
+        status: 409,
+        body: json!({ "error": "already_resolved" }),
+    };
+    flush(&mut outbox, &cache, &hub, &clock);
+    controller.sync(&outbox, &mut thread);
+
+    let card = only_card(&mut controller, &thread);
+    assert!(matches!(card.state, CardState::Failed { .. }), "{card:?}");
+    assert!(!card.is_answerable(), "someone else answered first");
+    assert!(card.options.iter().all(|o| !o.enabled));
 }
 
 // ---- criterion: a click refused on this device says why --------------------------------------
@@ -1261,5 +1360,92 @@ fn clicking_in_the_pane_reaches_the_controller_and_the_outbox(cx: &mut TestAppCo
     assert_eq!(
         thread.open_interrupts()[0].local,
         Some(LocalAnswer::Pending)
+    );
+}
+
+#[gpui_kit::test]
+fn a_refused_answer_is_sent_again_from_the_card_buttons_with_a_new_key(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let state = Rc::new(RefCell::new((
+        controller(&clock, LocalPresets::in_memory()),
+        open_thread(),
+        outbox(),
+    )));
+    let handler: CardHandler = {
+        let state = state.clone();
+        Rc::new(move |action, _, _| {
+            if let CardAction::Answer {
+                interrupt_id,
+                option_id,
+            } = action
+            {
+                let mut guard = state.borrow_mut();
+                let (controller, thread, (cache, outbox)) = &mut *guard;
+                controller
+                    .answer(thread, outbox, cache, &interrupt_id, &option_id)
+                    .expect("queued");
+            }
+        })
+    };
+    let (window, pane) = cx.update(|cx| {
+        gpui_kit::open_window(window_options(), cx, |_, cx| {
+            cx.new(|_| TranscriptPane::new())
+        })
+        .expect("window")
+    });
+    let show = |cx: &mut TestAppContext| {
+        let mut guard = state.borrow_mut();
+        let (controller, thread, _) = &mut *guard;
+        let cards = controller.cards(thread);
+        cx.update(|cx| {
+            pane.update(cx, |pane, cx| {
+                pane.set_thread(thread, cx);
+                pane.set_approvals(cards, Some(handler.clone()), cx);
+            })
+        });
+    };
+
+    show(cx);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("approval-option-allow", cx);
+    })
+    .expect("window is open");
+
+    // The hub refuses the answer on the open request; the card is refreshed from the outbox.
+    {
+        let mut guard = state.borrow_mut();
+        let (controller, thread, (cache, outbox)) = &mut *guard;
+        let hub = Hub {
+            seen: Mutex::new(Vec::new()),
+            status: 400,
+            body: json!({ "error": "bad_outcome" }),
+        };
+        flush(outbox, cache, &hub, &clock);
+        controller.sync(outbox, thread);
+    }
+    show(cx);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("approval-status")
+                .label()
+                .is_some_and(|text| text.contains("bad_outcome (HTTP 400)")),
+            "the refusal is shown on the card"
+        );
+        window.click("approval-option-reject", cx);
+    })
+    .expect("window is open");
+
+    let guard = state.borrow();
+    let (_, _, (_, outbox)) = &*guard;
+    let entries: Vec<_> = outbox.entries().collect();
+    assert_eq!(entries.len(), 2, "the second click reached the outbox");
+    assert_ne!(entries[0].idempotency_key, entries[1].idempotency_key);
+    assert_eq!(
+        entries[1].intent.body()["outcome"],
+        json!({ "type": "selected", "option_id": "reject" })
     );
 }
