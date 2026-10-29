@@ -1,0 +1,9 @@
+{ "permissions": { "allow": [
+  "Bash(wrangler d1 create sm-hub)",
+  "Bash(wrangler r2 bucket create sm-hub-blobs)",
+  "Bash(wrangler r2 bucket create sm-workspace-backups)",
+  "Bash(wrangler queues create sm-hub-notify)",
+  "Bash(wrangler deploy --env preview)",
+  "Bash(npm install --prefix /tmp/claude-0/* *)",
+  "Bash(pip install --target /tmp/claude-0/* *)"
+] } }
