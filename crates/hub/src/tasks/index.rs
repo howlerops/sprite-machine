@@ -22,12 +22,16 @@ fn approval_kind() -> InterruptKind {
     InterruptKind::Approval
 }
 
-/// The stored task statuses the Thread DO writes (`open`, `running`, `waiting`, `done`).
+/// The stored task statuses the Thread DO writes (`open`, `running`, `waiting`, `done`, `failed`, `cancelled`).
 pub const STATUS_OPEN: &str = "open";
 pub const STATUS_RUNNING: &str = "running";
 pub const STATUS_WAITING: &str = "waiting";
 /// The last task ended in success and nothing is queued, until the next prompt.
 pub const STATUS_DONE: &str = "done";
+/// The last task ended in `RunError{error}` and nothing is queued, until the next prompt.
+pub const STATUS_FAILED: &str = "failed";
+/// The last task ended in `RunError{cancelled}` and nothing is queued, until the next prompt.
+pub const STATUS_CANCELLED: &str = "cancelled";
 
 /// The thread's index state at one point in time.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +43,7 @@ pub struct IndexRow {
     pub title: String,
     /// `user` (the client set the title) or `derived` (the first prompt's first line).
     pub title_source: &'static str,
-    /// `open`, `running`, `waiting` or `done` (see the `STATUS_*` constants).
+    /// `open`, `running`, `waiting`, `done`, `failed` or `cancelled` (see the `STATUS_*` constants).
     pub status: &'static str,
     pub archived: bool,
     pub deleted: bool,
