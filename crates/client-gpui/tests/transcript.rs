@@ -575,7 +575,15 @@ fn all_example_variants_are_laid_out_in_the_window(cx: &mut TestAppContext) {
     }
     let (window, pane) = open_pane(cx, options(900., 1600.));
     cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
-    let expected = cx.update(|cx| texts(pane.read(cx).rows()));
+    // Image rows are drawn as thumbnails (see tests/attachments.rs), not as text rows.
+    let expected = cx.update(|cx| {
+        pane.read(cx)
+            .rows()
+            .iter()
+            .filter(|row| row.kind != RowKind::Image)
+            .map(|row| row.text.clone())
+            .collect::<Vec<_>>()
+    });
     assert!(expected.len() > 30, "{} rows", expected.len());
     cx.update_window(window, |_, window, cx| {
         window.render_frame(cx);
@@ -1194,4 +1202,37 @@ fn streaming_the_fixture_at_200_events_a_second_updates_few_rows_per_frame(
         times[times.len() - 1],
     );
     assert!(p95 <= budget, "p95 {p95:?} exceeds {budget:?}");
+}
+
+#[test]
+fn a_users_image_rows_are_rebuilt_per_item_and_equal_the_full_rebuild() {
+    let (mut thread, mut seq) = message_thread(50);
+    let none = BTreeSet::new();
+    let mut cache = RowCache::new();
+    cache.sync(&thread, &none, &[]);
+    push_event(
+        &mut thread,
+        &mut seq,
+        json!({"type": "UserMessage", "message_id": "u1",
+               "author": {"kind": "user", "id": "u1"},
+               "parts": [
+                   {"type": "text", "text": "see"},
+                   {"type": "file", "name": "a.png", "mime_type": "image/png",
+                    "url": "https://hub.test/a.png", "size": 3}]}),
+    );
+    cache.sync(&thread, &none, &[]);
+    let update = cache.last_update();
+    assert_eq!(update.items_rebuilt, 1, "{update:?}");
+    assert_eq!(
+        update.rows_rebuilt, 3,
+        "text, file note and image row: {update:?}"
+    );
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
+    let images = cache.rows().iter().filter(|row| row.kind == RowKind::Image);
+    assert_eq!(images.count(), 1);
+    // A delta elsewhere rebuilds that item alone.
+    push_event(&mut thread, &mut seq, text_delta("m3", " more"));
+    cache.sync(&thread, &none, &[]);
+    assert_eq!(cache.last_update().items_rebuilt, 1);
+    assert_eq!(cache.rows(), full_rows(&thread, &none));
 }

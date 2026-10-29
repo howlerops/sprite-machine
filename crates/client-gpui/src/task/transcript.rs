@@ -236,6 +236,7 @@ pub fn item_rows_with(
                 Some(first) => first.text = format!("{who}: {}", first.text),
                 None => out.push(Row::new(RowKind::User, Tone::Normal, 0, format!("{who}:"))),
             }
+            media::push_image_rows(&user.parts, 1, out);
         }
         Item::Text(text) => {
             let start = out.len();

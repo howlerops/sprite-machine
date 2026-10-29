@@ -1310,3 +1310,70 @@ fn media_refs_compare_by_value() {
     };
     assert_eq!(a.clone(), a);
 }
+
+// ---- a user's own image parts ----------------------------------------------------------------------------
+
+fn thread_with_user_image(url: &str) -> ThreadView {
+    let mut thread = ThreadView::new("th_1");
+    let event = json!({"type": "UserMessage", "message_id": "m1",
+    "author": {"kind": "user", "id": "u1"},
+    "parts": [
+        {"type": "text", "text": "look at this"},
+        {"type": "file", "name": "mine.png", "mime_type": "image/png", "url": url, "size": 67}
+    ]});
+    let envelope: Envelope = serde_json::from_value(json!({
+        "v": 1, "seq": 1, "thread_id": "th_1", "task_id": "tk_1", "run_id": "run_1",
+        "ts": "2026-10-27T22:00:00.000Z", "event": event
+    }))
+    .expect("envelope");
+    thread.apply(&envelope).expect("apply");
+    thread
+}
+
+#[test]
+fn a_users_image_part_becomes_an_image_row_after_the_text() {
+    let thread = thread_with_user_image("https://hub.test/a/mine.png?sig=1");
+    let rows = thread_rows(&thread);
+    let at = rows
+        .iter()
+        .position(|row| row.kind == RowKind::Image)
+        .expect("an image row");
+    assert_eq!(rows[at].media.as_ref().expect("media").name, "mine.png");
+    assert_eq!(rows[at].height(), media::THUMB_ROW_HEIGHT);
+    assert!(
+        rows[..at]
+            .iter()
+            .any(|row| row.text.contains("look at this"))
+    );
+}
+
+#[gpui_kit::test]
+fn a_users_image_renders_inline_and_falls_back_when_it_cannot_load(cx: &mut TestAppContext) {
+    let url = "https://hub.test/a/mine.png?sig=1";
+    let (window, pane) = open_pane(cx, BTreeMap::from([(url.to_owned(), png())]));
+    let thread = thread_with_user_image(url);
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+    settle_pane(cx, window, &pane, url);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find(media::READY_ID).label(), Some("Image mine.png"));
+        window.click(media::THUMB_ID, cx);
+        window.render_frame(cx);
+        assert!(window.find(media::PANEL_ID).visible());
+    })
+    .expect("window");
+
+    let bad = "https://hub.test/a/mine.png?sig=expired";
+    let (window, pane) = open_pane(cx, BTreeMap::new());
+    let thread = thread_with_user_image(bad);
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+    settle_pane(cx, window, &pane, bad);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(media::UNAVAILABLE_ID).label(),
+            Some("Image mine.png could not be loaded.")
+        );
+    })
+    .expect("window");
+}

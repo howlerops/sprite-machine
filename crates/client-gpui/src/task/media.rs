@@ -11,9 +11,8 @@
 //! [`HttpFetcher`] is the real one. The cache keeps one state per URL, so a thumbnail and the
 //! full view share one download.
 //!
-//! Only parts that reach the transcript as content parts are drawn this way (tool results
-//! today). A user's own message keeps just its text in `client-core`'s `UserView`; see the
-//! M3-006 report's discovered work.
+//! Image parts are drawn this way both in a tool call's content and in a user's own message
+//! (`UserView::parts`).
 
 use std::collections::HashMap;
 use std::future::Future;
