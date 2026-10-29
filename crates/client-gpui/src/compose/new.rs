@@ -86,11 +86,17 @@ pub fn parse_machines(body: &Value) -> Vec<MachineOption> {
                         online,
                         harnesses: strings(machine.pointer("/capabilities/harnesses")),
                         spawn: strings(machine.pointer("/capabilities/spawn")),
-                        permission_mode: machine
-                            .pointer("/capabilities/permission_mode")
-                            .and_then(Value::as_str)
-                            .filter(|mode| mode_looseness(mode).is_some())
-                            .map(str::to_owned),
+                        // `features: ["permission_mode:<mode>"]` (tunnel.md), else a plain field.
+                        permission_mode: super::cap_from_features(&strings(
+                            machine.pointer("/capabilities/features"),
+                        ))
+                        .or_else(|| {
+                            machine
+                                .pointer("/capabilities/permission_mode")
+                                .and_then(Value::as_str)
+                                .filter(|mode| mode_looseness(mode).is_some())
+                                .map(str::to_owned)
+                        }),
                     })
                 })
                 .collect()

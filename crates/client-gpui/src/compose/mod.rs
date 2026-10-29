@@ -30,7 +30,9 @@ pub use new::{
     AGENTS, DRAFT_FILE, Draft, Invalid, MODES, MachineOption, NewTaskModel, PreparedSend, SPAWNS,
     execute, fetch_machines, parse_machines,
 };
-pub use queue::{QueuedChip, queued_chips, remove_request, running_task, stop_intent};
+pub use queue::{
+    QueuedChip, queued_chips, remove_request, running_task, stop_intent, stoppable_intent,
+};
 pub use thread::ThreadComposer;
 
 /// The composer's English strings (`locales/en/compose.ftl`).

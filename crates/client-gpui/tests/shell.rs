@@ -77,6 +77,20 @@ struct HubState {
     answers: Mutex<Vec<Answer>>,
     /// The rows `GET /v1/threads` answers with (the inbox's list).
     threads: Mutex<Vec<Value>>,
+    /// Composer writes: prompts, session changes, pending removals and cancels, in order.
+    writes: Mutex<Vec<Write>>,
+    /// The status `DELETE /v1/threads/{t}/pending/{task}` answers (0 means 200).
+    delete_status: AtomicUsize,
+    /// The `machines` array `GET /v1/machines` answers with.
+    machines: Mutex<Vec<Value>>,
+}
+
+#[derive(Debug, Clone)]
+struct Write {
+    method: String,
+    path: String,
+    key: Option<String>,
+    body: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -235,11 +249,6 @@ fn push_live(state: &HubState, thread: &str, frame: String) {
         .push(frame);
 }
 
-async fn session_cancel(State(hub): State<Arc<HubState>>) -> Json<Value> {
-    hub.cancels.fetch_add(1, Ordering::SeqCst);
-    Json(json!({}))
-}
-
 async fn session_answer(
     State(hub): State<Arc<HubState>>,
     Path((thread, interrupt)): Path<(String, String)>,
@@ -256,6 +265,45 @@ async fn session_answer(
         body,
     });
     Json(json!({}))
+}
+
+async fn record_write(
+    State(hub): State<Arc<HubState>>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    hub.writes.lock().expect("lock").push(Write {
+        method: method.to_string(),
+        path: uri.path().to_owned(),
+        key: headers
+            .get("idempotency-key")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        body: serde_json::from_slice(&body).unwrap_or(Value::Null),
+    });
+    let status = hub.delete_status.load(Ordering::SeqCst);
+    if method == axum::http::Method::DELETE && status != 0 {
+        let code = StatusCode::from_u16(status as u16).expect("status");
+        return (code, Json(json!({ "error": "task_started" }))).into_response();
+    }
+    Json(json!({})).into_response()
+}
+
+async fn record_cancel(
+    State(hub): State<Arc<HubState>>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    hub.cancels.fetch_add(1, Ordering::SeqCst);
+    record_write(State(hub), method, uri, headers, body).await
+}
+
+async fn list_machines(State(state): State<Arc<HubState>>) -> Json<Value> {
+    Json(json!({ "machines": state.machines.lock().expect("lock").clone() }))
 }
 
 /// The inbox's list: the rows the test put in `threads`, on one page.
@@ -279,7 +327,14 @@ fn spawn_hub(state: Arc<HubState>) -> String {
                 .route("/v1/auth/github/token", post(github_token))
                 .route("/v1/threads", get(list_threads))
                 .route("/v1/threads/{thread_id}/subscribe", get(session_subscribe))
-                .route("/v1/threads/{thread_id}/cancel", post(session_cancel))
+                .route("/v1/machines", get(list_machines))
+                .route("/v1/threads/{thread_id}/prompts", post(record_write))
+                .route("/v1/threads/{thread_id}/session", post(record_write))
+                .route(
+                    "/v1/threads/{thread_id}/pending/{task_id}",
+                    axum::routing::delete(record_write),
+                )
+                .route("/v1/threads/{thread_id}/cancel", post(record_cancel))
                 .route(
                     "/v1/threads/{thread_id}/interrupts/{interrupt_id}",
                     post(session_answer),
@@ -2606,4 +2661,312 @@ fn a_thread_without_a_plan_or_usage_shows_the_widgets_empty_states(cx: &mut Test
             "{id} shows nothing without usage"
         );
     }
+}
+
+// ---- M3-005a: the composer in the open thread --------------------------------------------------
+
+fn state_frame(seq: u64, scope: &str, snapshot: Value) -> String {
+    event_frame(
+        seq,
+        "th_a",
+        json!({ "type": "StateSnapshot", "scope": scope, "snapshot": snapshot }),
+    )
+}
+
+fn run_started_frame(seq: u64) -> String {
+    event_frame(
+        seq,
+        "th_a",
+        json!({ "type": "RunStarted", "reason": "prompt", "agent_id": "agt_claude",
+                "machine_id": "mch_laptop" }),
+    )
+}
+
+/// `th_a` has a session (two commands, three modes, current `default`), optionally runs a task
+/// and has `tk_q` queued.
+fn hub_with_a_session(running: bool) -> (Arc<HubState>, String) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    let mut frames = vec![
+        state_frame(
+            1,
+            "session",
+            json!({
+                "available_commands": [
+                    { "name": "compact", "description": "Summarize" },
+                    { "name": "review", "description": "Review changes" },
+                ],
+                "modes": [
+                    { "id": "plan", "name": "Plan" },
+                    { "id": "default", "name": "Default" },
+                    { "id": "bypassPermissions", "name": "Bypass" },
+                ],
+                "current_mode_id": "default",
+            }),
+        ),
+        state_frame(
+            2,
+            "thread",
+            json!({ "pending_tasks": [{ "task_id": "tk_q", "preview": "then add tests" }] }),
+        ),
+    ];
+    frames.push(if running {
+        run_started_frame(3)
+    } else {
+        // A task that ran and finished: nothing is running.
+        event_frame(
+            3,
+            "th_a",
+            json!({ "type": "RunFinished",
+                    "outcome": { "type": "success", "stop_reason": "end_turn" } }),
+        )
+    });
+    state
+        .frames
+        .lock()
+        .expect("lock")
+        .insert("th_a".to_owned(), frames);
+    (state, hub)
+}
+
+fn open_composer_shell(
+    cx: &mut TestAppContext,
+    hub: &str,
+) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        hub,
+        stored_session_on(hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    open_thread_a(cx, window, &view);
+    (window, view)
+}
+
+fn writes_to(state: &HubState, method: &str, suffix: &str) -> Vec<Write> {
+    state
+        .writes
+        .lock()
+        .expect("lock")
+        .iter()
+        .filter(|write| write.method == method && write.path.ends_with(suffix))
+        .cloned()
+        .collect()
+}
+
+fn type_into(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+    text: &'static str,
+) {
+    cx.update_window(window, |_, window, cx| {
+        let input = view
+            .read(cx)
+            .thread_composer()
+            .read(cx)
+            .prompt_input()
+            .clone();
+        input.update(cx, |state, cx| state.set_value(text, window, cx));
+    })
+    .expect("window");
+}
+
+#[gpui_kit::test]
+fn the_open_thread_shows_a_composer_that_follows_each_snapshot(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    let (window, view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-composer");
+    // The session's modes came from the hub's state (set_thread on the snapshot).
+    wait_for_shown(cx, window, "thread-mode-plan");
+    // A slash opens the list with the session's commands.
+    type_into(cx, window, &view, "/");
+    wait_for_shown(cx, window, "slash-compact");
+    assert!(label_of(cx, window, "slash-review").is_some());
+    // A later snapshot reaches the composer: the hub replaces the commands.
+    push_live(
+        &state,
+        "th_a",
+        state_frame(
+            4,
+            "session",
+            json!({
+                "available_commands": [{ "name": "init", "description": "Create AGENTS" }],
+                "modes": [{ "id": "default", "name": "Default" }],
+                "current_mode_id": "default",
+            }),
+        ),
+    );
+    wait_for_shown(cx, window, "slash-init");
+    cx.update_window(window, |_, window, _| {
+        assert!(window.try_find("slash-compact").is_none());
+    })
+    .expect("window");
+}
+
+#[gpui_kit::test]
+fn sending_a_prompt_goes_through_the_outbox_with_fresh_ids(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    let (window, view) = open_composer_shell(cx, &hub);
+    // The composer has the thread once the first snapshot arrived (its modes show).
+    wait_for_shown(cx, window, "thread-mode-plan");
+    type_into(cx, window, &view, "add a test please");
+    cx.update_window(window, |_, window, cx| window.click("thread-send", cx))
+        .expect("window");
+    wait_until_true("the prompt to reach the hub", || {
+        !writes_to(&state, "POST", "/prompts").is_empty()
+    });
+    let prompts = writes_to(&state, "POST", "/prompts");
+    assert_eq!(prompts.len(), 1, "{prompts:?}");
+    assert_eq!(prompts[0].path, "/v1/threads/th_a/prompts");
+    assert!(
+        prompts[0]
+            .key
+            .as_deref()
+            .is_some_and(|k| k.starts_with("idk_"))
+    );
+    assert!(
+        prompts[0].body["task_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("tk_"))
+    );
+    assert!(
+        prompts[0].body["message_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("msg_"))
+    );
+    assert_eq!(prompts[0].body["parts"][0]["text"], "add a test please");
+    // The field is empty again.
+    cx.update_window(window, |_, _, cx| {
+        let input = view
+            .read(cx)
+            .thread_composer()
+            .read(cx)
+            .prompt_input()
+            .clone();
+        assert_eq!(input.read(cx).value().as_ref(), "");
+    })
+    .expect("window");
+}
+
+#[gpui_kit::test]
+fn stop_while_a_task_runs_cancels_it_through_the_outbox(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(true);
+    let (window, _view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-stop");
+    cx.update_window(window, |_, window, cx| window.click("thread-stop", cx))
+        .expect("window");
+    wait_until_true("the cancel to reach the hub", || {
+        !writes_to(&state, "POST", "/cancel").is_empty()
+    });
+    let cancels = writes_to(&state, "POST", "/cancel");
+    assert_eq!(cancels[0].path, "/v1/threads/th_a/cancel");
+    assert_eq!(cancels[0].body["task_id"], "tk_1");
+    assert!(
+        cancels[0]
+            .key
+            .as_deref()
+            .is_some_and(|k| k.starts_with("idk_"))
+    );
+}
+
+#[gpui_kit::test]
+fn a_mode_change_and_removing_a_queued_chip_hit_the_hub_with_keys(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(true);
+    let (window, _view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-plan");
+    cx.update_window(window, |_, window, cx| window.click("thread-mode-plan", cx))
+        .expect("window");
+    wait_until_true("the mode change", || {
+        !writes_to(&state, "POST", "/session").is_empty()
+    });
+    let sessions = writes_to(&state, "POST", "/session");
+    assert_eq!(sessions[0].path, "/v1/threads/th_a/session");
+    assert_eq!(sessions[0].body["mode_id"], "plan");
+    let mode_key = sessions[0].key.clone().expect("a key");
+    assert!(mode_key.starts_with("idk_"));
+
+    wait_for_shown(cx, window, "queued-remove-tk_q");
+    cx.update_window(window, |_, window, cx| {
+        window.click("queued-remove-tk_q", cx)
+    })
+    .expect("window");
+    wait_until_true("the removal", || {
+        !writes_to(&state, "DELETE", "/pending/tk_q").is_empty()
+    });
+    let removals = writes_to(&state, "DELETE", "/pending/tk_q");
+    assert_eq!(removals[0].path, "/v1/threads/th_a/pending/tk_q");
+    let key = removals[0].key.clone().expect("a key");
+    assert!(key.starts_with("idk_"));
+    assert_ne!(key, mode_key);
+}
+
+#[gpui_kit::test]
+fn a_409_task_started_on_remove_offers_stop_for_that_task(cx: &mut TestAppContext) {
+    // No RunStarted frame: the thread's events do not show the task running, only the 409 does.
+    let (state, hub) = hub_with_a_session(false);
+    state.delete_status.store(409, Ordering::SeqCst);
+    let (window, _view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "queued-remove-tk_q");
+    cx.update_window(window, |_, window, _| {
+        assert!(window.try_find("thread-stop").is_none(), "no Stop before");
+    })
+    .expect("window");
+    cx.update_window(window, |_, window, cx| {
+        window.click("queued-remove-tk_q", cx)
+    })
+    .expect("window");
+    wait_for_shown(cx, window, "thread-stop");
+    wait_for_shown(cx, window, "thread-started-notice");
+    cx.update_window(window, |_, window, cx| window.click("thread-stop", cx))
+        .expect("window");
+    wait_until_true("the cancel for tk_q", || {
+        !writes_to(&state, "POST", "/cancel").is_empty()
+    });
+    assert_eq!(
+        writes_to(&state, "POST", "/cancel")[0].body["task_id"],
+        "tk_q"
+    );
+}
+
+#[gpui_kit::test]
+fn the_runner_cap_comes_from_the_hosting_machines_features(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(true);
+    state.machines.lock().expect("lock").push(json!({
+        "machine_id": "mch_laptop", "name": "Laptop",
+        "presence": { "state": "online" },
+        "capabilities": { "features": ["permission_mode:acceptEdits"] },
+    }));
+    let (window, _view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-default");
+    // `bypassPermissions` is looser than the machine's `acceptEdits`, so it is not offered.
+    let mut gone = false;
+    for _ in 0..400 {
+        // The machines list is polled by a 50 ms timer on the test clock.
+        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.run_until_parked();
+        gone = cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find("thread-mode-bypassPermissions").is_none()
+            })
+            .expect("window");
+        if gone {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(gone, "the cap never applied");
+    assert!(label_of(cx, window, "thread-mode-plan").is_some());
+}
+
+#[gpui_kit::test]
+fn without_machine_features_every_mode_is_offered(cx: &mut TestAppContext) {
+    let (_state, hub) = hub_with_a_session(true);
+    let (window, _view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-bypassPermissions");
 }
