@@ -4104,8 +4104,8 @@ items:
     title: 'client: plan view + cost/context meters'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged 8bda741; worker: plan_usage 10 passed, client-gpui all suites, clippy clean. Tokens derived from context_used growth (spec has no token counters -> M3-009b). Leader verify after M3-010d."
+    status: "done"
+    evidence: "merged 8bda741; leader verify on v2 with M3-010d: client-gpui 163 passed 0 failed incl. plan_usage 10; clippy clean"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4129,7 +4129,9 @@ items:
     title: 'desktop task view: show the plan and usage widgets for the open thread (PlanModel::from_thread, UsageTracker::observe after each apply)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
@@ -4406,7 +4408,8 @@ items:
     title: 'shell: pass the open thread workspace root to the transcript pane and forward TranscriptEvent::OpenFile; diff summary string uses its own arg names'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2 (with M3-009): client-gpui 163 passed 0 failed, clippy clean, fmt ok; worker mutation check on set_workspace_root"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4435,6 +4438,21 @@ items:
       - 'crates/client-gpui/tests/transcript.rs'
     acceptance:
       - 'Escape closes the panel (test); counts computed once per activity content (test)'
+  - id: M3-010f
+    title: 'desktop: open the requested file (AppShell::last_open_file) in an editor or the system opener; client-gpui gets a tracing facade and logs open-file requests at debug'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-010d]
+    paths:
+      - 'crates/client-gpui/Cargo.toml'
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'OpenFile launches a configured opener (injectable for tests) with path and line; request logged at debug'
   - id: M3-011i
     title: 'desktop inbox: keyboard selection; Enter opens the focused row; open target has a role and an aria label'
     milestone: M3

@@ -310,3 +310,4 @@
 - 2026-10-29 leader: merged M3-010a (diff viewer in task view; 146 passed). Filed M3-010d (shell hookup + string arg names), M3-010e.
 - 2026-10-29 leader: merged M3-011g (151 passed). Filed M3-011k (HTTP-failed card cannot be retried from the UI). Assigned M3-010d (haiku).
 - 2026-10-29 leader: merged M3-009 (plan + usage widgets, not yet placed: M3-009a). Filed M3-009a/b/c.
+- 2026-10-29 leader: merged M3-010d; verified M3-009 + M3-010d on v2 (client-gpui 163 passed). Filed M3-010f. Assigned M3-009a (haiku).
