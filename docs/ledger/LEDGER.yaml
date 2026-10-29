@@ -4279,7 +4279,8 @@ items:
     title: 'approval card: show why an answer was refused (Expired, NotOpen, Outbox) instead of dropping AnswerError'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 151 passed 0 failed, clippy clean; worker fail-check: 4 approval tests + 1 shell test fail without change"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4356,7 +4357,9 @@ items:
     title: 'shell: pass the open thread workspace root to the transcript pane and forward TranscriptEvent::OpenFile; diff summary string uses its own arg names'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
@@ -4411,6 +4414,20 @@ items:
       - 'crates/client-gpui/tests/shell.rs'
     acceptance:
       - 'No fixed sleeps in the test; 20 repeated runs pass'
+  - id: M3-011k
+    title: 'approval card: an HTTP-failed answer on a still-open request stays answerable (retry from the card)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011g]
+    paths:
+      - 'crates/client-gpui/src/approval/**'
+      - 'crates/client-gpui/tests/approval.rs'
+    acceptance:
+      - 'After a refused HTTP answer on an open request the option buttons are enabled and a click retries (view test through the card widgets, not the controller)'
 
   - id: M3-012
     title: 'client: agent registry + launch managed agent form'
