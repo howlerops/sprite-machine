@@ -506,6 +506,7 @@ impl AppShell {
         self.composer.update(cx, |composer, cx| {
             composer.set_thread(&snapshot.view, cx);
             composer.set_started_removals(snapshot.started_removals.clone(), cx);
+            composer.set_refusals(snapshot.refusals.clone(), cx);
         });
         self.sync_runner_cap(cx);
         self.pane.update(cx, |pane, cx| {

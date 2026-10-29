@@ -70,3 +70,6 @@ compose-thread-stop = Stop
 compose-thread-stop-a11y = Stop the running task
 compose-thread-started = That message already started, so it could not be removed. Stop it instead.
 compose-thread-started-a11y = The queued message had already started; use Stop to cancel it
+compose-thread-refused-mode = The hub refused the mode change: { $detail }
+compose-thread-refused-model = The hub refused the model change: { $detail }
+compose-thread-refused-remove = The hub refused to remove the queued message: { $detail }
