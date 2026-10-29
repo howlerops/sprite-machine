@@ -28,7 +28,8 @@ use protocol::turn_event::MachinePresence;
 use crate::approval::{self, ApprovalCard, CardHandler};
 use crate::diff::{DiffEvent, DiffInput, DiffView};
 use crate::shell::i18n::{tr, tr_args};
-use crate::task::tools;
+use crate::task::row_cache::{RowCache, UpdateStats};
+use crate::task::tools::{self, DiffStats};
 
 /// Height of one transcript row.
 pub const ROW_HEIGHT: Pixels = px(22.);
@@ -195,6 +196,17 @@ pub fn item_rows_with_cards(
     cards: &[ApprovalCard],
     out: &mut Vec<Row>,
 ) {
+    item_rows_with(item, expanded, cards, &mut DiffStats::default(), out);
+}
+
+/// Like [`item_rows_with_cards`], taking diff counts from `stats`.
+pub fn item_rows_with(
+    item: &Item,
+    expanded: bool,
+    cards: &[ApprovalCard],
+    stats: &mut DiffStats,
+    out: &mut Vec<Row>,
+) {
     match item {
         Item::User(user) => {
             let who = if user.author.kind == ActorKind::User {
@@ -239,7 +251,7 @@ pub fn item_rows_with_cards(
             );
         }
         Item::Tool(tool) => tools::tool_rows(tool, expanded, out),
-        Item::Activity(activity) => tools::activity_rows(activity, expanded, out),
+        Item::Activity(activity) => tools::activity_rows_with(activity, expanded, stats, out),
         Item::Interrupt(interrupt) => {
             match cards
                 .iter()
@@ -294,27 +306,43 @@ pub fn task_rows(
     cards: &[ApprovalCard],
     out: &mut Vec<Row>,
 ) {
+    let mut stats = DiffStats::default();
     for item in task.transcript().items() {
         let key = *next_key;
         *next_key += 1;
-        let start = out.len();
-        item_rows_with_cards(item, false, cards, out);
-        if !out[start..].iter().any(|row| row.kind == RowKind::More) {
-            continue;
-        }
-        if expanded.contains(&key) {
-            out.truncate(start);
-            item_rows_with_cards(item, true, cards, out);
-            let mut less = Row::new(RowKind::More, Tone::Muted, 1, tr("transcript-show-less"));
-            less.expand = Some(key);
-            out.push(less);
-        } else {
-            for row in out[start..].iter_mut().filter(|r| r.kind == RowKind::More) {
-                row.expand = Some(key);
-            }
-        }
+        item_block(item, key, expanded, cards, &mut stats, out);
     }
     out.push(status_row(task.status()));
+}
+
+/// The rows of the item numbered `key`, with its "more" / "show less" rows wired to `key`.
+/// Returns `true` when the item has a capped body (its rows then depend on `key` and on
+/// whether `key` is in `expanded`).
+pub fn item_block(
+    item: &Item,
+    key: usize,
+    expanded: &BTreeSet<usize>,
+    cards: &[ApprovalCard],
+    stats: &mut DiffStats,
+    out: &mut Vec<Row>,
+) -> bool {
+    let start = out.len();
+    item_rows_with(item, false, cards, stats, out);
+    if !out[start..].iter().any(|row| row.kind == RowKind::More) {
+        return false;
+    }
+    if expanded.contains(&key) {
+        out.truncate(start);
+        item_rows_with(item, true, cards, stats, out);
+        let mut less = Row::new(RowKind::More, Tone::Muted, 1, tr("transcript-show-less"));
+        less.expand = Some(key);
+        out.push(less);
+    } else {
+        for row in out[start..].iter_mut().filter(|r| r.kind == RowKind::More) {
+            row.expand = Some(key);
+        }
+    }
+    true
 }
 
 /// The rows of a whole thread with every body capped.
@@ -334,8 +362,17 @@ pub fn thread_rows_with_cards(
     expanded: &BTreeSet<usize>,
     cards: &[ApprovalCard],
 ) -> Vec<Row> {
-    let mut out = Vec::new();
+    let mut out = header_rows(thread);
     let mut next_key = 0;
+    for task in thread.tasks() {
+        task_rows(task, expanded, &mut next_key, cards, &mut out);
+    }
+    out
+}
+
+/// The rows above the tasks: title, mode, context and machine presence.
+pub fn header_rows(thread: &ThreadView) -> Vec<Row> {
+    let mut out = Vec::new();
     let title = thread
         .title()
         .map(sanitize)
@@ -392,19 +429,16 @@ pub fn thread_rows_with_cards(
             ),
         ));
     }
-    for task in thread.tasks() {
-        task_rows(task, expanded, &mut next_key, cards, &mut out);
-    }
     out
 }
 
 /// The transcript pane. Call [`TranscriptPane::set_thread`] whenever the thread view changes.
 pub struct TranscriptPane {
-    rows: Vec<Row>,
+    cache: RowCache,
     item_sizes: Rc<Vec<Size<Pixels>>>,
     scroll_handle: VirtualListScrollHandle,
     follow_tail: bool,
-    thread: Option<ThreadView>,
+    has_thread: bool,
     expanded: BTreeSet<usize>,
     approvals: Vec<ApprovalCard>,
     approval_handler: Option<CardHandler>,
@@ -439,11 +473,11 @@ impl Default for TranscriptPane {
 impl TranscriptPane {
     pub fn new() -> Self {
         Self {
-            rows: Vec::new(),
+            cache: RowCache::new(),
             item_sizes: Rc::new(Vec::new()),
             scroll_handle: VirtualListScrollHandle::new(),
             follow_tail: false,
-            thread: None,
+            has_thread: false,
             expanded: BTreeSet::new(),
             approvals: Vec::new(),
             approval_handler: None,
@@ -506,23 +540,20 @@ impl TranscriptPane {
     }
 
     fn diff_input(&self, activity_id: &str) -> Option<DiffInput> {
-        let thread = self.thread.as_ref()?;
-        thread
-            .tasks()
-            .iter()
-            .flat_map(|task| task.transcript().items())
-            .find_map(|item| match item {
-                Item::Activity(activity)
-                    if activity.activity_id == activity_id && activity.complete =>
-                {
-                    activity.diff().map(|diff| DiffInput::from(&diff))
-                }
-                _ => None,
-            })
+        let activity = self.cache.activity(activity_id)?;
+        if !activity.complete {
+            return None;
+        }
+        activity.diff().map(|diff| DiffInput::from(&diff))
     }
 
     pub fn rows(&self) -> &[Row] {
-        &self.rows
+        self.cache.rows()
+    }
+
+    /// What the last update of the rows rebuilt (items, rows, diff models).
+    pub fn last_update(&self) -> UpdateStats {
+        self.cache.last_update()
     }
 
     /// Keep the newest row in view when the thread changes.
@@ -530,13 +561,16 @@ impl TranscriptPane {
         self.follow_tail = follow;
     }
 
-    /// Rebuilds the rows from `thread` and repaints.
+    /// Updates the rows from `thread` and repaints. Only the items that changed since the last
+    /// call have their rows built again (see [`RowCache`]).
     pub fn set_thread(&mut self, thread: &ThreadView, cx: &mut Context<Self>) {
-        self.thread = Some(thread.clone());
-        self.rebuild(cx);
-        if self.follow_tail && !self.rows.is_empty() {
+        self.has_thread = true;
+        self.cache.sync(thread, &self.expanded, &self.approvals);
+        self.after_update(cx);
+        let rows = self.cache.rows().len();
+        if self.follow_tail && rows > 0 {
             self.scroll_handle
-                .scroll_to_item(self.rows.len() - 1, ScrollStrategy::Bottom);
+                .scroll_to_item(rows - 1, ScrollStrategy::Bottom);
         }
     }
 
@@ -561,12 +595,20 @@ impl TranscriptPane {
         self.rebuild(cx);
     }
 
+    /// Applies a change of the expanded items or the cards to the rows already built.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
-        let Some(thread) = &self.thread else { return };
-        self.rows = thread_rows_with_cards(thread, &self.expanded, &self.approvals);
+        if !self.has_thread {
+            return;
+        }
+        self.cache.refresh(&self.expanded, &self.approvals);
+        self.after_update(cx);
+    }
+
+    fn after_update(&mut self, cx: &mut Context<Self>) {
         self.refresh_open_diff(cx);
-        if self.item_sizes.len() != self.rows.len() {
-            self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); self.rows.len()]);
+        let rows = self.cache.rows().len();
+        if self.item_sizes.len() != rows {
+            self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); rows]);
         }
         cx.notify();
     }
@@ -635,7 +677,7 @@ impl TranscriptPane {
     }
 
     fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let row = &self.rows[ix];
+        let row = &self.cache.rows()[ix];
         let text = SharedString::from(row.text.clone());
         let theme = cx.theme();
         let color = match row.tone {

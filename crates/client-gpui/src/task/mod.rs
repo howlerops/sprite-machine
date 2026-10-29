@@ -3,11 +3,13 @@
 //! the diff, approval and composer parts.
 
 pub mod plan;
+pub mod row_cache;
 pub mod tools;
 pub mod transcript;
 pub mod usage;
 
 pub use plan::{PlanModel, PlanRow, render_plan};
+pub use row_cache::{RowCache, UpdateStats};
 pub use transcript::{
     Row, RowKind, Tone, TranscriptEvent, TranscriptPane, thread_rows, thread_rows_expanded,
 };
