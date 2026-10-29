@@ -19,7 +19,9 @@ pub use model::{
     ListRequest, PatchRequest, PendingInterrupt, SEARCH_DEBOUNCE, Section, Status, SystemClock,
     ThreadRow, Verdict, parse_threads,
 };
-pub use view::{InboxEvent, InboxView, REFRESH_EVERY, Target};
+pub use view::{
+    EMPTY_CLEAR_FILTERS_ID, EMPTY_NEW_TASK_ID, InboxEvent, InboxView, REFRESH_EVERY, Target,
+};
 
 /// The inbox's English strings (`locales/en/inbox.ftl`).
 pub const EN_FTL: &str = include_str!("../../locales/en/inbox.ftl");

@@ -14,3 +14,5 @@ palette-untitled-thread = Untitled thread
 palette-item-a11y = { $title }
 palette-item-shortcut-a11y = { $title }, shortcut { $shortcut }
 palette-count-a11y = { $count } matching commands
+palette-empty-clear = Clear search
+palette-empty-clear-a11y = Clear the search and show all commands

@@ -24,7 +24,7 @@ pub use model::{
     MachineInfo, MachinesResponse, ManagedAgentClient, ManagedLaunchRequest, Presence,
     PresenceInfo, UnavailableManagedClient, agents_from_machines, byo_disabled_reason, submit,
 };
-pub use view::AgentsView;
+pub use view::{AgentsEvent, AgentsView, EMPTY_SETUP_ID};
 
 /// The agents strings (`locales/en/agents.ftl`).
 pub const EN_FTL: &str = include_str!("../../locales/en/agents.ftl");

@@ -16,7 +16,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use gpui_kit::TestSupportExt as _;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, *};
 use gpui_kit::prelude::*;
@@ -127,6 +127,18 @@ fn run_off_thread<T: Send + 'static>(
 }
 
 type SendAnswer = Result<client_core::ThreadCreated, client_core::CreateThreadError>;
+
+/// What the new-task page tells the shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeEvent {
+    /// The no-machines state's primary action: show how to connect a machine.
+    SetupMachine,
+}
+
+/// Element id of the no-machines state's action.
+pub const MACHINES_EMPTY_SETUP_ID: &str = "no-machines-action";
+
+impl EventEmitter<ComposeEvent> for ComposeView {}
 
 pub struct ComposeView {
     model: NewTaskModel,
@@ -510,6 +522,9 @@ impl ComposeView {
                 (machine.machine_id.clone(), label, a11y)
             })
             .collect::<Vec<_>>();
+        let no_machines = matches!(self.machines_state, MachinesState::Idle)
+            && items.is_empty()
+            && self.target.is_some();
         let note = match &self.machines_state {
             MachinesState::Loading => Some(tr("compose-machines-loading")),
             MachinesState::Failed(detail) => Some(tr_args(
@@ -535,6 +550,19 @@ impl ComposeView {
                         .aria_label(text.clone())
                         .text_color(cx.theme().muted_foreground)
                         .child(text),
+                )
+            })
+            .when(no_machines, |el| {
+                el.child(
+                    div().child(
+                        Button::new(MACHINES_EMPTY_SETUP_ID)
+                            .primary()
+                            .label(tr("compose-machines-empty-setup"))
+                            .accessibility_label(tr("compose-machines-empty-setup-a11y"))
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(ComposeEvent::SetupMachine);
+                            })),
+                    ),
                 )
             })
     }

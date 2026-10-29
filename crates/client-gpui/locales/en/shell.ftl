@@ -169,3 +169,6 @@ transcript-raw-flow = Flow event: { $detail }
 transcript-raw-unknown = unknown event
 
 content-machines-error = Could not load machines: { $detail }
+transcript-empty = Nothing here yet. The agent's messages and tool calls appear as they arrive.
+transcript-empty-write = Write a message
+transcript-empty-write-hint = Write the first message in this thread

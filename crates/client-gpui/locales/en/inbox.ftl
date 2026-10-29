@@ -49,3 +49,7 @@ inbox-status-error = { $detail }
 inbox-status-no-hub = Sign in to see your tasks.
 inbox-empty = No tasks yet. Start one with New task.
 inbox-empty-filtered = No tasks match.
+inbox-empty-new-task = New task
+inbox-empty-new-task-a11y = Start a new task
+inbox-empty-clear-filters = Clear filters
+inbox-empty-clear-filters-a11y = Clear the filters and the search

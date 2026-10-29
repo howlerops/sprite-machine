@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use client_core::TaskStatus;
 use client_core::view::{Item, TaskView, ThreadView};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{
     ActiveTheme as _, VirtualListScrollHandle,
     scroll::{ScrollableElement, ScrollbarAxis},
@@ -39,6 +40,9 @@ pub const ROW_HEIGHT: Pixels = px(22.);
 pub const PANE_ID: &str = "transcript";
 /// Element id carried by every laid-out row's text element.
 pub const ROW_ID: &str = "transcript-row";
+/// Element id of the empty state (a thread with nothing in it yet) and of its action.
+pub const EMPTY_ID: &str = "empty-thread";
+pub const EMPTY_WRITE_ID: &str = "empty-thread-write";
 /// Element id of a clickable "more lines" / "show less" row.
 pub const MORE_ID: &str = "transcript-more";
 /// Element id of a "View diff" action.
@@ -478,6 +482,8 @@ pub enum TranscriptEvent {
     /// Open `path` (resolved inside the workspace root) at 1-based `line`; re-emitted from the
     /// diff viewer's `DiffEvent::OpenFile`.
     OpenFile { path: PathBuf, line: u32 },
+    /// The empty thread's primary action: put the cursor in the composer.
+    WriteMessage,
 }
 
 impl EventEmitter<TranscriptEvent> for TranscriptPane {}
@@ -698,6 +704,15 @@ impl TranscriptPane {
         self.approvals = cards;
         self.approval_handler = handler;
         self.rebuild(cx);
+    }
+
+    /// Whether the thread has nothing to show beyond its header rows (title, mode, presence):
+    /// no messages, no tool calls. A pane that has no thread yet is empty too.
+    pub fn is_empty_thread(&self) -> bool {
+        self.cache
+            .rows()
+            .iter()
+            .all(|row| row.kind == RowKind::Header)
     }
 
     /// Shows the capped bodies of item `key` in full, or caps them again.
@@ -1008,6 +1023,35 @@ impl Render for TranscriptPane {
                             .map(|image| self.render_image_panel(&image, cx)),
                         |el, panel| el.child(panel),
                     )
+                    .when(self.is_empty_thread(), |el| {
+                        // Below the header rows (title, mode, presence) the list shows.
+                        let header_height = ROW_HEIGHT * self.cache.rows().len() as f32;
+                        el.child(
+                            v_flex()
+                                .id(EMPTY_ID)
+                                .role(Role::Status)
+                                .test_support()
+                                .aria_label(tr("transcript-empty"))
+                                .absolute()
+                                .top(header_height)
+                                .left_0()
+                                .right_0()
+                                .p_4()
+                                .items_center()
+                                .gap_2()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr("transcript-empty"))
+                                .child(
+                                    Button::new(EMPTY_WRITE_ID)
+                                        .primary()
+                                        .label(tr("transcript-empty-write"))
+                                        .accessibility_label(tr("transcript-empty-write-hint"))
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            cx.emit(TranscriptEvent::WriteMessage);
+                                        })),
+                                ),
+                        )
+                    })
                     .child(
                         v_flex()
                             .id("transcript-scroll")
