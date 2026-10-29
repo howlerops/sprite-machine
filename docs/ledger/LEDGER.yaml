@@ -4123,7 +4123,8 @@ items:
     title: 'client: diff viewer'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged 8cfd154; similar 2.7.0 already in Cargo.lock; leader verify on v2 with M3-011f: client-gpui 141 passed 0 failed, clippy clean"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4253,7 +4254,8 @@ items:
     title: 'desktop inbox: clicking a thread row opens it (calls AppShell::open_thread)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 141 passed; tests/shell 46 passed 5/5 repeated runs; clippy clean; worker fail-check: 4 new tests fail without wiring"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4297,6 +4299,76 @@ items:
       - 'crates/client-gpui/src/shell/link.rs'
     acceptance:
       - 'SessionLink holds a Connection again; tests unchanged and green'
+  - id: M3-010a
+    title: 'client: wire DiffView into the task view (diff activities and ACP tool_call diff content; OpenFile forwarded with the workspace root)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: M
+    risk: low
+    deps: [M3-010]
+    paths:
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/tests/transcript.rs'
+    acceptance:
+      - 'A tool call with diff content opens the DiffView from the transcript; OpenFile reaches the shell with path and line (window test)'
+  - id: M3-010b
+    title: 'client: approval card reuses DiffModel (hunks and size limits) instead of its own capped diff lines'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-010]
+    paths:
+      - 'crates/client-gpui/src/approval/**'
+      - 'crates/client-gpui/tests/approval.rs'
+    acceptance:
+      - 'approval tests green with DiffModel; one diff implementation'
+  - id: M3-010c
+    title: 'client: diff viewer polish (syntax and intra-line highlighting, hunk keyboard navigation, horizontal scroll)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: M
+    risk: low
+    deps: [M3-010]
+    paths:
+      - 'crates/client-gpui/src/diff/**'
+      - 'crates/client-gpui/tests/diff.rs'
+    acceptance:
+      - 'each feature has a test'
+  - id: M3-011i
+    title: 'desktop inbox: keyboard selection; Enter opens the focused row; open target has a role and an aria label'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011f]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/locales/en/inbox.ftl'
+      - 'crates/client-gpui/tests/inbox.rs'
+    acceptance:
+      - 'Arrow keys move selection, Enter emits OpenThread; open target has role and label naming the thread (tests)'
+  - id: M3-011j
+    title: 'client-gpui tests: the_banner_follows_a_client_core_connection waits on conditions, not fixed sleeps (flaked once)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011f]
+    paths:
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'No fixed sleeps in the test; 20 repeated runs pass'
 
   - id: M3-012
     title: 'client: agent registry + launch managed agent form'
