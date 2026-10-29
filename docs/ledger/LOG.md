@@ -299,3 +299,4 @@
 - 2026-10-29 leader: merged M2B-019e (nacked runner line kept with a notice) and M3-007 (desktop inbox, 21 tests); verify on merged v2 running. Filed M2B-019h (tunnel nack integration test) and M2-010h (hub list rows carry pending_interrupts/workspace/archived, from M3-007). Assigned M2-015 (sonnet).
 - 2026-10-29 leader: M2B-006a done: five harness ACP entry points answer initialize; gemini row changed to --acp; goose left to M2B-006b (human).
 - 2026-10-29 leader: merged M3-011 (approval cards, 23 tests); filed M3-011a/b/c/d from its discovered work.
+- 2026-10-29 leader: disk hit 0 during verify; freed stale wasm dirs and an old in-repo target (9 GB free). Re-running runner+client-gpui verify. Assigned M2B-019h (haiku).

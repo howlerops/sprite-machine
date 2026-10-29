@@ -6480,7 +6480,9 @@ items:
     title: 'runner tunnel: integration test that a nacked prompt_submit reaches the host (tunnel_client.rs)'
     milestone: M2b
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: rust
     size: S
     risk: low
