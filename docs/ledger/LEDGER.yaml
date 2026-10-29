@@ -4637,10 +4637,15 @@ items:
     title: 'client: desktop notifications, deep links, notification settings'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-002, M2-011]
     paths:
-      - 'crates/client-gpui/src/notify/**'
+      - "crates/client-gpui/src/notify/**"
+      - "crates/client-gpui/locales/en/notify.ftl"
+      - "crates/client-gpui/tests/notify.rs"
     context:
       - 'docs/PLAN-v2-ade.md §4.2 (Notifications)'
       - 'crates/hub/src/links* (M2-010 deep links)'
