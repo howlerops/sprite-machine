@@ -204,6 +204,26 @@ fn failure(status: u16) -> Failure {
 // ---- model: sections ------------------------------------------------------------------------------
 
 #[test]
+fn a_failed_status_is_its_own_status_and_sits_with_done() {
+    assert_eq!(Status::parse("failed"), Status::Failed);
+    assert_eq!(Status::Failed.as_query(), "failed");
+    assert_eq!(Section::of(Status::Failed), Section::Done);
+    // Unknown strings are still idle.
+    assert_eq!(Status::parse("cancelled"), Status::Idle);
+    let (model, _) = model_with(vec![
+        thread("th_bad", "Broke", "failed"),
+        thread("th_run", "Run", "running"),
+    ]);
+    assert_eq!(model.row("th_bad").expect("row").status, Status::Failed);
+    let done: Vec<_> = model
+        .section(Section::Done)
+        .iter()
+        .map(|row| row.thread_id.clone())
+        .collect();
+    assert_eq!(done, ["th_bad"]);
+}
+
+#[test]
 fn threads_fall_into_needs_you_running_and_done_in_the_hubs_order() {
     let (model, _) = model_with(vec![
         thread("th_done", "Done one", "done"),

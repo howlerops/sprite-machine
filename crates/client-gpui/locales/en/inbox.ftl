@@ -9,6 +9,7 @@ inbox-filter-status-all = All
 inbox-filter-status-needs_you = Needs you
 inbox-filter-status-running = Running
 inbox-filter-status-done = Done
+inbox-filter-status-failed = Failed
 inbox-filter-status-a11y = Show { $name } tasks
 inbox-filter-status-selected-a11y = Showing { $name } tasks
 inbox-filter-agent = Agent
