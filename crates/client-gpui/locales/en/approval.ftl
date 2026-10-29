@@ -1,0 +1,36 @@
+# Approval card strings (en). Referenced from src/approval/ and checked by tests/approval.rs.
+
+approval-region-a11y = Approval needed: { $detail }
+approval-heading-detail = Approval needed: { $detail }
+approval-time-left = { $detail } left
+approval-expired = Expired; the request can no longer be answered
+approval-option-a11y = { $name } ({ $kind })
+approval-kind-allow_once = allow once
+approval-kind-allow_always = allow always
+approval-kind-reject_once = reject once
+approval-kind-reject_always = reject always
+approval-command = Command
+approval-command-cwd = in { $detail }
+approval-diff = Change to { $detail }
+approval-diff-new-file = New file { $detail }
+approval-diff-incomplete = (diff still arriving)
+approval-more-lines = ... { $detail } more lines
+approval-preset-offer = Save "{ $name }" as this workspace's preset
+approval-preset-offer-a11y = Also save { $name } as the preset for this workspace
+approval-preset-note = Presets are stored on this device for now; the hub has no preset API yet.
+approval-preset-saved = Saved as this workspace's preset on this device
+approval-sending = Sending your answer...
+approval-failed = Your answer was not delivered: { $detail }
+approval-resolved = { $choice } by { $user } at { $time }
+approval-resolved-no-time = { $choice } by { $user }
+approval-resolved-cancelled = Cancelled
+approval-resolved-declined = Declined
+approval-resolved-submitted = Answered
+approval-resolved-expired = Expired
+approval-conflict = Already resolved by { $user } at { $time }
+approval-conflict-no-time = Already resolved by { $user }
+approval-actor-device = { $user } ({ $device })
+approval-actor-system = the system
+approval-actor-policy = a policy
+approval-time-format = { $hours }:{ $minutes }:{ $seconds } UTC
+approval-conflict-unknown = Already resolved by someone else

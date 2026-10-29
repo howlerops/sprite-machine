@@ -24,6 +24,7 @@ use gpui_kit::*;
 use protocol::tunnel::ActorKind;
 use protocol::turn_event::MachinePresence;
 
+use crate::approval::{self, ApprovalCard, CardHandler};
 use crate::shell::i18n::{tr, tr_args};
 use crate::task::tools;
 
@@ -170,6 +171,17 @@ pub fn push_more(out: &mut Vec<Row>, hidden: usize, indent: u8) {
 
 /// The rows of one transcript item.
 pub fn item_rows(item: &Item, expanded: bool, out: &mut Vec<Row>) {
+    item_rows_with_cards(item, expanded, &[], out);
+}
+
+/// Like [`item_rows`]; an approval interrupt that has a card in `cards` is shown by
+/// [`approval::card_rows`] (the unanswered card itself is pinned above the list).
+pub fn item_rows_with_cards(
+    item: &Item,
+    expanded: bool,
+    cards: &[ApprovalCard],
+    out: &mut Vec<Row>,
+) {
     match item {
         Item::User(user) => {
             let who = if user.author.kind == ActorKind::User {
@@ -215,7 +227,15 @@ pub fn item_rows(item: &Item, expanded: bool, out: &mut Vec<Row>) {
         }
         Item::Tool(tool) => tools::tool_rows(tool, expanded, out),
         Item::Activity(activity) => tools::activity_rows(activity, expanded, out),
-        Item::Interrupt(interrupt) => tools::interrupt_rows(interrupt, expanded, out),
+        Item::Interrupt(interrupt) => {
+            match cards
+                .iter()
+                .find(|card| card.interrupt_id == interrupt.id())
+            {
+                Some(card) => approval::card_rows(card, out),
+                None => tools::interrupt_rows(interrupt, expanded, out),
+            }
+        }
         Item::Checkpoint(checkpoint) => tools::checkpoint_rows(checkpoint, out),
         Item::Step(step) => tools::step_rows(step, out),
         Item::Subagent(sub) => tools::subagent_rows(sub, expanded, out),
@@ -258,19 +278,20 @@ pub fn task_rows(
     task: &TaskView,
     expanded: &BTreeSet<usize>,
     next_key: &mut usize,
+    cards: &[ApprovalCard],
     out: &mut Vec<Row>,
 ) {
     for item in task.transcript().items() {
         let key = *next_key;
         *next_key += 1;
         let start = out.len();
-        item_rows(item, false, out);
+        item_rows_with_cards(item, false, cards, out);
         if !out[start..].iter().any(|row| row.kind == RowKind::More) {
             continue;
         }
         if expanded.contains(&key) {
             out.truncate(start);
-            item_rows(item, true, out);
+            item_rows_with_cards(item, true, cards, out);
             let mut less = Row::new(RowKind::More, Tone::Muted, 1, tr("transcript-show-less"));
             less.expand = Some(key);
             out.push(less);
@@ -291,6 +312,15 @@ pub fn thread_rows(thread: &ThreadView) -> Vec<Row> {
 /// The rows of a whole thread: title and machine presence, then each task in order. Items are
 /// numbered in order across tasks; those numbered in `expanded` are shown in full.
 pub fn thread_rows_expanded(thread: &ThreadView, expanded: &BTreeSet<usize>) -> Vec<Row> {
+    thread_rows_with_cards(thread, expanded, &[])
+}
+
+/// [`thread_rows_expanded`] with approval cards: see [`item_rows_with_cards`].
+pub fn thread_rows_with_cards(
+    thread: &ThreadView,
+    expanded: &BTreeSet<usize>,
+    cards: &[ApprovalCard],
+) -> Vec<Row> {
     let mut out = Vec::new();
     let mut next_key = 0;
     let title = thread
@@ -350,7 +380,7 @@ pub fn thread_rows_expanded(thread: &ThreadView, expanded: &BTreeSet<usize>) -> 
         ));
     }
     for task in thread.tasks() {
-        task_rows(task, expanded, &mut next_key, &mut out);
+        task_rows(task, expanded, &mut next_key, cards, &mut out);
     }
     out
 }
@@ -363,6 +393,8 @@ pub struct TranscriptPane {
     follow_tail: bool,
     thread: Option<ThreadView>,
     expanded: BTreeSet<usize>,
+    approvals: Vec<ApprovalCard>,
+    approval_handler: Option<CardHandler>,
 }
 
 impl Default for TranscriptPane {
@@ -380,6 +412,8 @@ impl TranscriptPane {
             follow_tail: false,
             thread: None,
             expanded: BTreeSet::new(),
+            approvals: Vec::new(),
+            approval_handler: None,
         }
     }
 
@@ -402,6 +436,19 @@ impl TranscriptPane {
         }
     }
 
+    /// Sets the approval cards (from `ApprovalController::cards`) and where their clicks go.
+    /// Unanswered cards are pinned above the transcript; answered ones stay in it as rows.
+    pub fn set_approvals(
+        &mut self,
+        cards: Vec<ApprovalCard>,
+        handler: Option<CardHandler>,
+        cx: &mut Context<Self>,
+    ) {
+        self.approvals = cards;
+        self.approval_handler = handler;
+        self.rebuild(cx);
+    }
+
     /// Shows the capped bodies of item `key` in full, or caps them again.
     pub fn toggle_expanded(&mut self, key: usize, cx: &mut Context<Self>) {
         if !self.expanded.remove(&key) {
@@ -412,7 +459,7 @@ impl TranscriptPane {
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let Some(thread) = &self.thread else { return };
-        self.rows = thread_rows_expanded(thread, &self.expanded);
+        self.rows = thread_rows_with_cards(thread, &self.expanded, &self.approvals);
         if self.item_sizes.len() != self.rows.len() {
             self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); self.rows.len()]);
         }
@@ -476,29 +523,43 @@ impl TranscriptPane {
 
 impl Render for TranscriptPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let pinned: Vec<ApprovalCard> = self
+            .approvals
+            .iter()
+            .filter(|card| !matches!(card.state, approval::CardState::Resolved { .. }))
+            .cloned()
+            .collect();
+        v_flex()
             .id(PANE_ID)
             .test_support()
             .aria_label(tr("task-label"))
             .relative()
             .size_full()
+            .when(!pinned.is_empty(), |el| {
+                el.child(approval::render_cards(
+                    &pinned,
+                    self.approval_handler.clone(),
+                ))
+            })
             .child(
-                v_flex()
-                    .id("transcript-scroll")
-                    .relative()
-                    .size_full()
-                    .child(
-                        v_virtual_list(
-                            cx.entity().clone(),
-                            "transcript-list",
-                            self.item_sizes.clone(),
-                            |pane, visible_range, _, cx| {
-                                visible_range.map(|ix| pane.render_row(ix, cx)).collect()
-                            },
+                div().flex_1().min_h_0().relative().child(
+                    v_flex()
+                        .id("transcript-scroll")
+                        .relative()
+                        .size_full()
+                        .child(
+                            v_virtual_list(
+                                cx.entity().clone(),
+                                "transcript-list",
+                                self.item_sizes.clone(),
+                                |pane, visible_range, _, cx| {
+                                    visible_range.map(|ix| pane.render_row(ix, cx)).collect()
+                                },
+                            )
+                            .track_scroll(&self.scroll_handle),
                         )
-                        .track_scroll(&self.scroll_handle),
-                    )
-                    .scrollbar(&self.scroll_handle, ScrollbarAxis::Vertical),
+                        .scrollbar(&self.scroll_handle, ScrollbarAxis::Vertical),
+                ),
             )
     }
 }
