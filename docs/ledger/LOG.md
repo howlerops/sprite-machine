@@ -315,3 +315,4 @@
 - 2026-10-29 leader: merged M3-011j (shell tests condition-based waits; 20/20 runs for worker). Verify with M3-014.
 - 2026-10-29 leader: disk hit 0 again (M3-014 and M3-005 workers stopped mid-build, nothing lost); pruned stale test exes/deps/incremental (13 GB free) and resumed both.
 - 2026-10-29 leader: merged M3-005 (composer pieces, not yet wired: M3-005a; intents: M3-005b). The worker wrongly thought the shared target was gone and built a private 5.4 GB target; deleted.
+- 2026-10-29 leader: merged M3-014 (palette + shortcuts); verified M3-005, M3-011j, M3-014 together on v2 (client 258 passed, shell+palette 3/3). Filed M3-014a/b. M3-005a now after M3-005b. Assigned M3-005b (sonnet), M2-010i (haiku).

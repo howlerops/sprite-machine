@@ -4019,8 +4019,8 @@ items:
     title: 'client: composer slash commands, mode/model switch, queued chips, Stop'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: compose_commands 12 passed, compose 13, clippy clean. Leader verify with M3-014."
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-005 + M3-011j + M3-014 together): clippy client-core/gpui clean; client-core+client-gpui 258 passed 0 failed; shell 51 + palette 27 passed 3/3 repeated runs; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4048,7 +4048,10 @@ items:
     lane: client
     size: M
     risk: medium
-    deps: [M3-005, M3-014]
+    deps:
+      - "M3-005"
+      - "M3-014"
+      - "M3-005b"
     paths:
       - 'crates/client-gpui/src/shell/**'
       - 'crates/client-gpui/src/task/**'
@@ -4060,7 +4063,9 @@ items:
     title: 'client-core: Intent variants for session set (mode/config) and pending remove, so they go through the outbox with idempotency keys'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: medium
@@ -4511,8 +4516,8 @@ items:
     title: 'client-gpui tests: the_banner_follows_a_client_core_connection waits on conditions, not fixed sleeps (flaked once)'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: shell 20/20 runs, clippy clean. Leader verify with M3-014."
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-005 + M3-011j + M3-014 together): clippy client-core/gpui clean; client-core+client-gpui 258 passed 0 failed; shell 51 + palette 27 passed 3/3 repeated runs; fmt ok"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4581,7 +4586,8 @@ items:
     title: 'client: command palette + shortcuts'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-005 + M3-011j + M3-014 together): clippy client-core/gpui clean; client-core+client-gpui 258 passed 0 failed; shell 51 + palette 27 passed 3/3 repeated runs; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4596,6 +4602,35 @@ items:
       - '⌘K palette, ⌘N, ⌘↵, task navigation shortcuts'
     verify:
       - 'cargo test -p client-gpui --test palette'
+  - id: M3-014a
+    title: 'client: thread-nav chord revisit and user-remappable shortcuts (KeyBinding::load with parse_with_os on a gpui bump)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-014]
+    paths:
+      - 'crates/client-gpui/src/palette/**'
+      - 'crates/client-gpui/tests/palette.rs'
+    acceptance:
+      - 'Shortcuts load from one table with OS-aware parsing; a user override file remaps one (test)'
+  - id: M3-014b
+    title: 'client: palette extras (archive/rename, theme, sign out, filters; recency ranking; hub search for unloaded threads)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: M
+    risk: low
+    deps: [M3-014]
+    paths:
+      - 'crates/client-gpui/src/palette/**'
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/palette.rs'
+    acceptance:
+      - 'Each new command has a test; recency boosts ranking (test)'
 
   - id: M3-015
     title: 'client: mobile shell + layouts + native push (per ADR 0001b)'
@@ -6056,7 +6091,9 @@ items:
     title: 'hub: list form/auth interrupts on needs_you rows (pending_interrupts kind) so the inbox can show them'
     milestone: M2
     phase: P4
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: rust
     size: S
     risk: low
