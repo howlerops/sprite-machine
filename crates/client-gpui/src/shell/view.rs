@@ -6,8 +6,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use client_core::Connectivity;
 use client_core::outbox::{Clock, Intent};
+use client_core::{Connectivity, TaskStatus};
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -158,6 +158,10 @@ pub struct AppShell {
     /// [`crate::inbox::InboxView::lists_applied`] as of the last look.
     lists_seen: u64,
     _inbox_lists: Subscription,
+    /// The open thread's last snapshot status as a hub status string. The snapshot can be ahead
+    /// of the inbox list; see [`AppShell::on_inbox_changed`].
+    snapshot_status: Option<(String, &'static str)>,
+    _inbox_timer: Option<Task<()>>,
     _activation: Subscription,
     _notify_task: Option<Task<()>>,
 }
@@ -207,7 +211,7 @@ impl AppShell {
         });
         let activation = cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active();
-            this.set_window_active(active, cx);
+            this.activate(active, window, cx);
         });
         let notify_events = EventQueue::default();
         let toasts = ToastSink::new(notify_events.clone());
@@ -284,11 +288,14 @@ impl AppShell {
             inbox_seeded: false,
             lists_seen: 0,
             _inbox_lists: inbox_lists,
+            snapshot_status: None,
+            _inbox_timer: None,
             _activation: activation,
             _notify_task: None,
         };
         shell.start_notify_task(window, cx);
         shell.start_machines_timer(cx);
+        shell.start_inbox_timer(window, cx);
         shell.apply_theme(window, cx);
         shell.refresh_link(cx);
         shell
@@ -326,6 +333,7 @@ impl AppShell {
                 self.snapshot_task = None;
                 self.tick_task = None;
                 self.open_thread = None;
+                self.snapshot_status = None;
                 self.inbox_seeded = false;
                 self.sync_notify_focus();
                 self.set_connectivity(Connectivity::Connecting, cx);
@@ -592,6 +600,58 @@ impl AppShell {
         self.sync_notify_focus();
     }
 
+    /// The window went to the front or the back. Coming to the front also refetches the inbox
+    /// (a fetch already running is not doubled), so what changed while away shows at once.
+    pub fn activate(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_window_active(active, cx);
+        if active {
+            self.inbox
+                .update(cx, |inbox, cx| inbox.refresh_if_idle(window, cx));
+        }
+    }
+
+    /// Refetch the inbox every [`crate::inbox::REFRESH_EVERY`] while signed in.
+    fn start_inbox_timer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self._inbox_timer = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(crate::inbox::REFRESH_EVERY)
+                    .await;
+                let result = this.update_in(cx, |this, window, cx| {
+                    this.inbox
+                        .update(cx, |inbox, cx| inbox.refresh_if_idle(window, cx));
+                });
+                if result.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// The open thread's snapshot status goes to the notifier too, so a run that ends while its
+    /// thread is open (and the window is in the background) notifies without waiting for a list,
+    /// and the list that reports the same status later does not notify again (the notifier
+    /// de-duplicates by thread and status). A thread the notifier has not seen yet is only
+    /// recorded: its first status is not a change.
+    fn observe_snapshot_status(&mut self, thread_id: &str, status: TaskStatus) {
+        if !self.inbox_seeded {
+            return;
+        }
+        let status = match status {
+            TaskStatus::Starting | TaskStatus::Running => "running",
+            TaskStatus::NeedsYou => "needs_you",
+            TaskStatus::Succeeded => "done",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Cancelled => "cancelled",
+        };
+        if self.notifier.knows(thread_id) {
+            self.notifier.observe(thread_id, status);
+        } else {
+            self.notifier.seed([(thread_id, status)]);
+        }
+        self.snapshot_status = Some((thread_id.to_owned(), status));
+    }
+
     /// The notifier's prefs, shared with the notification settings.
     pub fn notify_settings(&self) -> &Entity<NotifySettingsView> {
         &self.notify_settings
@@ -645,11 +705,29 @@ impl AppShell {
         if *model.filters() != Filters::default() || !model.search_text().trim().is_empty() {
             return;
         }
+        // The open thread's snapshot can be ahead of the list (a failed run the list still shows
+        // as running). That stale row is left out, so it cannot undo what the notifier knows and
+        // make the list that catches up notify a second time. The guard lasts until a list agrees.
+        let ahead = self.snapshot_status.clone();
+        let is_stale = |thread_id: &str, status: &str| {
+            matches!(&ahead, Some((id, ahead_status))
+                if id == thread_id
+                    && status == "running"
+                    && matches!(*ahead_status, "done" | "failed" | "cancelled"))
+        };
+        let stale = model
+            .rows()
+            .iter()
+            .any(|row| is_stale(&row.thread_id, row.status.as_query()));
         let rows: Vec<(String, &'static str)> = model
             .rows()
             .iter()
+            .filter(|row| !is_stale(&row.thread_id, row.status.as_query()))
             .map(|row| (row.thread_id.clone(), row.status.as_query()))
             .collect();
+        if !stale {
+            self.snapshot_status = None;
+        }
         let threads = rows.iter().map(|(id, status)| (id.as_str(), *status));
         if self.inbox_seeded {
             self.notifier.observe_all(threads);
@@ -727,6 +805,7 @@ impl AppShell {
         self.link_thread = thread_id.to_owned();
         if self.open_thread.as_deref() != Some(thread_id) {
             self.open_thread = Some(thread_id.to_owned());
+            self.snapshot_status = None;
             self.pane = cx.new(|_| {
                 let mut pane = TranscriptPane::new();
                 pane.set_follow_tail(true);
@@ -763,6 +842,7 @@ impl AppShell {
     /// Back to the thread list. The link keeps following the thread it has.
     pub fn close_thread(&mut self, cx: &mut Context<Self>) {
         if self.open_thread.take().is_some() {
+            self.snapshot_status = None;
             if let Some(link) = &self.link {
                 link.forget_refusals();
             }
@@ -803,6 +883,9 @@ impl AppShell {
         let handler: CardHandler = Rc::new(move |action, _, cx| {
             let _ = shell.update(cx, |shell, _| shell.on_card_action(action));
         });
+        if let Some(task) = snapshot.view.tasks().last() {
+            self.observe_snapshot_status(&snapshot.thread_id, task.status());
+        }
         self.plan = snapshot.plan;
         self.usage = snapshot.usage;
         self.thread_machine = snapshot.view.machine_id().map(str::to_owned);

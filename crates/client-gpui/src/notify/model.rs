@@ -256,6 +256,11 @@ impl Notifier {
             .map(|thread_id| NotifyEvent::Open { thread_id })
     }
 
+    /// Whether a status of this thread was recorded (seeded or observed).
+    pub fn knows(&self, thread_id: &str) -> bool {
+        self.seen.contains_key(thread_id)
+    }
+
     /// Drop a thread's state (deleted / archived), so a reused id starts fresh.
     pub fn forget(&mut self, thread_id: &str) {
         self.seen.remove(thread_id);

@@ -68,6 +68,10 @@ fn run_off_thread<T: Send + 'static>(
 type OpAnswer = Result<(), Failure>;
 type ListAnswer = Result<Vec<ThreadRow>, Failure>;
 
+/// How often the shell refetches the inbox list on its own, so notifications fire without the
+/// user doing anything. It also refetches when the window comes to the front.
+pub const REFRESH_EVERY: Duration = Duration::from_secs(20);
+
 pub struct InboxView {
     model: InboxModel,
     target: Option<Target>,
@@ -197,6 +201,27 @@ impl InboxView {
         ));
         self.watch(window, cx);
         cx.notify();
+    }
+
+    /// The background refresh (timer tick, window coming to the front): fetch the list again
+    /// unless that would be wrong or wasteful. Returns whether a fetch started.
+    ///
+    /// - No target (signed out): nothing to fetch.
+    /// - A fetch already in flight: not doubled, the running one answers.
+    /// - A filtered or searched list (or a search about to fire): skipped. The notifier only
+    ///   trusts the unfiltered list, and replacing the user's filtered view behind their back is
+    ///   worse than waiting; the next unfiltered list catches up.
+    pub fn refresh_if_idle(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.target.is_none()
+            || self.list_rx.is_some()
+            || *self.model.filters() != super::model::Filters::default()
+            || !self.model.search_text().trim().is_empty()
+            || self.model.search_pending()
+        {
+            return false;
+        }
+        self.refresh(window, cx);
+        true
     }
 
     fn watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
