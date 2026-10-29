@@ -5,7 +5,8 @@
   "type": "module",
   "description": "The mobile web page served by the hub (Workers Static Assets). No build step; npm is for the browser tests only.",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:unit": "node --test tests/*.unit.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

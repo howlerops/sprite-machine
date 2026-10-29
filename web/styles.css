@@ -231,6 +231,16 @@ a:focus-visible {
   color: var(--info);
 }
 
+.status-failed {
+  background: var(--alert-bg);
+  color: var(--alert);
+}
+
+.status-cancelled {
+  background: var(--off-bg);
+  color: var(--off);
+}
+
 .threads {
   margin: 0;
   padding: 0;
