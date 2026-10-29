@@ -4215,8 +4215,8 @@ items:
     title: "client-core UserView keeps content parts; the transcript draws a user's own image parts inline (task::media::push_image_rows)"
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: client-core, client-gpui, runner tui 55 green; clippy clean. Leader verify with M3-006b."
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-006a + M3-006b): client-core+client-gpui 369 passed 0 failed; runner tui 55 passed; shell 80 + transcript 22 passed 5/5; clippy client-core/gpui/runner clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4235,7 +4235,8 @@ items:
     title: 'desktop shell: ThreadComposer::set_upload_target on sign-in/link changes so thread-composer uploads work; CONVENTIONS.md notes DropZone for file drops'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2 (M3-006a + M3-006b): client-core+client-gpui 369 passed 0 failed; runner tui 55 passed; shell 80 + transcript 22 passed 5/5; clippy client-core/gpui/runner clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
