@@ -3683,10 +3683,18 @@ items:
     title: 'Desktop app embeds the runner (Connect-to-phone toggle)'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M2B-007, M3-002]
     paths:
-      - 'crates/client-gpui/src/local/**'
+      - "crates/client-gpui/src/local/**"
+      - "crates/client-gpui/Cargo.toml"
+      - "crates/client-gpui/src/shell/**"
+      - "crates/client-gpui/locales/en/local.ftl"
+      - "crates/client-gpui/tests/local.rs"
+      - "crates/runner/src/**"
     context:
       - 'docs/PLAN-v2-ade.md §4.10 (Other front ends)'
       - 'crates/client-gpui/CONVENTIONS.md'
