@@ -435,6 +435,59 @@ fn chunked_diffs_and_terminal_output_concatenate_in_order() {
 }
 
 #[test]
+fn an_interrupt_resolution_keeps_the_envelope_ts_of_the_first_accepted_answer() {
+    let mut open = ThreadView::new("th_1");
+    apply_all(
+        &mut open,
+        &sequence(&[
+            "UserMessage.json",
+            "RunStarted.json",
+            "Interrupt.json",
+            "RunFinished.interrupt.json",
+        ]),
+    );
+    let interrupt = |view: &ThreadView| view.tasks()[0].transcript().interrupt("int_1").cloned();
+    assert_eq!(
+        interrupt(&open).expect("interrupt").resolved_at,
+        None,
+        "open: no time"
+    );
+
+    let mut first = example("InterruptResolved.json");
+    first.seq = 5;
+    first.ts = "2026-10-27T22:00:30.000Z".to_owned();
+    let mut second = first.clone();
+    second.seq = 6;
+    second.ts = "2026-10-27T22:09:00.000Z".to_owned();
+    open.apply(&first).expect("applies");
+    open.apply(&second).expect("applies");
+    assert_eq!(
+        interrupt(&open).expect("interrupt").resolved_at.as_deref(),
+        Some("2026-10-27T22:00:30.000Z"),
+        "the first accepted answer's ts counts"
+    );
+
+    // A reconnect replays the same envelopes into a fresh view: the same time.
+    let mut replayed = ThreadView::new("th_1");
+    apply_all(
+        &mut replayed,
+        &sequence(&[
+            "UserMessage.json",
+            "RunStarted.json",
+            "Interrupt.json",
+            "RunFinished.interrupt.json",
+        ]),
+    );
+    replayed.apply(&first).expect("applies");
+    replayed.apply(&second).expect("applies");
+    assert_eq!(
+        interrupt(&replayed),
+        interrupt(&open),
+        "replay gives the same view"
+    );
+}
+
+#[test]
 fn interrupt_shows_the_409_winner_until_the_hub_confirms() {
     let mut view = ThreadView::new("th_1");
     apply_all(

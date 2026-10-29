@@ -105,7 +105,7 @@ impl TaskView {
     fn apply(&mut self, envelope: &Envelope) -> Result<(), ViewError> {
         // The transcript is the only step that can refuse an event, and it changes nothing when
         // it does. It runs first, so a refused event leaves this task as it was.
-        self.transcript.apply(&envelope.event)?;
+        self.transcript.apply(&envelope.event, &envelope.ts)?;
         match &envelope.event {
             Event::RunStarted(_) => {
                 self.run_id = envelope.run_id.clone();

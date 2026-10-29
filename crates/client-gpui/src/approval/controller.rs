@@ -113,8 +113,11 @@ pub struct ApprovalController {
     saved: BTreeSet<String>,
     /// interrupt id -> local id of the queued answer.
     answers: BTreeMap<String, i64>,
-    /// interrupt id -> when this client first saw it resolved (ms).
+    /// interrupt id -> the time a host gave for the resolution (ms), overriding the envelope.
     resolved_at: BTreeMap<String, u64>,
+    /// interrupt id -> when this client first saw it resolved (ms): the fallback when the
+    /// envelope carries no parseable `ts`.
+    first_seen: BTreeMap<String, u64>,
 }
 
 impl ApprovalController {
@@ -133,6 +136,7 @@ impl ApprovalController {
             saved: BTreeSet::new(),
             answers: BTreeMap::new(),
             resolved_at: BTreeMap::new(),
+            first_seen: BTreeMap::new(),
         }
     }
 
@@ -157,8 +161,8 @@ impl ApprovalController {
         self.remember.contains(interrupt_id)
     }
 
-    /// Records the hub's own time for a resolution (for example the envelope `ts`), replacing
-    /// the first-seen time.
+    /// Records a time for a resolution that a host knows better than the envelope `ts`. It wins
+    /// over the envelope `ts`, which in turn wins over the first-seen time.
     pub fn set_resolved_at(&mut self, interrupt_id: &str, at_ms: u64) {
         self.resolved_at.insert(interrupt_id.to_owned(), at_ms);
     }
@@ -263,7 +267,7 @@ impl ApprovalController {
                     view.set_local_answer(&interrupt_id, None);
                 }
                 IntentState::Conflict { resolved_by, .. } => {
-                    self.resolved_at
+                    self.first_seen
                         .entry(interrupt_id.clone())
                         .or_insert(now_ms);
                     match resolved_by {
@@ -302,7 +306,9 @@ impl ApprovalController {
     }
 
     /// The cards of every approval interrupt in the thread, in transcript order, as of the
-    /// injected clock. The first time a resolution is seen its time is stamped.
+    /// injected clock. A resolved card shows the envelope `ts` of its `InterruptResolved` (the
+    /// same after a replay), and the first time it was seen only when that `ts` is missing or
+    /// unparseable.
     pub fn cards(&mut self, view: &ThreadView) -> Vec<ApprovalCard> {
         let now_ms = self.clock.now_ms();
         let mut out = Vec::new();
@@ -310,13 +316,20 @@ impl ApprovalController {
             let transcript = task.transcript();
             for interrupt in transcript.interrupts() {
                 if !interrupt.is_open() {
-                    self.resolved_at
+                    self.first_seen
                         .entry(interrupt.id().to_owned())
                         .or_insert(now_ms);
                 }
+                let envelope_ms = interrupt.resolved_at.as_deref().and_then(parse_rfc3339_ms);
+                let resolved_at_ms = self
+                    .resolved_at
+                    .get(interrupt.id())
+                    .copied()
+                    .or(envelope_ms)
+                    .or_else(|| self.first_seen.get(interrupt.id()).copied());
                 let context = CardContext {
                     now_ms,
-                    resolved_at_ms: self.resolved_at.get(interrupt.id()).copied(),
+                    resolved_at_ms,
                     remember_preset: self.remember.contains(interrupt.id()),
                     preset_saved: self.saved.contains(interrupt.id()),
                 };

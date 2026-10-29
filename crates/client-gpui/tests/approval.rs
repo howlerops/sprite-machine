@@ -37,9 +37,14 @@ const EXPIRES_MS: u64 = 1_793_139_000_000;
 // ---- fixtures --------------------------------------------------------------------------------
 
 fn envelope(seq: u64, event: Value) -> Envelope {
+    envelope_at(seq, "2026-10-27T22:00:16.000Z", event)
+}
+
+/// An envelope produced at `ts` (the producer time the hub stamps on it).
+fn envelope_at(seq: u64, ts: &str, event: Value) -> Envelope {
     serde_json::from_value(json!({
         "v": 1, "seq": seq, "thread_id": "th_1", "task_id": "tk_1", "run_id": "run_1",
-        "ts": "2026-10-27T22:00:16.000Z", "event": event,
+        "ts": ts, "event": event,
     }))
     .expect("envelope")
 }
@@ -397,10 +402,11 @@ fn a_resolved_card_shows_who_resolved_it_and_when() {
     let mut thread = open_thread();
     assert!(only_card(&mut controller, &thread).is_answerable());
 
-    clock.set(RAISED_MS + 63_000); // 22:01:19
+    clock.set(RAISED_MS + 63_000); // 22:01:19, when this client looks
     thread
-        .apply(&envelope(
+        .apply(&envelope_at(
             3,
+            "2026-10-27T22:01:19.000Z",
             resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
         ))
         .expect("resolved");
@@ -450,6 +456,88 @@ fn system_and_policy_resolvers_are_named_and_expiry_is_reported() {
         device_id: None,
     };
     assert_eq!(actor_text(&policy), "a policy");
+}
+
+#[test]
+fn the_card_shows_the_envelope_ts_of_the_resolution_not_the_time_it_was_seen() {
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut controller = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    // Resolved at 22:00:30 by the hub, but first looked at by this client at 22:01:19.
+    thread
+        .apply(&envelope_at(
+            3,
+            "2026-10-27T22:00:30.000Z",
+            resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
+        ))
+        .expect("resolved");
+    clock.set(RAISED_MS + 63_000);
+    let CardState::Resolved { summary, .. } = only_card(&mut controller, &thread).state else {
+        panic!("not resolved");
+    };
+    assert_eq!(summary, "Allow by Jacob (dev_phone) at 22:00:30 UTC");
+
+    clock.set(RAISED_MS + 540_000);
+    let CardState::Resolved { summary, .. } = only_card(&mut controller, &thread).state else {
+        panic!("not resolved");
+    };
+    assert_eq!(
+        summary, "Allow by Jacob (dev_phone) at 22:00:30 UTC",
+        "stable over time"
+    );
+}
+
+#[test]
+fn a_replayed_resolution_after_reconnect_shows_the_same_time() {
+    let resolution = envelope_at(
+        3,
+        "2026-10-27T22:00:30.000Z",
+        resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
+    );
+    let clock = Arc::new(ManualClock::new(RAISED_MS + 63_000));
+    let mut before = open_thread();
+    before.apply(&resolution).expect("resolved");
+    let first = only_card(&mut controller(&clock, LocalPresets::in_memory()), &before).state;
+
+    // The client reconnects later and replays the same events into a fresh view.
+    clock.set(RAISED_MS + 900_000);
+    let mut replayed = thread_with(vec![diff_event(), interrupt_event(options_json())]);
+    replayed.apply(&resolution).expect("replayed");
+    let again = only_card(
+        &mut controller(&clock, LocalPresets::in_memory()),
+        &replayed,
+    )
+    .state;
+
+    assert_eq!(first, again);
+    let CardState::Resolved { summary, .. } = again else {
+        panic!("not resolved");
+    };
+    assert_eq!(summary, "Allow by Jacob (dev_phone) at 22:00:30 UTC");
+}
+
+#[test]
+fn a_missing_or_unparseable_ts_falls_back_to_the_first_seen_time() {
+    for ts in ["", "soon"] {
+        let clock = Arc::new(ManualClock::new(RAISED_MS));
+        let mut controller = controller(&clock, LocalPresets::in_memory());
+        let mut thread = open_thread();
+        thread
+            .apply(&envelope_at(
+                3,
+                ts,
+                resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
+            ))
+            .expect("resolved");
+        clock.set(RAISED_MS + 63_000); // first seen at 22:01:19
+        let CardState::Resolved { summary, .. } = only_card(&mut controller, &thread).state else {
+            panic!("not resolved");
+        };
+        assert_eq!(
+            summary, "Allow by Jacob (dev_phone) at 22:01:19 UTC",
+            "ts {ts:?}"
+        );
+    }
 }
 
 // ---- criterion: answer through the Outbox; 409 shows who won ---------------------------------
@@ -962,8 +1050,9 @@ fn the_pane_pins_open_cards_and_shows_resolver_and_time_in_the_transcript(cx: &m
     // Resolved: the card leaves the pinned area; who and when stay in the transcript.
     clock.advance(30_000);
     thread
-        .apply(&envelope(
+        .apply(&envelope_at(
             4,
+            "2026-10-27T22:00:46.000Z",
             resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
         ))
         .expect("resolved");
