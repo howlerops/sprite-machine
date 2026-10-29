@@ -22,7 +22,7 @@ pub use model::{
     A2A_EDGE_AVAILABLE, AgentKind, AgentRow, Capabilities, FakeManagedClient, FormError, Health,
     LaunchConfig, LaunchError, LaunchForm, LaunchState, LaunchedAgent, MANAGED_HARNESSES,
     MachineInfo, MachinesResponse, ManagedAgentClient, ManagedLaunchRequest, Presence,
-    PresenceInfo, agents_from_machines, byo_disabled_reason, submit,
+    PresenceInfo, UnavailableManagedClient, agents_from_machines, byo_disabled_reason, submit,
 };
 pub use view::AgentsView;
 

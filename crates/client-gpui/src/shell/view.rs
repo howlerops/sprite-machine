@@ -22,6 +22,7 @@ use super::browser::Browser;
 use super::i18n::{tr, tr_args};
 use super::link::{LinkConfig, SessionLink, ThreadSnapshot};
 use super::login::{LoginDriver, LoginEvent, LoginMethod, LoginStage};
+use super::machines::{self, MachinesFeed};
 use super::model::{FocusSlot, HubOutcome, Screen, ShellModel, theme_a11y};
 use super::nav::Section;
 use super::pairing::QrMatrix;
@@ -119,8 +120,12 @@ pub struct AppShell {
     /// The composer under the open thread's transcript.
     composer: Entity<ThreadComposer>,
     _composer_events: Subscription,
-    /// Re-derives the composer's runner cap when the machines list arrives.
-    _machines_observer: Subscription,
+    /// The agents page, fed by the shell's machines feed.
+    agents: Entity<crate::agents::AgentsView>,
+    /// The one `GET /v1/machines` feed: agents page, new-task composer and runner cap.
+    machines: MachinesFeed,
+    machines_pump: Option<Task<()>>,
+    _machines_timer: Option<Task<()>>,
     /// The thread the composer's prompt text belongs to; the text is cleared when it changes.
     composer_thread: Option<String>,
     /// The machine hosting the open thread, from its last snapshot.
@@ -222,7 +227,17 @@ impl AppShell {
         let pane_events = Self::subscribe_pane(&pane, cx);
         let composer = cx.new(|cx| ThreadComposer::new(window, cx));
         let composer_events = cx.subscribe(&composer, Self::on_composer_event);
-        let machines_observer = cx.observe(&compose, |this, _, cx| this.sync_runner_cap(cx));
+        let agents = cx.new(|cx| {
+            crate::agents::AgentsView::new(
+                &[],
+                crate::agents::LaunchConfig {
+                    model_key_configured: false,
+                },
+                Arc::new(crate::agents::UnavailableManagedClient),
+                window,
+                cx,
+            )
+        });
         let mut shell = Self {
             model,
             driver,
@@ -245,7 +260,10 @@ impl AppShell {
             pane,
             composer,
             _composer_events: composer_events,
-            _machines_observer: machines_observer,
+            agents,
+            machines: MachinesFeed::default(),
+            machines_pump: None,
+            _machines_timer: None,
             composer_thread: None,
             thread_machine: None,
             plan: PlanModel::default(),
@@ -270,6 +288,7 @@ impl AppShell {
             _notify_task: None,
         };
         shell.start_notify_task(window, cx);
+        shell.start_machines_timer(cx);
         shell.apply_theme(window, cx);
         shell.refresh_link(cx);
         shell
@@ -341,6 +360,121 @@ impl AppShell {
     /// The inbox list.
     pub fn inbox(&self) -> &Entity<crate::inbox::InboxView> {
         &self.inbox
+    }
+
+    /// The agents page.
+    pub fn agents(&self) -> &Entity<crate::agents::AgentsView> {
+        &self.agents
+    }
+
+    /// The machines the shell's feed last received (empty before the first answer).
+    pub fn machines(&self) -> &[crate::compose::MachineOption] {
+        &self.machines.snapshot.options
+    }
+
+    /// Fetch `GET /v1/machines` now (a fetch already running is not doubled). Called when the
+    /// session appears, when the Agents page opens and by the timer. Does nothing signed out.
+    pub fn refresh_machines(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.machines.target.clone() else {
+            return;
+        };
+        if self.machines.rx.is_some() {
+            return;
+        }
+        if !self.machines.loaded {
+            self.compose
+                .update(cx, |compose, cx| compose.machines_loading(cx));
+        }
+        self.machines.rx = Some(machines::fetch_off_thread(target));
+        self.machines_pump = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+                let Ok(more) = this.update(cx, |this, cx| this.pump_machines(cx)) else {
+                    break;
+                };
+                if !more {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Move a finished fetch into the pages. Returns whether one is still running.
+    fn pump_machines(&mut self, cx: &mut Context<Self>) -> bool {
+        use std::sync::mpsc::TryRecvError;
+        let Some(receiver) = &self.machines.rx else {
+            return false;
+        };
+        let answer = match receiver.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return true,
+            Err(TryRecvError::Disconnected) => Err("the request did not finish".to_owned()),
+        };
+        self.machines.rx = None;
+        self.machines.loaded = true;
+        match answer {
+            Ok(snapshot) => {
+                self.machines.error = None;
+                self.machines.snapshot = snapshot;
+                let info = self.machines.snapshot.info.clone();
+                let options = self.machines.snapshot.options.clone();
+                self.agents
+                    .update(cx, |agents, cx| agents.set_machines(&info, cx));
+                self.compose
+                    .update(cx, |compose, cx| compose.apply_machines(options, cx));
+                self.sync_runner_cap(cx);
+            }
+            Err(detail) => {
+                self.machines.error = Some(detail.clone());
+                self.compose
+                    .update(cx, |compose, cx| compose.machines_failed(detail, cx));
+            }
+        }
+        cx.notify();
+        false
+    }
+
+    /// Refresh the machines list every [`machines::REFRESH_EVERY`].
+    fn start_machines_timer(&mut self, cx: &mut Context<Self>) {
+        self._machines_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(machines::REFRESH_EVERY)
+                    .await;
+                if this
+                    .update(cx, |this, cx| this.refresh_machines(cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Follow the session: a new hub or account starts a fresh feed and fetches at once.
+    fn sync_machines_target(
+        &mut self,
+        target: Option<crate::compose::Target>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.machines.target == target {
+            return;
+        }
+        self.machines_pump = None;
+        self.machines.reset(target.clone());
+        let (info, options) = (Vec::new(), Vec::new());
+        self.agents
+            .update(cx, |agents, cx| agents.set_machines(&info, cx));
+        self.compose.update(cx, |compose, cx| {
+            compose.set_send_target(target.clone(), cx);
+            compose.apply_machines(options, cx);
+        });
+        self.sync_runner_cap(cx);
+        if target.is_some() {
+            self.refresh_machines(cx);
+        }
     }
 
     /// The new-task composer.
@@ -687,13 +821,12 @@ impl AppShell {
 
     /// The runner's permission mode for the open thread: from the `features`
     /// (`permission_mode:<mode>`) of the machine that hosts it, as the new-task composer's
-    /// machines list knows them. Unset while the machine or its list is not known.
+    /// shell's machines feed knows them. Unset while the machine or its list is not known.
     fn sync_runner_cap(&mut self, cx: &mut Context<Self>) {
         let cap = self.thread_machine.as_deref().and_then(|machine_id| {
-            self.compose
-                .read(cx)
-                .model()
-                .machines()
+            self.machines
+                .snapshot
+                .options
                 .iter()
                 .find(|machine| machine.machine_id == machine_id)
                 .and_then(|machine| machine.permission_mode.clone())
@@ -866,7 +999,15 @@ impl AppShell {
 
     pub fn select(&mut self, section: Section, cx: &mut Context<Self>) {
         self.model.nav.select(section);
+        self.refresh_if_agents(cx);
         cx.notify();
+    }
+
+    /// Opening the Agents page refreshes presence.
+    fn refresh_if_agents(&mut self, cx: &mut Context<Self>) {
+        if self.model.nav.current() == Section::Agents {
+            self.refresh_machines(cx);
+        }
     }
 
     pub fn start_login(&mut self, method: LoginMethod, cx: &mut Context<Self>) {
@@ -1038,6 +1179,8 @@ impl AppShell {
             self.render_settings(slots, cx).into_any_element()
         } else if current == Section::NewTask {
             self.compose.clone().into_any_element()
+        } else if current == Section::Agents {
+            self.render_agents(cx).into_any_element()
         } else if current == Section::Inbox && self.open_thread.is_some() {
             self.render_thread(slots, cx).into_any_element()
         } else if current == Section::Inbox {
@@ -1081,6 +1224,23 @@ impl AppShell {
                             .child(content),
                     ),
             )
+    }
+
+    /// The agents table and launch form, with a note when the machines fetch failed.
+    fn render_agents(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let error = self
+            .machines
+            .error
+            .as_ref()
+            .map(|detail| tr_args("content-machines-error", &[("detail", detail)]));
+        v_flex()
+            .id("agents-page")
+            .size_full()
+            .gap_2()
+            .when_some(error, |el, text| {
+                el.child(Self::status("agents-feed-error", text, cx))
+            })
+            .child(self.agents.clone())
     }
 
     /// The open thread: a way back to the list, then the transcript with its approval cards, and
@@ -1270,8 +1430,7 @@ impl Render for AppShell {
             api: format!("{}/v1", session.hub.trim_end_matches('/')),
             token: Some(session.grant.token.clone()),
         });
-        self.compose
-            .update(cx, |compose, cx| compose.set_target(target, window, cx));
+        self.sync_machines_target(target, cx);
         let inbox_target = self.model.session().map(|session| crate::inbox::Target {
             api: format!("{}/v1", session.hub.trim_end_matches('/')),
             token: Some(session.grant.token.clone()),
@@ -1301,6 +1460,7 @@ impl Render for AppShell {
                     // The page may take the focused field with it; keep the shortcuts live.
                     window.focus(&this.focus, cx);
                     this.model.nav.next();
+                    this.refresh_if_agents(cx);
                     cx.notify();
                 }
             }))
@@ -1309,6 +1469,7 @@ impl Render for AppShell {
                     // The page may take the focused field with it; keep the shortcuts live.
                     window.focus(&this.focus, cx);
                     this.model.nav.previous();
+                    this.refresh_if_agents(cx);
                     cx.notify();
                 }
             }))
