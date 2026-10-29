@@ -4273,7 +4273,9 @@ items:
     title: 'approval card: show why an answer was refused (Expired, NotOpen, Outbox) instead of dropping AnswerError'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
@@ -4303,7 +4305,9 @@ items:
     title: 'client: wire DiffView into the task view (diff activities and ACP tool_call diff content; OpenFile forwarded with the workspace root)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: M
     risk: low
