@@ -53,7 +53,7 @@ pub struct Connection {
 impl Connection {
     /// Takes both links. The published state starts as their combination.
     pub fn new(subscription: Subscription, outbox: Outbox) -> Self {
-        let state = subscription.connectivity().combine(outbox.connectivity());
+        let state = Self::state_of(&subscription, &outbox);
         Self {
             subscription,
             outbox,
@@ -97,14 +97,32 @@ impl Connection {
         result
     }
 
-    /// Queues an intent. Queuing does not change either link.
+    /// The combined banner state of the two links.
+    ///
+    /// Rule: an outbox that is still `Connecting` (no HTTP answer or failure since it was
+    /// loaded) and has nothing queued has no opinion, because it has nothing to be unsure
+    /// about; the state then follows the subscription alone. Once something is queued and
+    /// unanswered it counts as `Connecting` again, and any answer or failure (the outbox's own
+    /// `Online` / `Offline`) always counts.
+    fn state_of(subscription: &Subscription, outbox: &Outbox) -> Connectivity {
+        let subscription = subscription.connectivity();
+        match outbox.connectivity() {
+            Connectivity::Connecting if outbox.entries().next().is_none() => subscription,
+            link => subscription.combine(link),
+        }
+    }
+
+    /// Queues an intent. Queuing leaves both links as they are, but an unanswered intent
+    /// gives a still-`Connecting` outbox an opinion again, so the combined state is published.
     pub fn enqueue(
         &mut self,
         cache: &Cache,
         intent: Intent,
         now_ms: u64,
     ) -> Result<i64, OutboxError> {
-        self.outbox.enqueue(cache, intent, now_ms)
+        let id = self.outbox.enqueue(cache, intent, now_ms)?;
+        self.publish();
+        Ok(id)
     }
 
     /// [`Outbox::flush`], then the combined state is published.
@@ -125,10 +143,7 @@ impl Connection {
     }
 
     fn publish(&self) {
-        let state = self
-            .subscription
-            .connectivity()
-            .combine(self.outbox.connectivity());
+        let state = Self::state_of(&self.subscription, &self.outbox);
         self.combined.send_if_modified(|current| {
             let changed = *current != state;
             *current = state;

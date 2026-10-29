@@ -423,7 +423,8 @@ impl Outbox {
 
     /// The hub link as the outbox last saw it. A transport failure makes it `Offline`; any
     /// answer from the hub (whatever the status) makes it `Online` again. `Connecting` until
-    /// the first POST gets a result.
+    /// the first POST gets a result; [`crate::Connection`] ignores that
+    /// initial `Connecting` while nothing is queued.
     pub fn connectivity(&self) -> Connectivity {
         self.connectivity
     }
