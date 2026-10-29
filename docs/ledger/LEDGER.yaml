@@ -6336,3 +6336,44 @@ items:
       - 'cargo test -p protocol -p hub -p runner'
       - 'bash scripts/hub-test.sh machine_do'
       - 'cargo run -p cli -- e2e rc'
+
+  - id: M2B-019e
+    title: 'runner tui: a runner-typed line the hub nacks is shown as a notice and kept (re-queued or editable), never lost'
+    milestone: M2b
+    phase: P3
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-019d]
+    paths:
+      - 'crates/runner/src/tui/**'
+      - 'crates/runner/src/tunnel/**'
+      - 'crates/runner/tests/tui.rs'
+    context:
+      - 'docs/ledger/reports/M2B-019d.md (Discovered work)'
+    acceptance:
+      - 'A prompt_submit nack reaches the TUI as a notice and the line is kept; test'
+    verify:
+      - 'cargo test -p runner --test tui'
+
+  - id: M2B-019f
+    title: 'hub: a task the runner started before /rc counts as busy, so the first shared prompt queues behind it instead of being refused by the bridge'
+    milestone: M2b
+    phase: P3
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-019d]
+    paths:
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/src/machines/**'
+      - 'crates/runner/src/tui/**'
+      - 'crates/hub/tests/machine_do.rs'
+      - 'crates/runner/tests/tui.rs'
+    context:
+      - 'docs/ledger/reports/M2B-019d.md (Discovered work)'
+    acceptance:
+      - 'Register with /rc while an offline-started task runs; a phone prompt waits for it and runs once; test'
+    verify:
+      - 'cargo test -p hub -p runner'
+      - 'bash scripts/hub-test.sh machine_do'
