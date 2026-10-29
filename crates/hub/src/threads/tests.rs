@@ -127,6 +127,31 @@ fn interrupt(task: &str, run: &str, id: &str, expires_ms: u64) -> Envelope {
     )
 }
 
+/// A form or auth interrupt (no options): `kind` is the interrupt's kind.
+fn open_interrupt(
+    task: &str,
+    run: &str,
+    id: &str,
+    kind: InterruptKind,
+    expires_ms: u64,
+) -> Envelope {
+    run_event(
+        task,
+        run,
+        Interrupt {
+            interrupt_id: id.to_owned(),
+            kind,
+            title: format!("{kind:?} for {id}"),
+            message: None,
+            expires_at: format_timestamp(expires_ms),
+            tool_call_id: None,
+            options: None,
+            response_schema: None,
+            url: (kind == InterruptKind::Auth).then(|| "https://example.test/login".to_owned()),
+        },
+    )
+}
+
 fn pause(task: &str, run: &str, ids: &[&str]) -> Envelope {
     run_event(
         task,
@@ -1884,6 +1909,74 @@ fn the_index_status_follows_the_run_and_its_approvals() {
     assert!(answered.pending_interrupts.is_empty());
     append(&mut core, success("tk_1", "run_1"));
     assert_eq!(core.index_row(NOW).expect("row").status, "done");
+}
+
+#[test]
+fn the_index_lists_form_and_auth_interrupts_with_their_kind_and_no_options() {
+    let mut core = core();
+    created(&mut core, create_body(true));
+    append(&mut core, started("tk_1", "run_1"));
+    append(
+        &mut core,
+        open_interrupt(
+            "tk_1",
+            "run_1",
+            "int_form",
+            InterruptKind::Form,
+            NOW + 60_000,
+        ),
+    );
+    append(
+        &mut core,
+        open_interrupt(
+            "tk_1",
+            "run_1",
+            "int_auth",
+            InterruptKind::Auth,
+            NOW + 60_000,
+        ),
+    );
+    let waiting = core.index_row(NOW).expect("row");
+    assert_eq!(waiting.status, "waiting");
+    let listed: Vec<(&str, InterruptKind, usize)> = waiting
+        .pending_interrupts
+        .iter()
+        .map(|p| (p.interrupt_id.as_str(), p.kind, p.options.len()))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("int_form", InterruptKind::Form, 0),
+            ("int_auth", InterruptKind::Auth, 0),
+        ]
+    );
+    assert_eq!(waiting.pending_interrupts[0].title, "Form for int_form");
+
+    let form = core
+        .answer_interrupt(
+            &actor("usr_2"),
+            "idk_form",
+            "int_form",
+            ResolvedOutcome::Submitted {
+                data: json!({ "branch": "main" }),
+            },
+            NOW,
+        )
+        .expect("answer form");
+    assert_eq!(form.status, 200);
+    let auth = core
+        .answer_interrupt(
+            &actor("usr_2"),
+            "idk_auth",
+            "int_auth",
+            ResolvedOutcome::Declined,
+            NOW,
+        )
+        .expect("answer auth");
+    assert_eq!(auth.status, 200);
+    let answered = core.index_row(NOW).expect("row");
+    assert_eq!(answered.status, "running");
+    assert!(answered.pending_interrupts.is_empty());
 }
 
 #[test]

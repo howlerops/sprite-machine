@@ -2,16 +2,24 @@
 //! when a request must refresh that row. Pure: the DO builds the row ([`crate::threads`]) and
 //! writes it through [`super::sync`] (wasm32) or [`super::store::upsert`].
 
-use protocol::turn_event::{Envelope, Event, InterruptOption, StateScope};
+use protocol::turn_event::{Envelope, Event, InterruptKind, InterruptOption, StateScope};
 use serde::{Deserialize, Serialize};
 
-/// An open approval interrupt on a thread, as `GET /v1/threads` lists it (client-api.md §5.2).
-/// `options` are the ACP options the agent sent, unchanged.
+/// An open interrupt on a thread, as `GET /v1/threads` lists it (client-api.md §5.2). `kind` is
+/// `approval`, `form` or `auth`. `options` are the ACP options the agent sent, unchanged, for an
+/// approval; a form or an auth interrupt has none (`[]`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingInterrupt {
     pub interrupt_id: String,
     pub title: String,
+    /// Missing in a row stored before M2-010i, which listed approvals only.
+    #[serde(default = "approval_kind")]
+    pub kind: InterruptKind,
     pub options: Vec<InterruptOption>,
+}
+
+fn approval_kind() -> InterruptKind {
+    InterruptKind::Approval
 }
 
 /// The stored task statuses the Thread DO writes (`open`, `running`, `waiting`, `done`).
@@ -35,7 +43,7 @@ pub struct IndexRow {
     pub status: &'static str,
     pub archived: bool,
     pub deleted: bool,
-    /// The open approval interrupts (other kinds are not listed).
+    /// Every open interrupt of the thread's running tasks (approval, form and auth).
     pub pending_interrupts: Vec<PendingInterrupt>,
     /// The time of the change that produced this row (ISO-8601 UTC).
     pub updated_at: String,

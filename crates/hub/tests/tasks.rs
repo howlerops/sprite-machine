@@ -625,6 +625,7 @@ fn rows_carry_workspace_archived_and_the_open_approvals_with_their_options() {
         json!([{
             "interrupt_id": "int_list_1",
             "title": "Run cargo test?",
+            "kind": "approval",
             "options": [
                 { "option_id": "opt_yes", "name": "Yes, once", "kind": "allow_once" },
                 { "option_id": "opt_never", "name": "Never", "kind": "reject_always" },
@@ -650,4 +651,57 @@ fn rows_carry_workspace_archived_and_the_open_approvals_with_their_options() {
     );
     assert_eq!(row_of(&mch, &thread)["archived"], true);
     assert!(!listed(dev, &format!("machine_id={mch}")).contains(&thread));
+}
+
+/// M2-010i: a form interrupt makes the row `needs_you` and is listed with `kind: form` and no
+/// options; answering it empties the list.
+#[test]
+fn a_form_interrupt_is_listed_with_kind_form_and_no_options_until_answered() {
+    let dev = "dev";
+    let mch = machine(dev);
+    let thread = create_thread(dev, &mch, Some("Needs a form"), None);
+    let task = unique("tk");
+    assert_eq!(prompt(&thread, &task).status, 202);
+    runner_event(
+        &thread,
+        &task,
+        "run_f",
+        json!({ "type": "RunStarted", "reason": "prompt" }),
+    );
+    runner_event(
+        &thread,
+        &task,
+        "run_f",
+        json!({
+            "type": "Interrupt",
+            "interrupt_id": "int_list_form",
+            "kind": "form",
+            "title": "Which branch?",
+            "expires_at": "2099-01-01T00:00:00.000Z",
+            "response_schema": { "type": "object" },
+        }),
+    );
+    let waiting = row_of(&mch, &thread);
+    assert_eq!(waiting["status"], "needs_you");
+    assert_eq!(
+        waiting["pending_interrupts"],
+        json!([{
+            "interrupt_id": "int_list_form",
+            "title": "Which branch?",
+            "kind": "form",
+            "options": [],
+        }])
+    );
+
+    let answer = http(
+        "POST",
+        &format!("/v1/threads/{thread}/interrupts/int_list_form"),
+        Some(dev),
+        &[("Idempotency-Key", &unique("idk"))],
+        Some(&json!({ "outcome": { "type": "submitted", "data": { "branch": "main" } } })),
+    );
+    assert_eq!(answer.status, 200, "answer: {}", answer.body);
+    let resolved = row_of(&mch, &thread);
+    assert_eq!(resolved["status"], "running");
+    assert_eq!(resolved["pending_interrupts"], json!([]));
 }

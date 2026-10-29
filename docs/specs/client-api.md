@@ -130,15 +130,16 @@ them when absent. Threads started on the runner itself (TUI, `/rc`) appear throu
 - `archived`: `true` for an archived thread. Archived threads are left out of the list unless
   the query has `archived=true`, which lists them **in addition to** the active ones (each row
   says which it is); deleted threads are never listed.
-- `pending_interrupts`: the thread's open **approval** interrupts, oldest first, each
-  `{ "interrupt_id", "title", "options": [ { "option_id", "name", "kind" } ] }` with the ACP
-  options exactly as the agent sent them (`kind` is `allow_once|allow_always|reject_once|reject_always`).
-  Only `needs_you` rows have entries; every other row has `[]`. Open `form` and `auth`
-  interrupts also make a row `needs_you` but are not listed here (answer them from the thread:
-  `GET /v1/threads/{thread_id}` and the subscription carry the `Interrupt` event). The array
-  comes from the index row, written in the same upsert as `status`, so it is as fresh as
-  `status` and costs no per-row lookup. Answer with
-  `POST /v1/threads/{thread_id}/interrupts/{interrupt_id}` (§5.4).
+- `pending_interrupts`: every open interrupt of the thread, oldest first, each
+  `{ "interrupt_id", "title", "kind", "options": [ { "option_id", "name", "kind" } ] }`.
+  `kind` is `approval|form|auth`. An `approval` lists its ACP options exactly as the agent sent
+  them (option `kind` is `allow_once|allow_always|reject_once|reject_always`). A `form` or `auth`
+  interrupt has `"options": []`: answer a form with `submitted` and an auth with `declined` or
+  `cancelled`, as §5.4 says, and open its `url` (auth) or fields (form) from the thread
+  (`GET /v1/threads/{thread_id}` and the subscription carry the `Interrupt` event). Only
+  `needs_you` rows have entries; every other row has `[]`. The array comes from the index row,
+  written in the same upsert as `status`, so it is as fresh as `status` and costs no per-row
+  lookup. Answer with `POST /v1/threads/{thread_id}/interrupts/{interrupt_id}` (§5.4).
 
 - `status`: `idle` (no task started, or the last run ended in an error or cancel), `running`,
   `needs_you` (an approval is open), `done` (the last task ended in `RunFinished{success}` and
