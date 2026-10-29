@@ -3186,7 +3186,7 @@ items:
     title: 'hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc'
     milestone: M2
     phase: P2
-    status: "in_progress"
+    status: "assigned"
     attempt: 1
     assignee: "worker-sonnet"
     deps: [M2-014, M2-008]
