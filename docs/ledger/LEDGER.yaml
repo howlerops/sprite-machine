@@ -4000,7 +4000,8 @@ items:
     title: 'client: inbox (sections, search, filters, archive, rename, quick approve)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged b18c18e; 21 inbox tests; quick Allow/Deny needs M2-010h"
     assignee: "sonnet"
     attempt: 1
     lane: client
@@ -4082,7 +4083,8 @@ items:
     title: 'client: approval cards'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged a1d04ee; worker: 23 approval tests, client-gpui tests + clippy green; leader re-verify on merged tree pending in this batch"
     assignee: "sonnet"
     attempt: 1
     lane: client
@@ -4097,6 +4099,70 @@ items:
       - 'Exact ACP options from Interrupt{approval}; embedded pending diff/command; time remaining; resolver + time shown; allow_always offers the workspace preset'
     verify:
       - 'cargo test -p client-gpui --test approval'
+  - id: M3-011a
+    title: 'client-core: InterruptView carries resolved_at (envelope ts) so approval cards show the real resolution time'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-011]
+    paths:
+      - 'crates/client-core/src/view/**'
+      - 'crates/client-gpui/src/approval/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/tests/approval.rs'
+    acceptance:
+      - 'InterruptView exposes the ts of the envelope that resolved it; replay after reconnect keeps the original time'
+      - 'The approval card uses it instead of first-seen time (test)'
+  - id: M3-011b
+    title: 'hub + client-core: workspace approval presets API (allow_always syncs to the hub)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: M
+    risk: medium
+    deps: [M3-011]
+    paths:
+      - 'crates/hub/src/**'
+      - 'crates/hub/migrations/**'
+      - 'docs/specs/client-api.md'
+      - 'crates/client-core/src/**'
+      - 'crates/client-gpui/src/approval/**'
+    acceptance:
+      - 'Spec + hub route to store/list workspace presets; live test'
+      - 'client-core call; ApprovalController syncs LocalPresets and sets synced=true'
+  - id: M3-011c
+    title: 'client-gpui shell: wire ApprovalController into the app connection (ThreadView, Outbox, Cache, 1 s tick, flush after answer)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-011, M3-007]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/approval/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Opening a thread with a pending approval shows its card; clicking an option sends through the app Outbox and flushes (test with a recording transport)'
+      - 'Time left repaints each second'
+  - id: M3-011d
+    title: 'task view: approval cards in place in the transcript (variable-height rows)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: M
+    risk: low
+    deps: [M3-011]
+    paths:
+      - 'crates/client-gpui/src/task/**'
+    acceptance:
+      - 'Cards render at their transcript position, not pinned above; virtualization still bounded'
 
   - id: M3-012
     title: 'client: agent registry + launch managed agent form'
@@ -6392,7 +6458,8 @@ items:
     title: 'runner tui: a runner-typed line the hub nacks is shown as a notice and kept (re-queued or editable), never lost'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged 392172b; runner tests"
     assignee: "haiku"
     attempt: 1
     lane: rust

@@ -298,3 +298,4 @@
 2026-10-29T02:50Z user added .claude/settings.json allow rules → leader created D1 sm-hub, R2 sm-hub-blobs, R2 sm-workspace-backups, queue sm-hub-notify → M2-014 done (docs/ops/hub.md). M2-015 (deploy workflow) unblocked
 - 2026-10-29 leader: merged M2B-019e (nacked runner line kept with a notice) and M3-007 (desktop inbox, 21 tests); verify on merged v2 running. Filed M2B-019h (tunnel nack integration test) and M2-010h (hub list rows carry pending_interrupts/workspace/archived, from M3-007). Assigned M2-015 (sonnet).
 - 2026-10-29 leader: M2B-006a done: five harness ACP entry points answer initialize; gemini row changed to --acp; goose left to M2B-006b (human).
+- 2026-10-29 leader: merged M3-011 (approval cards, 23 tests); filed M3-011a/b/c/d from its discovered work.
