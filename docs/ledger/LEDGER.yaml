@@ -4019,7 +4019,8 @@ items:
     title: 'client: composer slash commands, mode/model switch, queued chips, Stop'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: compose_commands 12 passed, compose 13, clippy clean. Leader verify with M3-014."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4039,6 +4040,38 @@ items:
       - '`/` lists commands from state; mode picker; queued messages removable; Stop cancels'
     verify:
       - 'cargo test -p client-gpui --test compose_commands'
+  - id: M3-005a
+    title: 'desktop: wire ThreadComposer into the task view (Send/Cancel via the link outbox, ThreadRequest via authenticated hub call, set_thread per snapshot, set_runner_mode from machine capabilities)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: M
+    risk: medium
+    deps: [M3-005, M3-014]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Open thread shows the composer; a prompt reaches the hub via the outbox; Stop sends cancel; mode change and remove-pending hit the documented routes (fake hub); 409 task_started on remove falls back to Stop (window tests)'
+  - id: M3-005b
+    title: 'client-core: Intent variants for session set (mode/config) and pending remove, so they go through the outbox with idempotency keys'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-005]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/tests/compose_commands.rs'
+    acceptance:
+      - 'Intent::SetSession and Intent::RemovePending map to client-api.md §5.3/§5.5 requests with Idempotency-Key (outbox tests); composer emits them instead of raw ThreadRequest'
 
   - id: M3-006
     title: 'client: attachments (picker, paste, drag-drop) + inline images'
