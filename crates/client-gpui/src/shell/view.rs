@@ -17,8 +17,9 @@ use tokio::sync::watch;
 
 use super::browser::Browser;
 use super::i18n::{tr, tr_args};
+use super::link::{LinkConfig, SessionLink};
 use super::login::{LoginDriver, LoginEvent, LoginMethod, LoginStage};
-use super::model::{FocusSlot, Screen, ShellModel, theme_a11y};
+use super::model::{FocusSlot, HubOutcome, Screen, ShellModel, theme_a11y};
 use super::nav::Section;
 use super::pairing::QrMatrix;
 use super::prefs::{Appearance, Preferences, ThemeChoice};
@@ -52,6 +53,8 @@ pub struct AppConfig {
     pub prefs_path: Option<PathBuf>,
     /// Divides the polling sleeps; 1 for a real launch, larger in tests against a local hub.
     pub poll_speedup: u32,
+    /// The thread whose subscription the session's connection follows.
+    pub link_thread: String,
 }
 
 pub struct AppShell {
@@ -64,6 +67,15 @@ pub struct AppShell {
     _appearance: Subscription,
     _hub_input_events: Subscription,
     connectivity_task: Option<Task<()>>,
+    /// The signed-in session's hub link; present exactly while a session is.
+    link: Option<SessionLink>,
+    link_thread: String,
+    link_retry: Duration,
+    cache_path: Option<PathBuf>,
+    /// What the last Save of the hub field did, shown under the field.
+    hub_feedback: Option<HubOutcome>,
+    /// Why the shell is on the login screen without the user having signed out.
+    notice: Option<String>,
 }
 
 impl AppShell {
@@ -73,6 +85,13 @@ impl AppShell {
             .as_deref()
             .and_then(|p| p.parent())
             .map(PathBuf::from);
+        let cache_path = config
+            .prefs_path
+            .as_deref()
+            .and_then(|p| p.parent())
+            .map(|dir| dir.join("cache.sqlite"));
+        let link_retry =
+            Duration::from_millis((1000 / u64::from(config.poll_speedup.max(1))).max(5));
         let model = ShellModel::new(config.store, config.prefs, config.prefs_path, &config.hub);
         let driver = LoginDriver::new(model.hub().to_string(), config.browser)
             .with_sleep_divisor(config.poll_speedup);
@@ -85,7 +104,7 @@ impl AppShell {
         let hub_input_events = cx.subscribe_in(&hub_input, window, Self::on_hub_event);
         let compose = cx.new(|cx| crate::compose::ComposeView::new(draft_dir, window, cx));
         let inbox = cx.new(|cx| crate::inbox::InboxView::new(window, cx));
-        let shell = Self {
+        let mut shell = Self {
             model,
             driver,
             focus,
@@ -95,8 +114,15 @@ impl AppShell {
             _appearance: appearance,
             _hub_input_events: hub_input_events,
             connectivity_task: None,
+            link: None,
+            link_thread: config.link_thread,
+            link_retry,
+            cache_path,
+            hub_feedback: None,
+            notice: None,
         };
         shell.apply_theme(window, cx);
+        shell.refresh_link(cx);
         shell
     }
 
@@ -111,6 +137,46 @@ impl AppShell {
     /// The settings field that edits the hub address.
     pub fn hub_input(&self) -> &Entity<InputState> {
         &self.hub_input
+    }
+
+    /// The signed-in session's hub link, if there is a session.
+    pub fn link(&self) -> Option<&SessionLink> {
+        self.link.as_ref()
+    }
+
+    /// What the last Save of the hub field did.
+    pub fn hub_feedback(&self) -> Option<HubOutcome> {
+        self.hub_feedback
+    }
+
+    /// Keep the hub link in step with the session: open one when a session appears (at launch
+    /// or after sign-in) and follow its connectivity; drop it when the session ends.
+    fn refresh_link(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.model.session() else {
+            if self.link.take().is_some() {
+                self.connectivity_task = None;
+                self.set_connectivity(Connectivity::Connecting, cx);
+            }
+            return;
+        };
+        if self.link.is_some() {
+            return;
+        }
+        let config = LinkConfig {
+            hub: session.hub.clone(),
+            token: session.grant.token.clone(),
+            thread_id: self.link_thread.clone(),
+            cache_path: self.cache_path.clone(),
+            retry: self.link_retry,
+        };
+        match SessionLink::open(config) {
+            Ok(link) => {
+                let feed = link.connectivity_feed();
+                self.link = Some(link);
+                self.follow_connectivity(feed, cx);
+            }
+            Err(_) => self.set_connectivity(Connectivity::Offline, cx),
+        }
     }
 
     /// Apply the chosen theme (or the system's) to every window.
@@ -169,17 +235,34 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let InputEvent::PressEnter { .. } = event {
-            self.commit_hub(window, cx);
+        match event {
+            InputEvent::PressEnter { .. } => self.commit_hub(window, cx),
+            // Typing makes the last answer stale; the field showing the saved address again
+            // (after a Save) is not typing.
+            InputEvent::Change => {
+                let typed = self.hub_input.read(cx).value();
+                if typed.as_ref() != self.model.hub() && self.hub_feedback.take().is_some() {
+                    cx.notify();
+                }
+            }
+            _ => {}
         }
     }
 
-    /// Enter in the hub field saves the address. A refused address changes nothing, so the field
-    /// goes back to the hub in use.
+    /// Enter or the Save control saves the address. A refused address changes nothing, so the
+    /// field goes back to the hub in use. Saving a different hub while signed in signs out, and
+    /// the login screen says why.
     fn commit_hub(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let typed = self.hub_input.read(cx).value().to_string();
-        // Errors are a refused address or a failed save; either way the hub in use is the answer.
-        let _ = self.model.set_hub(&typed);
+        let outcome = self.model.change_hub(&typed);
+        self.hub_feedback = Some(outcome);
+        if outcome == HubOutcome::SavedSignedOut {
+            self.notice = Some(tr_args(
+                "login-notice-hub-changed",
+                &[("hub", self.model.hub())],
+            ));
+            self.refresh_link(cx);
+        }
         self.driver.set_hub(self.model.hub());
         let hub = self.model.hub().to_string();
         self.hub_input
@@ -193,6 +276,7 @@ impl AppShell {
     }
 
     pub fn start_login(&mut self, method: LoginMethod, cx: &mut Context<Self>) {
+        self.notice = None;
         let _ = self.model.apply_login(LoginEvent::Started(method));
         self.driver.set_hub(self.model.hub());
         self.driver.start(method);
@@ -208,6 +292,8 @@ impl AppShell {
 
     pub fn sign_out(&mut self, cx: &mut Context<Self>) {
         let _ = self.model.sign_out();
+        self.notice = None;
+        self.refresh_link(cx);
         cx.notify();
     }
 
@@ -220,6 +306,7 @@ impl AppShell {
         for event in events {
             let _ = self.model.apply_login(event);
         }
+        self.refresh_link(cx);
         cx.notify();
     }
 
@@ -288,6 +375,9 @@ impl AppShell {
             .text_color(cx.theme().foreground)
             .child(div().id("login-title").text_xl().child(tr("login-title")))
             .child(Self::status("login-status", status, cx))
+            .when_some(self.notice.clone(), |el, notice| {
+                el.child(Self::status("login-notice", notice, cx))
+            })
             .when(choosing, |el| {
                 el.child(
                     h_flex()
@@ -441,7 +531,15 @@ impl AppShell {
                             .test_support()
                             .aria_label(tr("settings-hub"))
                             .child(Input::new(&self.hub_input)),
-                    ),
+                    )
+                    .child(
+                        Self::button(slots, "hub-save", tr("settings-hub-save")).on_click(
+                            cx.listener(|this, _, window, cx| this.commit_hub(window, cx)),
+                        ),
+                    )
+                    .when_some(self.hub_feedback, |el, outcome| {
+                        el.child(Self::status("hub-feedback", hub_feedback_text(outcome), cx))
+                    }),
             )
             .child(
                 div()
@@ -458,6 +556,15 @@ impl AppShell {
                 )),
             )
     }
+}
+
+fn hub_feedback_text(outcome: HubOutcome) -> String {
+    tr(match outcome {
+        HubOutcome::Saved => "settings-hub-saved",
+        HubOutcome::SavedSignedOut => "settings-hub-saved-signed-out",
+        HubOutcome::Refused => "settings-hub-refused",
+        HubOutcome::NotStored => "settings-hub-not-stored",
+    })
 }
 
 /// The QR code, the typed code and the instructions while pairing.

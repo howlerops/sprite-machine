@@ -29,6 +29,7 @@ login-error-browser = Could not open your browser: { $detail }
 login-error-timeout = Sign-in took too long and was stopped.
 login-error-hub = The hub refused the sign-in: { $detail }
 login-error-cancelled = Sign-in was cancelled.
+login-notice-hub-changed = You were signed out because the hub address changed to { $hub }. Sign in again to use it.
 login-status-a11y = Sign-in status
 
 ## Navigation
@@ -62,6 +63,12 @@ settings-theme-selected-a11y = Theme: { $choice }, selected
 settings-language = Language
 settings-language-en = English
 settings-hub = Hub address
+settings-hub-save = Save
+settings-hub-save-a11y = Save the hub address
+settings-hub-saved = Hub address saved.
+settings-hub-saved-signed-out = Hub address saved. You were signed out because your session belongs to another hub.
+settings-hub-refused = Not saved: enter a full http or https address, for example https://hub.example.com.
+settings-hub-not-stored = The hub address could not be saved, so it applies only until you quit.
 settings-account = Account
 settings-signed-in-as = Signed in as { $user } in { $org }
 settings-sign-out = Sign out
