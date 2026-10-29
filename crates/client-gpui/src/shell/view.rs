@@ -29,6 +29,9 @@ use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
 use crate::inbox::InboxEvent;
+use crate::palette::{
+    self, CommandId, NextThread, OpenPalette, PaletteEvent, PaletteView, PreviousThread, ShortcutId,
+};
 use crate::task::{
     PlanModel, TranscriptEvent, TranscriptPane, UsageModel, render_plan, render_usage,
 };
@@ -42,17 +45,28 @@ pub const APPROVAL_TICK: Duration = Duration::from_secs(1);
 
 /// Register the shell's key bindings. Call once, after `gpui_kit::init`.
 pub fn init(cx: &mut App) {
-    let new_task = if cfg!(target_os = "macos") {
-        "cmd-n"
-    } else {
-        "ctrl-n"
-    };
     crate::compose::init(cx);
-    cx.bind_keys([
-        KeyBinding::new(new_task, GoNewTask, Some(CONTEXT)),
-        KeyBinding::new("ctrl-tab", NextSection, Some(CONTEXT)),
-        KeyBinding::new("ctrl-shift-tab", PreviousSection, Some(CONTEXT)),
-    ]);
+    palette::init(cx);
+    // Also inside text fields, which would otherwise take some of these strokes.
+    for context in [CONTEXT, "Shell > Input"] {
+        cx.bind_keys([
+            KeyBinding::new(
+                palette::keystroke(ShortcutId::NewTask),
+                GoNewTask,
+                Some(context),
+            ),
+            KeyBinding::new(
+                palette::keystroke(ShortcutId::NextSection),
+                NextSection,
+                Some(context),
+            ),
+            KeyBinding::new(
+                palette::keystroke(ShortcutId::PreviousSection),
+                PreviousSection,
+                Some(context),
+            ),
+        ]);
+    }
 }
 
 /// Everything the shell needs from the outside world.
@@ -78,6 +92,8 @@ pub struct AppShell {
     hub_input: Entity<InputState>,
     compose: Entity<crate::compose::ComposeView>,
     inbox: Entity<crate::inbox::InboxView>,
+    palette: Entity<PaletteView>,
+    _palette_events: Subscription,
     _appearance: Subscription,
     _hub_input_events: Subscription,
     _inbox_events: Subscription,
@@ -146,6 +162,8 @@ impl AppShell {
             } = event;
             this.open_thread(thread_id, workspace.as_deref(), cx);
         });
+        let palette = cx.new(|cx| PaletteView::new(window, cx));
+        let palette_events = cx.subscribe_in(&palette, window, Self::on_palette_event);
         let pane = cx.new(|_| TranscriptPane::new());
         let pane_events = Self::subscribe_pane(&pane, cx);
         let mut shell = Self {
@@ -155,6 +173,8 @@ impl AppShell {
             hub_input,
             compose,
             inbox,
+            palette,
+            _palette_events: palette_events,
             _appearance: appearance,
             _hub_input_events: hub_input_events,
             _inbox_events: inbox_events,
@@ -239,6 +259,102 @@ impl AppShell {
                 self.start_tick(cx);
             }
             Err(_) => self.set_connectivity(Connectivity::Offline, cx),
+        }
+    }
+
+    /// The new-task composer.
+    pub fn compose(&self) -> &Entity<crate::compose::ComposeView> {
+        &self.compose
+    }
+
+    /// The command palette overlay.
+    pub fn palette(&self) -> &Entity<PaletteView> {
+        &self.palette
+    }
+
+    /// Open the palette over the pages and the inbox's threads; while it is open, close it.
+    pub fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.model.screen() != Screen::Main {
+            return;
+        }
+        if self.palette.read(cx).is_open() {
+            self.palette
+                .update(cx, |palette, cx| palette.close(window, cx));
+            return;
+        }
+        let commands = palette::build_commands(&palette::thread_order(self.inbox.read(cx).model()));
+        self.palette
+            .update(cx, |palette, cx| palette.open(commands, window, cx));
+        cx.notify();
+    }
+
+    fn on_palette_event(
+        &mut self,
+        _: &Entity<PaletteView>,
+        event: &PaletteEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PaletteEvent::Closed => cx.notify(),
+            PaletteEvent::Run(command) => self.run_command(command, window, cx),
+        }
+    }
+
+    /// Do what a palette command says.
+    pub fn run_command(
+        &mut self,
+        command: &CommandId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match command {
+            CommandId::Go(section) => {
+                window.focus(&self.focus, cx);
+                self.select(*section, cx);
+            }
+            CommandId::NewTask => self.new_task(window, cx),
+            CommandId::OpenThread(thread_id) => self.open_inbox_thread(thread_id, cx),
+            CommandId::NextThread => self.step_thread(1, cx),
+            CommandId::PreviousThread => self.step_thread(-1, cx),
+        }
+        cx.notify();
+    }
+
+    /// Show the composer and put the cursor in its prompt, so Cmd/Ctrl+Enter sends.
+    pub fn new_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.model.screen() != Screen::Main {
+            return;
+        }
+        self.select(Section::NewTask, cx);
+        let prompt = self.compose.read(cx).prompt_input().focus_handle(cx);
+        window.focus(&prompt, cx);
+    }
+
+    /// Open a thread of the inbox's list by id (its workspace comes from the row).
+    fn open_inbox_thread(&mut self, thread_id: &str, cx: &mut Context<Self>) {
+        let workspace = self
+            .inbox
+            .read(cx)
+            .model()
+            .row(thread_id)
+            .and_then(|row| row.workspace.clone());
+        self.open_thread(thread_id, workspace.as_deref(), cx);
+    }
+
+    /// Open the thread `delta` places from the open one in the inbox's order.
+    fn step_thread(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.model.screen() != Screen::Main {
+            return;
+        }
+        let threads = palette::thread_order(self.inbox.read(cx).model());
+        let ids: Vec<&str> = threads
+            .iter()
+            .map(|thread| thread.thread_id.as_str())
+            .collect();
+        if let Some(ix) = palette::adjacent(&ids, self.open_thread.as_deref(), delta) {
+            let thread = &threads[ix];
+            self.open_thread(&thread.thread_id, thread.workspace.as_deref(), cx);
         }
     }
 
@@ -895,28 +1011,36 @@ impl Render for AppShell {
             Screen::Login => self.render_login(&slots, cx).into_any_element(),
             Screen::Main => self.render_main(&slots, cx).into_any_element(),
         };
+        let palette_open = self.model.screen() == Screen::Main && self.palette.read(cx).is_open();
         div()
             .id("app-shell")
             .key_context(CONTEXT)
             .track_focus(&self.focus)
+            .relative()
             .size_full()
-            .on_action(cx.listener(|this, _: &GoNewTask, _, cx| {
-                if this.model.screen() == Screen::Main {
-                    this.select(Section::NewTask, cx);
-                }
+            .on_action(cx.listener(|this, _: &GoNewTask, window, cx| this.new_task(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenPalette, window, cx| {
+                this.toggle_palette(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &NextSection, _, cx| {
+            .on_action(cx.listener(|this, _: &NextThread, _, cx| this.step_thread(1, cx)))
+            .on_action(cx.listener(|this, _: &PreviousThread, _, cx| this.step_thread(-1, cx)))
+            .on_action(cx.listener(|this, _: &NextSection, window, cx| {
                 if this.model.screen() == Screen::Main {
+                    // The page may take the focused field with it; keep the shortcuts live.
+                    window.focus(&this.focus, cx);
                     this.model.nav.next();
                     cx.notify();
                 }
             }))
-            .on_action(cx.listener(|this, _: &PreviousSection, _, cx| {
+            .on_action(cx.listener(|this, _: &PreviousSection, window, cx| {
                 if this.model.screen() == Screen::Main {
+                    // The page may take the focused field with it; keep the shortcuts live.
+                    window.focus(&this.focus, cx);
                     this.model.nav.previous();
                     cx.notify();
                 }
             }))
             .child(body)
+            .when(palette_open, |el| el.child(self.palette.clone()))
     }
 }
