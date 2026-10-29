@@ -471,15 +471,13 @@ impl Router {
             }
             Some(worktree)
         };
-        self.start_session(
-            thread_id,
-            &found,
-            cwd,
-            worktree,
-            store,
-            self.ctx.permission_mode,
-        )
-        .await
+        // The mode the thread ran in when it was started, capped by the machine's mode now; a
+        // thread with no record (stored before the record existed) gets the local mode.
+        let mode = PermissionMode::load(&dir).map_or(self.ctx.permission_mode, |saved| {
+            self.ctx.permission_mode.capped(saved.as_str())
+        });
+        self.start_session(thread_id, &found, cwd, worktree, store, mode)
+            .await
     }
 
     /// `-c`: the last session of the current directory is started again and registered with the
@@ -564,17 +562,25 @@ impl Router {
         mode: PermissionMode,
     ) -> Result<(), Reject> {
         // The record lets a prompt after the session ends add the worktree back.
+        let dir = session_dir(&self.ctx.state_dir, thread_id);
         let started = match &worktree {
-            Some(worktree) => worktree
-                .save(&session_dir(&self.ctx.state_dir, thread_id))
-                .map_err(|e| {
-                    (
-                        CommandErrorCode::Invalid,
-                        format!("save the worktree: {e:#}"),
-                    )
-                }),
+            Some(worktree) => worktree.save(&dir).map_err(|e| {
+                (
+                    CommandErrorCode::Invalid,
+                    format!("save the worktree: {e:#}"),
+                )
+            }),
             None => Ok(()),
         }
+        // The effective mode is recorded so a reopen after an idle close keeps it.
+        .and_then(|()| {
+            mode.save(&dir).map_err(|e| {
+                (
+                    CommandErrorCode::Invalid,
+                    format!("save the permission mode: {e:#}"),
+                )
+            })
+        })
         .and_then(|()| self.spawn_session(thread_id, found, cwd, worktree.clone(), store, mode));
         match started {
             Ok(()) => Ok(()),

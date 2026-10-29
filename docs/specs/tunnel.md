@@ -260,7 +260,9 @@ is a request. Modes are ordered from strictest to loosest: `plan` < `default` < 
 than its local mode; otherwise (looser, or not a known mode) its local mode applies. The session
 runs in that effective mode from before the first prompt (ACP `session/set_mode`) and reports it
 as `StateDelta{session}` `current_mode_id`, like any mode change. The dispatch does not fail
-because it was capped. A runner reopening an idle-closed session uses its local mode.
+because it was capped. A runner reopening an idle-closed session keeps the thread's effective
+mode (recorded when the session started), capped again by its local mode; a thread with no
+record uses the local mode.
 
 MCP servers for the thread's ACP session (`session/new`, `session/resume`, `session/load`) are
 **not** carried by `dispatch` (SPEC-004): until loadouts (plan §4.6, M5) they come from the
