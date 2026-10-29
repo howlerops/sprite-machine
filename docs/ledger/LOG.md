@@ -322,3 +322,4 @@
 - 2026-10-29 leader: merged M3-005c; verified with M2-010k (client 278 passed, shell+inbox 5/5). Filed + assigned M3-005e (outbox pruning; refusal text) to sonnet.
 - 2026-10-29 leader: merged M3-013 (notifier, ToastSink via gpui-component system+in-app, hub link parser, prefs). Filed M3-013a (shell hookup + failed status), M3-013b, M3-013c.
 - 2026-10-29 leader: merged M3-005e (Done entries capped at 64; refusals readable + dismissable); M3-013 verified (client 298 passed). Running runner tests + e2e app/rc for the outbox change.
+- 2026-10-29 leader: M3-005e verified (runner 253 passed, e2e app + rc PASS).
