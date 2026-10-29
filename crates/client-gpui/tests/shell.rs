@@ -1424,8 +1424,9 @@ fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
         .block_on(connection.next_persisted(&mut cache))
         .expect("the live frame is read");
     assert_eq!(applied, Applied::Live);
-    // The outbox has not answered yet, so the connection is still not online.
-    assert_eq!(banner(cx).as_deref(), Some("Reconnecting..."));
+    // Live with nothing queued: the idle outbox has no opinion, so the banner hides.
+    assert_eq!(connection.connectivity(), Connectivity::Online);
+    assert_eq!(banner(cx), None);
 
     connection
         .enqueue(
@@ -1437,6 +1438,8 @@ fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
             0,
         )
         .expect("queues");
+    // A queued send the hub has not answered yet is still connecting.
+    assert_eq!(banner(cx).as_deref(), Some("Reconnecting..."));
     let report = runtime
         .block_on(connection.flush(
             &cache,
@@ -1614,12 +1617,12 @@ fn after_sign_in_the_banner_follows_the_sessions_own_connection(cx: &mut TestApp
             .all(|bearer| bearer == "Bearer sm_session_token")
     );
 
-    // The hub accepts the socket: the connection retries and goes live, but the outbox has not
-    // been answered yet, so it is still not online.
+    // The hub accepts the socket: the connection retries and goes live. Nothing is queued, so
+    // the idle outbox has no opinion and the banner goes away.
     state.socket_up.store(true, Ordering::SeqCst);
-    wait_for_banner(cx, window, &view, Some("Reconnecting..."));
+    wait_for_banner(cx, window, &view, None);
 
-    // The outbox gets an answer: the whole connection is online and the banner goes away.
+    // A send gets an answer: the connection stays online and the banner stays away.
     cx.update(|cx| {
         view.read(cx)
             .link()
@@ -1629,8 +1632,14 @@ fn after_sign_in_the_banner_follows_the_sessions_own_connection(cx: &mut TestApp
                 task_id: "tk_1".to_owned(),
             });
     });
-    wait_for_banner(cx, window, &view, None);
+    for _ in 0..400 {
+        if state.cancels.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
     assert_eq!(state.cancels.load(Ordering::SeqCst), 1);
+    wait_for_banner(cx, window, &view, None);
 }
 
 #[gpui_kit::test]
@@ -1645,7 +1654,8 @@ fn a_stored_session_opens_the_link_at_launch_and_signing_out_closes_it(cx: &mut 
         stored_session_on(&hub),
         Arc::new(RecordingBrowser::new()),
     );
-    wait_for_banner(cx, window, &view, Some("Reconnecting..."));
+    // The socket is accepted and nothing is queued, so the banner hides once the link is live.
+    wait_for_banner(cx, window, &view, None);
     cx.update(|cx| assert!(view.read(cx).link().is_some()));
 
     cx.update_window(window, |_, _, cx| {

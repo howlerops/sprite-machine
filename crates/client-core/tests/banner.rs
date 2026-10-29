@@ -175,17 +175,23 @@ async fn an_unreachable_hub_starts_offline_and_reconnect_brings_it_live() {
     record(&mut rx, &mut seen);
     assert_eq!(owner.connectivity(), Connectivity::Connecting);
 
-    // Live: the subscription is online, but the outbox has not heard from the hub yet.
+    // Live: the subscription is online and nothing is queued, so the outbox has no opinion.
     until_live(&mut owner, &mut cache).await;
     assert_eq!(owner.subscription().connectivity(), Connectivity::Online);
-    assert_eq!(owner.connectivity(), Connectivity::Connecting);
+    assert_eq!(owner.outbox().connectivity(), Connectivity::Connecting);
+    record(&mut rx, &mut seen);
+    assert_eq!(owner.connectivity(), Connectivity::Online);
 
-    // The hub answers a queued intent: the outbox is online, so the combined state is online.
+    // A queued intent the hub has not answered yet: connecting, as before.
     let clock = ManualClock::new(0);
     let mut rng = FixedRandom(u64::MAX);
     owner
         .enqueue(&cache, cancel("tk_1"), clock.now_ms())
         .expect("enqueues");
+    record(&mut rx, &mut seen);
+    assert_eq!(owner.connectivity(), Connectivity::Connecting);
+
+    // The hub answers it: the outbox is online, so the combined state is online.
     let answering = Scripted(Mutex::new(VecDeque::from([answered(202)])));
     owner
         .flush(&cache, &answering, &base, &clock, &mut rng)
@@ -201,8 +207,10 @@ async fn an_unreachable_hub_starts_offline_and_reconnect_brings_it_live() {
             Connectivity::Offline,
             Connectivity::Connecting,
             Connectivity::Online,
+            Connectivity::Connecting,
+            Connectivity::Online,
         ],
-        "offline at start, then connecting, then online"
+        "offline, connecting, online when live and idle, connecting while a send is unanswered, online"
     );
 }
 
@@ -255,15 +263,17 @@ async fn the_owner_publishes_the_banner_sequence_as_either_link_changes() {
     // 1. Both links connecting.
     assert_eq!(owner.connectivity(), Connectivity::Connecting);
 
-    // 2. The subscription goes live; the outbox has no answer yet. Still connecting.
+    // 2. The subscription goes live with nothing queued: the idle outbox has no opinion.
     until_live(&mut owner, &mut cache).await;
     record(&mut rx, &mut seen);
-    assert_eq!(owner.connectivity(), Connectivity::Connecting);
+    assert_eq!(owner.connectivity(), Connectivity::Online);
 
-    // 3. The hub answers the first queued intent: both links online, banner gone.
+    // 3. A queued intent with no answer yet: connecting again. Then the hub answers it.
     owner
         .enqueue(&cache, cancel("tk_1"), clock.now_ms())
         .expect("enqueues");
+    record(&mut rx, &mut seen);
+    assert_eq!(owner.connectivity(), Connectivity::Connecting);
     let answering = Scripted(Mutex::new(VecDeque::from([answered(202)])));
     let report = owner
         .flush(&cache, &answering, &base, &clock, &mut rng)
@@ -325,6 +335,8 @@ async fn the_owner_publishes_the_banner_sequence_as_either_link_changes() {
         vec![
             Connectivity::Connecting,
             Connectivity::Online,
+            Connectivity::Connecting,
+            Connectivity::Online,
             Connectivity::Offline,
             Connectivity::Connecting,
             Connectivity::Online,
@@ -336,9 +348,59 @@ async fn the_owner_publishes_the_banner_sequence_as_either_link_changes() {
         vec![
             Some("Connecting..."),
             None,
+            Some("Connecting..."),
+            None,
             Some("Offline: changes will be sent when you reconnect"),
             Some("Connecting..."),
             None,
         ]
     );
+}
+
+#[tokio::test]
+async fn an_idle_outbox_follows_the_subscription_and_a_failed_send_still_shows_offline() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
+    let base = format!("http://{}", listener.local_addr().expect("address"));
+    let hub = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accepts");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("handshake");
+        for frame in [HELLO, LIVE] {
+            socket
+                .send(Message::Text(frame.into()))
+                .await
+                .expect("sends");
+        }
+        std::future::pending::<()>().await;
+    });
+    let mut cache = Cache::open_in_memory().expect("cache");
+    let subscription = Subscription::connect(&base, ThreadSync::new("th_1"), None)
+        .await
+        .expect("connects");
+    let outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let mut owner = Connection::new(subscription, outbox);
+    let clock = ManualClock::new(0);
+    let mut rng = FixedRandom(u64::MAX);
+
+    // Live and idle: no banner, although no HTTP request has ever been made.
+    until_live(&mut owner, &mut cache).await;
+    assert_eq!(owner.connectivity(), Connectivity::Online);
+    assert_eq!(owner.connectivity().banner(), None);
+
+    // A send that fails: offline.
+    owner
+        .enqueue(&cache, cancel("tk_1"), clock.now_ms())
+        .expect("enqueues");
+    let down = Scripted(Mutex::new(VecDeque::from([Err(TransportError(
+        "connection refused".to_owned(),
+    ))])));
+    owner
+        .flush(&cache, &down, &base, &clock, &mut rng)
+        .await
+        .expect("flushes");
+    assert_eq!(owner.connectivity(), Connectivity::Offline);
+    hub.abort();
 }
