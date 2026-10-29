@@ -397,7 +397,7 @@ impl InboxView {
         cx.emit(event);
     }
 
-    /// Quick Allow / Deny on the thread's first open approval.
+    /// Quick Allow / Deny on the thread's first open approval (forms and auth are skipped).
     pub fn answer(
         &mut self,
         thread_id: &str,
@@ -634,18 +634,21 @@ impl InboxView {
         .flatten()
         .collect::<Vec<_>>()
         .join(" - ");
-        let pending = row.pending.first().cloned();
+        // The quick buttons answer the first approval; the detail line is the first open
+        // interrupt of any kind.
+        let approval = row.first_approval().cloned();
         let id = row.thread_id.clone();
         let rename_id = id.clone();
         let archive_id = id.clone();
         let archived = row.archived;
-        let (allow, deny) = pending.as_ref().map_or((false, false), |p| {
+        let (allow, deny) = approval.as_ref().map_or((false, false), |p| {
             (
                 p.option_for(Verdict::Allow).is_some(),
                 p.option_for(Verdict::Deny).is_some(),
             )
         });
-        let detail = pending.map(|p| p.title).unwrap_or_default();
+        let approval_title = approval.map(|p| p.title).unwrap_or_default();
+        let detail = row.detail().unwrap_or_default().to_owned();
         let (allow_id, deny_id) = (id.clone(), id.clone());
         let open_id = id.clone();
         div()
@@ -699,7 +702,7 @@ impl InboxView {
                                 .label(tr("inbox-allow"))
                                 .accessibility_label(tr_args(
                                     "inbox-allow-a11y",
-                                    &[("detail", &detail)],
+                                    &[("detail", &approval_title)],
                                 ))
                                 .primary()
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -714,7 +717,10 @@ impl InboxView {
                                 row.thread_id
                             )))
                             .label(tr("inbox-deny"))
-                            .accessibility_label(tr_args("inbox-deny-a11y", &[("detail", &detail)]))
+                            .accessibility_label(tr_args(
+                                "inbox-deny-a11y",
+                                &[("detail", &approval_title)],
+                            ))
                             .on_click(cx.listener(
                                 move |this, _, window, cx| {
                                     this.answer(&deny_id, Verdict::Deny, window, cx);

@@ -13,8 +13,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use client_gpui::inbox::{
-    Clock, Failure, InboxEvent, InboxModel, InboxView, Item, SEARCH_DEBOUNCE, Section, Status,
-    Target, Verdict, answer_interrupt, fetch_threads, parse_threads, patch_thread,
+    Clock, Failure, InboxEvent, InboxModel, InboxView, InterruptKind, Item, SEARCH_DEBOUNCE,
+    Section, Status, Target, Verdict, answer_interrupt, fetch_threads, parse_threads, patch_thread,
 };
 use client_gpui::shell::i18n::Catalog;
 use gpui_kit::test::TestWindowExt;
@@ -422,6 +422,91 @@ fn an_approval_without_allow_or_reject_options_has_no_quick_answer() {
     assert!(model.begin_answer("th_n", Verdict::Allow).is_none());
 }
 
+/// A form (`kind` form, no options) that the hub lists before the approval.
+fn form_entry(interrupt_id: &str, title: &str) -> Value {
+    json!({ "interrupt_id": interrupt_id, "title": title, "kind": "form", "options": [] })
+}
+
+/// An auth entry (`kind` auth, no options).
+fn auth_entry(interrupt_id: &str, title: &str) -> Value {
+    json!({ "interrupt_id": interrupt_id, "title": title, "kind": "auth", "options": [] })
+}
+
+#[test]
+fn a_pending_entry_carries_its_kind_and_a_missing_kind_is_an_approval() {
+    let mut row = needing("th_m", "Mixed");
+    let approval = row["pending_interrupts"][0].clone();
+    row["pending_interrupts"] = json!([
+        form_entry("int_f", "Fill in"),
+        auth_entry("int_a", "Sign in"),
+        approval,
+        { "interrupt_id": "int_x", "title": "Future", "kind": "widget", "options": [] }
+    ]);
+    let (model, _) = model_with(vec![row]);
+    let kinds: Vec<InterruptKind> = model
+        .row("th_m")
+        .expect("row")
+        .pending
+        .iter()
+        .map(|p| p.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            InterruptKind::Form,
+            InterruptKind::Auth,
+            InterruptKind::Approval,
+            InterruptKind::Other,
+        ]
+    );
+    assert_eq!(InterruptKind::parse(None), InterruptKind::Approval);
+}
+
+#[test]
+fn a_quick_answer_takes_the_approval_listed_after_a_form() {
+    let mut row = needing("th_m", "Mixed");
+    let approval = row["pending_interrupts"][0].clone();
+    row["pending_interrupts"] = json!([form_entry("int_f", "Fill in"), approval]);
+    let (mut model, _) = model_with(vec![row]);
+    let allow = model.begin_answer("th_m", Verdict::Allow).expect("allow");
+    assert_eq!(allow.interrupt_id, "int_9");
+    assert_eq!(
+        allow.body,
+        json!({ "outcome": { "type": "selected", "option_id": "yes_once" } })
+    );
+    model.finish(allow.op, Ok(()));
+    // The form is still open, so the row stays in Needs you with the form as its detail.
+    let row = model.row("th_m").expect("row");
+    assert_eq!(row.status, Status::NeedsYou);
+    assert_eq!(row.detail(), Some("Fill in"));
+    assert!(model.begin_answer("th_m", Verdict::Deny).is_none());
+}
+
+#[test]
+fn a_row_with_only_a_form_or_auth_has_no_quick_answer_and_its_first_title_is_the_detail() {
+    let mut form = thread("th_f", "Form", "needs_you");
+    form["pending_interrupts"] = json!([
+        form_entry("int_f", "Fill in"),
+        auth_entry("int_a", "Sign in")
+    ]);
+    let mut auth = thread("th_a", "Auth", "needs_you");
+    auth["pending_interrupts"] = json!([auth_entry("int_a", "Sign in to GitHub")]);
+    let (mut model, _) = model_with(vec![form, auth]);
+    for id in ["th_f", "th_a"] {
+        assert!(
+            model.begin_answer(id, Verdict::Allow).is_none(),
+            "{id} allow"
+        );
+        assert!(model.begin_answer(id, Verdict::Deny).is_none(), "{id} deny");
+    }
+    assert!(model.row("th_f").expect("row").first_approval().is_none());
+    assert_eq!(model.row("th_f").expect("row").detail(), Some("Fill in"));
+    assert_eq!(
+        model.row("th_a").expect("row").detail(),
+        Some("Sign in to GitHub")
+    );
+}
+
 // ---- requests against the fake hub ---------------------------------------------------------------------
 
 #[test]
@@ -692,6 +777,70 @@ fn quick_allow_answers_and_does_not_open_the_thread(cx: &mut TestAppContext) {
         opened,
         "Allow must not emit an open"
     );
+}
+
+#[gpui_kit::test]
+fn a_row_whose_first_entry_is_a_form_still_offers_quick_allow(cx: &mut TestAppContext) {
+    let hub = Arc::new(Hub::default());
+    let mut row = needing("th_mix", "Mixed");
+    let approval = row["pending_interrupts"][0].clone();
+    row["pending_interrupts"] = json!([form_entry("int_f", "Fill in the deploy form"), approval]);
+    *hub.threads.lock().expect("lock") = vec![row];
+    let api = spawn_hub(hub.clone());
+    let (window, view) = open_inbox(cx, ManualClock::new());
+    point_at(cx, window, &view, &api);
+    wait_until(cx, window, &view, |window, _| {
+        window.try_find("inbox-allow-th_mix").is_some()
+    });
+    cx.update_window(window, |_, window, cx| {
+        assert_eq!(
+            window.find("inbox-allow-th_mix").label(),
+            Some("Allow: Allow edit to src/main.rs?")
+        );
+        window.click("inbox-allow-th_mix", cx);
+    })
+    .expect("window");
+    wait_until(cx, window, &view, |_, _| {
+        !hub.answers.lock().expect("lock").is_empty()
+    });
+    let answers = hub.answers.lock().expect("lock");
+    assert_eq!(answers[0].0, "th_mix");
+    assert_eq!(answers[0].1, "int_9", "the approval, not the form");
+    assert_eq!(
+        answers[0].3,
+        json!({ "outcome": { "type": "selected", "option_id": "yes_once" } })
+    );
+}
+
+#[gpui_kit::test]
+fn a_row_with_only_a_form_or_auth_shows_no_quick_buttons(cx: &mut TestAppContext) {
+    let hub = Arc::new(Hub::default());
+    let mut form = thread("th_form", "Form", "needs_you");
+    form["pending_interrupts"] = json!([form_entry("int_f", "Fill in")]);
+    let mut auth = thread("th_auth", "Auth", "needs_you");
+    auth["pending_interrupts"] = json!([auth_entry("int_a", "Sign in")]);
+    *hub.threads.lock().expect("lock") = vec![form, auth];
+    let api = spawn_hub(hub.clone());
+    let (window, view) = open_inbox(cx, ManualClock::new());
+    point_at(cx, window, &view, &api);
+    wait_until(cx, window, &view, |window, _| {
+        window.try_find("inbox-open-th_form").is_some()
+            && window.try_find("inbox-open-th_auth").is_some()
+    });
+    cx.update_window(window, |_, window, _| {
+        for id in ["th_form", "th_auth"] {
+            assert!(
+                window.try_find(format!("inbox-allow-{id}")).is_none(),
+                "{id} allow"
+            );
+            assert!(
+                window.try_find(format!("inbox-deny-{id}")).is_none(),
+                "{id} deny"
+            );
+        }
+    })
+    .expect("window");
+    assert!(hub.answers.lock().expect("lock").is_empty());
 }
 
 #[gpui_kit::test]
