@@ -290,3 +290,4 @@
 2026-10-29T02:02Z M2B-019f back (sonnet): thread_open.running_task (tunnel.md §3.4) makes the Thread DO count a pre-/rc task as running; native + live tests → merged; verify running; added M2B-019g (P4). M3-004a back (sonnet): runner caps a dispatch mode by the local mode (set_mode before first prompt), hello advertises permission_mode:<mode>, hub relays it, composer offers only allowed modes; specs updated. Merge after the M2B-019f verify. Added M3-004c (P3: keep the capped mode on reopen)
 2026-10-29T02:07Z M2B-019f verify green → done. M3-004a merged; verify running
 2026-10-29T02:07Z assign M3-004c (haiku)
+2026-10-29T02:23Z M3-004a verify green → done

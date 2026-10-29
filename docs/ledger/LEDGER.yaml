@@ -6393,7 +6393,8 @@ items:
     title: 'Spec + runner + composer: a remotely requested permission mode is capped by the machine local mode (never looser; plan §4.10 "the local permission mode applies"); the composer only offers modes the machine allows and says when it was capped'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; clippy workspace + wasm clean, runner/hub/client-gpui/protocol 802/0, live machine_do PASS, tracer PASS on merged tree"
     assignee: "sonnet"
     attempt: 1
     lane: rust
