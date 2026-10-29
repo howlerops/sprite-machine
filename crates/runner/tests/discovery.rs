@@ -90,11 +90,7 @@ fn finds_all_six_harnesses_with_their_acp_invocation() {
             ("codex", "codex-acp".to_owned(), strings(&[])),
             ("opencode", "opencode".to_owned(), strings(&["acp"])),
             ("pi", "pi-acp".to_owned(), strings(&[])),
-            (
-                "gemini",
-                "gemini".to_owned(),
-                strings(&["--experimental-acp"])
-            ),
+            ("gemini", "gemini".to_owned(), strings(&["--acp"])),
             ("goose", "goose".to_owned(), strings(&["acp"])),
         ]
     );

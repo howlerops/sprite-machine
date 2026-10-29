@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 142/300 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 136/200
+done 143/300 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 136/200
 
 ## Per phase
 
@@ -10,7 +10,7 @@ done 142/300 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (huma
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 70 | 64 | 0 |
+| P2 | 70 | 65 | 0 |
 | P3 | 41 | 23 | 3 |
 | P4 | 61 | 2 | 0 |
 | P5 | 30 | 0 | 0 |
@@ -47,7 +47,7 @@ done 142/300 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (huma
 | M1A-006g | worker | rust | done | Local vs hub prompts by an explicit IncomingCommand flag (not the "local:" idempotency-key prefix); hub refuses "local:" keys; tidy stale tracer wording |
 | M2B-005a | worker | rust | done | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
 | M2B-005b | worker | rust | done | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
-| M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
+| M2B-006a | worker | rust | done | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
 | M2B-006b | worker | rust | blocked | Confirm goose ACP invocation (goose acp) against a real goose binary; a real session/new per harness with logins |
 | M2B-006c | worker | rust | done | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
 | M2B-004f | worker | rust | done | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |

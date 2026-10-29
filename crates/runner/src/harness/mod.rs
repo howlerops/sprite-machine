@@ -39,14 +39,17 @@ pub struct Harness {
 /// The ACP entry points, in the order the hello reports them (PLAN §4.10 and the list on
 /// PLAN line 388). A new harness, or a changed invocation, is a row here.
 ///
-/// These invocations are NOT confirmed against the upstream projects: this worktree was built
-/// offline. Each one stays unconfirmed until a real `session/new` against it succeeds:
-/// - claude: the `claude-agent-acp` adapter (the plan's name); `claude-code-acp` is the older one.
-/// - codex: the `codex-acp` adapter.
-/// - opencode: native `opencode acp` (https://opencode.ai/docs/acp).
-/// - pi: a community adapter; `pi-acp` and `pi-acpinator` are the two names the plan lists.
-/// - gemini: `gemini --experimental-acp`.
-/// - goose: `goose acp`.
+/// Checked on 2026-10-29 (M2B-006a): each invocation below answered an ACP `initialize` with
+/// `protocolVersion: 1`, except goose, which is still unconfirmed.
+/// - claude: `claude-agent-acp` (npm `@agentclientprotocol/claude-agent-acp` 0.99.0, also published
+///   as `@zed-industries/claude-agent-acp`); `claude-code-acp` (`@zed-industries/claude-code-acp`
+///   0.16.2) is the older one.
+/// - codex: `codex-acp` (npm `@zed-industries/codex-acp` 0.16.0).
+/// - opencode: native `opencode acp` (npm `opencode-ai` 1.19.5).
+/// - pi: `pi-acp` (npm `pi-acp` 0.0.34) or `pi-acpinator` (npm `pi-acpinator` 0.1.0).
+/// - gemini: `gemini --acp` (npm `@google/gemini-cli` 0.66.0, where `--experimental-acp` is a
+///   deprecated alias).
+/// - goose: `goose acp`, not yet checked against a real binary.
 pub const HARNESSES: &[Harness] = &[
     Harness {
         name: "claude",
@@ -92,7 +95,7 @@ pub const HARNESSES: &[Harness] = &[
         name: "gemini",
         acp: &[Entry {
             program: "gemini",
-            args: &["--experimental-acp"],
+            args: &["--acp"],
         }],
     },
     Harness {

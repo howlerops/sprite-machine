@@ -2533,9 +2533,10 @@ items:
     title: 'Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES'
     milestone: M2b
     phase: P2
-    status: "blocked"
+    status: "done"
+    evidence: "2026-10-29 leader probe (ACP initialize, protocolVersion 1 answered): claude-agent-acp (@agentclientprotocol/claude-agent-acp 0.99.0), claude-code-acp (@zed-industries/claude-code-acp 0.16.2), codex-acp (@zed-industries/codex-acp 0.16.0), opencode acp (opencode-ai 1.19.5), pi-acp 0.0.34, pi-acpinator 0.1.0, gemini --acp and --experimental-acp (@google/gemini-cli 0.66.0; experimental is deprecated, row changed to --acp). goose not run (permission check refused a downloaded binary) -> M2B-006b."
     howto: "Confirming the harness invocations needs installing and running third-party agent CLIs (npm/pip packages: claude-agent-acp, codex-acp, opencode, gemini-cli, goose, pi adapter); the session permission check refused that (Code from External). Either run the probe yourself on a machine where these are installed (for each: start its ACP entry point and send an ACP initialize; note package, version and exact command) and paste the results, or allow the leader to install them into a scratch prefix in this container. No logins or keys are needed for initialize."
-    blocked_on: "human"
+    blocked_on: null
     lane: rust
     size: S
     risk: medium
