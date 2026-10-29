@@ -4659,7 +4659,8 @@ items:
     title: 'client: desktop notifications, deep links, notification settings'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: notify 17 passed, client-gpui all, clippy clean. Leader verify with M3-005e."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4677,6 +4678,51 @@ items:
       - 'Native desktop notifications with click-through; hub link https://<hub>/t/<id> opens the task; prefs UI'
     verify:
       - 'cargo test -p client-gpui --test notify'
+  - id: M3-013a
+    title: 'Wire Notifier, ToastSink and deep links into AppShell (seed on first inbox fetch, observe on refresh and open-thread snapshots, focus tracking, Open -> open_thread, settings view mounted)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: M
+    risk: medium
+    deps: [M3-013, M3-005e]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/notify/**'
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Window test with the fake hub: a thread moving to needs_you shows one toast; the open thread does not notify; clicking/Open opens it; a hub link opens the thread'
+      - 'inbox Status carries failed (client-api.md §5.2 string) so failed runs notify'
+  - id: M3-013b
+    title: 'desktop: register an OS URL handler for hub links (macOS Info.plist, Linux .desktop) and verify toast click on a real desktop'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-013a]
+    paths:
+      - 'crates/client-gpui/**'
+      - 'docs/**'
+    acceptance:
+      - 'Bundle metadata registers the handler; manual check recorded'
+  - id: M3-013c
+    title: 'desktop notification prefs sync with GET/PUT /v1/push/prefs (approval_needed, task_done, task_failed)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-013a]
+    paths:
+      - 'crates/client-gpui/src/notify/**'
+      - 'crates/client-gpui/tests/notify.rs'
+    acceptance:
+      - 'Toggles load from and save to the hub (fake hub test)'
 
   - id: M3-014
     title: 'client: command palette + shortcuts'
