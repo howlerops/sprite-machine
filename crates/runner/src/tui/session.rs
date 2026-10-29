@@ -33,7 +33,9 @@ use std::sync::Arc;
 use client_core::Connectivity;
 use client_core::sync::Incoming;
 use protocol::tunnel::{Actor, ActorKind, Command, ContentPart, Outcome, Workspace};
-use protocol::turn_event::{Envelope, Event, InterruptResolved, ResolvedOutcome, UserMessage};
+use protocol::turn_event::{
+    Envelope, Event, InterruptResolved, ResolvedOutcome, RunFinished, RunOutcome, UserMessage,
+};
 use sidecar::acp::reattach::rfc3339;
 use sidecar::bridge::{
     CommandFailure, CommandSource, EventSink, IncomingCommand, Origin, SinkError,
@@ -57,6 +59,21 @@ pub trait Upstream: Send + Sync {
         agent: &str,
         workspace: &Workspace,
     ) -> Result<(), String>;
+
+    /// [`Upstream::open`] for a session whose agent is already running a task that started
+    /// before the registration (`running_task`, tunnel.md §3.4): the hub counts that task as
+    /// busy from the moment the thread exists. The default ignores the task.
+    fn open_running(
+        &self,
+        thread_id: &str,
+        title: &str,
+        agent: &str,
+        workspace: &Workspace,
+        running_task: Option<&str>,
+    ) -> Result<(), String> {
+        let _ = running_task;
+        self.open(thread_id, title, agent, workspace)
+    }
 
     /// Sends envelopes (producer side, `seq` 0) in order.
     fn send<'a>(&'a self, envelopes: Vec<Envelope>) -> UpstreamFuture<'a>;
@@ -184,6 +201,31 @@ impl Inner {
                 }
                 _ => None,
             })
+    }
+
+    /// The task the agent is running now: the last one in the log that has begun (its
+    /// `UserMessage`) and not ended (`RunFinished{success}` or `RunError`, as the hub counts it).
+    fn running_task(&self) -> Option<String> {
+        let mut running: Option<&str> = None;
+        for entry in &self.log {
+            let Some(task) = entry.envelope.task_id.as_deref() else {
+                continue;
+            };
+            match &entry.envelope.event {
+                Event::UserMessage(_) => running = Some(task),
+                Event::RunFinished(RunFinished {
+                    outcome: RunOutcome::Success { .. },
+                    ..
+                })
+                | Event::RunError(_)
+                    if running == Some(task) =>
+                {
+                    running = None;
+                }
+                _ => {}
+            }
+        }
+        running.map(str::to_owned)
     }
 
     /// The task an interrupt belongs to.
@@ -461,11 +503,14 @@ impl Backend for Session {
         let registration = (self.registrar)(self.handle.clone()).await?;
         let mut inner = self.handle.inner.lock().await;
         if !inner.opened {
-            registration.upstream.open(
+            // A task the agent started before `/rc` is named in the registration, so the hub
+            // counts it as busy before its events arrive.
+            registration.upstream.open_running(
                 &inner.thread_id,
                 &inner.title,
                 &inner.agent,
                 &inner.workspace,
+                inner.running_task().as_deref(),
             )?;
             inner.opened = true;
         }

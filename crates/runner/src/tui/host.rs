@@ -328,6 +328,43 @@ impl Upstream for TunnelUpstream {
             .map_err(|error| error.to_string())
     }
 
+    fn open_running(
+        &self,
+        thread_id: &str,
+        title: &str,
+        agent: &str,
+        workspace: &Workspace,
+        running_task: Option<&str>,
+    ) -> Result<(), String> {
+        let Some(task) = running_task else {
+            return self.open(thread_id, title, agent, workspace);
+        };
+        // `TunnelSink::thread_open` has no field for the running task, so the frame is queued
+        // here under the same guard (`thread_open` first in the outbox, once per thread).
+        self.0.mark_local_thread(thread_id);
+        let workspace = serde_json::to_value(workspace).map_err(|error| error.to_string())?;
+        let shared = &self.0.shared;
+        let mut local = shared
+            .local_threads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if local.get(thread_id) == Some(&true) {
+            return Err(format!("thread {thread_id} is already open"));
+        }
+        shared
+            .enqueue(serde_json::json!({
+                "t": "thread_open",
+                "thread_id": thread_id,
+                "title": title,
+                "agent": agent,
+                "workspace": workspace,
+                "running_task": task,
+            }))
+            .map_err(|error| error.to_string())?;
+        local.insert(thread_id.to_owned(), true);
+        Ok(())
+    }
+
     fn send<'a>(&'a self, envelopes: Vec<Envelope>) -> UpstreamFuture<'a> {
         Box::pin(async move {
             self.0

@@ -1459,6 +1459,8 @@ mod session {
     #[derive(Default)]
     struct Recording {
         opened: Mutex<Vec<(String, String)>>,
+        /// The task each registration named as already running (`None`: idle).
+        running: Mutex<Vec<Option<String>>>,
         sent: Mutex<Vec<Envelope>>,
         /// The prompts typed here that went up (task id, message id, text), in order.
         prompts: Mutex<Vec<(String, String, String)>>,
@@ -1472,6 +1474,21 @@ mod session {
     }
 
     impl Upstream for Recording {
+        fn open_running(
+            &self,
+            thread_id: &str,
+            title: &str,
+            agent: &str,
+            workspace: &Workspace,
+            running_task: Option<&str>,
+        ) -> Result<(), String> {
+            self.running
+                .lock()
+                .expect("lock")
+                .push(running_task.map(str::to_owned));
+            self.open(thread_id, title, agent, workspace)
+        }
+
         fn open(
             &self,
             thread_id: &str,
@@ -2236,6 +2253,63 @@ mod session {
             .filter(|e| matches!(e.event, Event::UserMessage(_)))
             .count();
         assert_eq!(user_messages, 2, "each prompt went up once");
+    }
+
+    /// `/rc` while a task started offline is still running: the registration names it, so the
+    /// hub counts it busy; the phone's first prompt waits at the hub and reaches the agent once,
+    /// after the offline task ended.
+    #[tokio::test]
+    async fn registering_during_an_offline_task_names_it_and_the_phone_prompt_runs_once_after() {
+        let mut rig = rig(
+            vec![
+                permission_turn("Running.", "All green."),
+                plain_turn("Phone answered."),
+            ],
+            false,
+        )
+        .await;
+        rig.start().await;
+        rig.say("run the tests").await;
+        rig.until("the approval", open_approval).await;
+
+        rig.say("/rc").await;
+        let task = rig.app.view().tasks()[0].task_id.clone();
+        assert_eq!(
+            *rig.hub.running.lock().expect("lock"),
+            [Some(task.clone())],
+            "the registration names the task the agent is running"
+        );
+
+        // The hub holds the phone's prompt until the offline task ends. Shared now, the answer
+        // typed here goes through the hub.
+        *rig.hub.verdict.lock().expect("lock") = Some(Ok(HubVerdict::Accepted));
+        *rig.hub.approve_with.lock().expect("lock") = Some((rig.handle.clone(), 7));
+        rig.press(Key::Enter).await;
+        rig.until("the offline turn", |app| rig_done(app, &task))
+            .await;
+        rig.handle
+            .hub_command(hub_prompt(1, "tk_phone", "and now the phone"))
+            .await;
+        rig.until("the phone's turn", |app| rig_done(app, "tk_phone"))
+            .await;
+        let shown = screen_sized(&rig.app, 60, 20);
+        assert_eq!(
+            shown.matches("agent> Phone answered.").count(),
+            1,
+            "{shown}"
+        );
+        assert!(!shown.contains("refused"), "{shown}");
+    }
+
+    /// An idle session names no task.
+    #[tokio::test]
+    async fn registering_an_idle_session_names_no_task() {
+        let mut rig = rig(vec![plain_turn("One.")], false).await;
+        rig.start().await;
+        rig.say("first").await;
+        rig.until("turn one", |app| rig_done(app, "tk_t11")).await;
+        rig.say("/rc").await;
+        assert_eq!(*rig.hub.running.lock().expect("lock"), [None]);
     }
 
     /// What the phone said is the hub's already: it is shown here and never sent back up.

@@ -1171,6 +1171,36 @@ fn thread_open_registers_a_thread_unless_another_machine_hosts_it() {
 }
 
 #[test]
+fn thread_open_passes_the_task_the_runner_is_already_running_to_the_thread() {
+    let world = new_world();
+    let mut runner = Runner::new();
+    let conn = world.connect(&mut runner, NOW);
+    let open = |event_id: &str, thread: &str, extra: Value| {
+        let mut frame = json!({
+            "t": "thread_open",
+            "event_id": event_id,
+            "thread_id": thread,
+            "title": "typed offline",
+            "agent": "claude",
+            "workspace": { "path": "/p" },
+        });
+        frame
+            .as_object_mut()
+            .expect("object")
+            .extend(extra.as_object().cloned().unwrap_or_default());
+        frame
+    };
+    runner.up_frame(open("evt_a", "th_busy", json!({"running_task": "tk_off"})));
+    runner.up_frame(open("evt_b", "th_idle", json!({})));
+    world.pump_up(conn, &mut runner, NOW);
+    assert!(runner.nacks.is_empty(), "{:?}", runner.nacks);
+    let inits = world.host.inits.borrow();
+    assert_eq!(inits.len(), 2);
+    assert_eq!(inits[0].1["running_task"], "tk_off");
+    assert!(inits[1].1.get("running_task").is_none());
+}
+
+#[test]
 fn a_failed_command_fails_its_task() {
     let world = new_world();
     let mut runner = Runner::new();

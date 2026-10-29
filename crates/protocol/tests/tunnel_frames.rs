@@ -178,6 +178,28 @@ fn thread_open_example_roundtrips() {
 }
 
 #[test]
+fn thread_open_with_a_running_task_roundtrips() {
+    let frame = roundtrip_frame(
+        r#"{
+  "t": "thread_open",
+  "seq": 120,
+  "event_id": "evt_01JBW52B7H",
+  "thread_id": "th_01JBW52B6Z",
+  "title": "fix flaky test",
+  "agent": "claude",
+  "workspace": { "path": "/Users/me/src/app" },
+  "running_task": "tk_off"
+}"#,
+    );
+    match frame {
+        Frame::ThreadOpen { running_task, .. } => {
+            assert_eq!(running_task.as_deref(), Some("tk_off"));
+        }
+        other => panic!("expected thread_open, got {other:?}"),
+    }
+}
+
+#[test]
 fn command_frame_with_prompt_roundtrips() {
     // §3.5 example with the `"...": "per kind, below"` placeholder replaced by the real
     // `prompt` command from §3.5 (the `prompt` example, verbatim).

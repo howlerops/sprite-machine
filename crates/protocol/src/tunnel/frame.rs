@@ -50,6 +50,9 @@ pub enum Frame {
         title: String,
         agent: String,
         workspace: Workspace,
+        /// The task the runner is running right now, started before this registration (§3.4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        running_task: Option<String>,
     },
     /// Runner → hub: outcome of a command that could not be applied (§3.6).
     CommandResult {

@@ -155,6 +155,15 @@ thread so phones see it. Threads created by a `dispatch` command need no `thread
 }
 ```
 
+`running_task` (optional): the `task_id` of a task the runner is **already running** when it
+registers the thread, one it started itself before `/rc` (the TUI's offline turns). The Thread DO
+counts that task as running from the moment the thread exists, so a prompt that arrives before
+the runner's earlier events do waits in the pending queue (§3.5) instead of starting and being
+sent down to an agent that is busy. The runner's `UserMessage` for the task fills in the record
+and its `RunFinished{success}` / `RunError` ends it, as for any task; the hub sends no `prompt`
+command for it. A `running_task` that is not a valid id is `nack{invalid_envelope}`. Omit it when
+the agent is idle.
+
 ### 3.5 `command` (down)
 
 ```json
