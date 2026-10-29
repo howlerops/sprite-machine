@@ -67,6 +67,8 @@ struct HubState {
     subscribed: Mutex<Vec<String>>,
     /// POSTs to an interrupt endpoint: thread, interrupt, Idempotency-Key, body.
     answers: Mutex<Vec<Answer>>,
+    /// The rows `GET /v1/threads` answers with (the inbox's list).
+    threads: Mutex<Vec<Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +222,12 @@ async fn session_answer(
     Json(json!({}))
 }
 
+/// The inbox's list: the rows the test put in `threads`, on one page.
+async fn list_threads(State(state): State<Arc<HubState>>) -> Json<Value> {
+    let threads = state.threads.lock().expect("lock").clone();
+    Json(json!({ "threads": threads, "next_cursor": null }))
+}
+
 fn spawn_hub(state: Arc<HubState>) -> String {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -233,6 +241,7 @@ fn spawn_hub(state: Arc<HubState>) -> String {
                 .route("/v1/auth/device/code", post(device_code))
                 .route("/v1/auth/device/token", post(device_token))
                 .route("/v1/auth/github/token", post(github_token))
+                .route("/v1/threads", get(list_threads))
                 .route("/v1/threads/{thread_id}/subscribe", get(session_subscribe))
                 .route("/v1/threads/{thread_id}/cancel", post(session_cancel))
                 .route(
@@ -1970,6 +1979,132 @@ fn wait_until_true(what: &str, done: impl Fn() -> bool) {
         std::thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for {what}");
+}
+
+/// A row of the inbox's list (`GET /v1/threads`).
+fn inbox_row(id: &str, title: &str, status: &str, workspace: &str) -> Value {
+    json!({
+        "thread_id": id, "title": title, "machine_id": "mch_1", "agent": "claude",
+        "status": status, "updated_at": "2026-10-28T10:00:00.000Z", "last_seq": 7,
+        "workspace": workspace,
+    })
+}
+
+/// The same row with the open approval the hub reports as `pending_interrupts`.
+fn with_approval(mut row: Value) -> Value {
+    row["pending_interrupts"] = json!([{
+        "interrupt_id": "int_1", "title": "Allow edit to src/main.rs?",
+        "options": [
+            { "option_id": "yes_once", "name": "Yes", "kind": "allow_once" },
+            { "option_id": "nope", "name": "No", "kind": "reject_once" },
+        ],
+    }]);
+    row
+}
+
+/// Pumps the inbox (its refresh timer runs on the test clock) until `id` is laid out.
+fn wait_for_inbox(cx: &mut TestAppContext, window: gpui_kit::AnyWindowHandle, id: &'static str) {
+    for _ in 0..400 {
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        let shown = cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find(id).is_some()
+            })
+            .expect("window");
+        if shown {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("{id} never shown in the inbox");
+}
+
+#[gpui_kit::test]
+fn clicking_an_inbox_row_shows_its_thread_and_follows_it(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    *state.threads.lock().expect("lock") =
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")];
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    wait_for_inbox(cx, window, "inbox-open-th_a");
+    assert!(state.subscribed.lock().expect("lock").is_empty());
+
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-open-th_a", cx);
+    })
+    .expect("window");
+    wait_until_true("a subscription to th_a", || {
+        *state.subscribed.lock().expect("lock") == ["th_a"]
+    });
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), Some("th_a")));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("thread-back").is_some(),
+            "the thread page is shown"
+        );
+    })
+    .expect("window");
+}
+
+#[gpui_kit::test]
+fn quick_allow_on_a_row_answers_and_does_not_open_its_thread(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    *state.threads.lock().expect("lock") = vec![
+        with_approval(inbox_row("th_a", "Needs me", "needs_you", "/work/repo")),
+        inbox_row("th_b", "Fix login", "running", "/work/other"),
+    ];
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    // Open th_b from its row, then go back to the list.
+    wait_for_inbox(cx, window, "inbox-open-th_b");
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-open-th_b", cx);
+    })
+    .expect("window");
+    wait_until_true("a subscription to th_b", || {
+        *state.subscribed.lock().expect("lock") == ["th_b"]
+    });
+    cx.update_window(window, |_, window, cx| {
+        window.click("thread-back", cx);
+    })
+    .expect("window");
+
+    // Allow on th_a answers the approval and must not open th_a.
+    wait_for_inbox(cx, window, "inbox-allow-th_a");
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-allow-th_a", cx);
+    })
+    .expect("window");
+    wait_until_true("the quick answer to reach the hub", || {
+        !state.answers.lock().expect("lock").is_empty()
+    });
+    let answers = state.answers.lock().expect("lock").clone();
+    assert_eq!(answers[0].thread, "th_a");
+    assert_eq!(answers[0].interrupt, "int_1");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(*state.subscribed.lock().expect("lock"), ["th_b"]);
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), None));
 }
 
 #[gpui_kit::test]

@@ -13,14 +13,14 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use client_gpui::inbox::{
-    Clock, Failure, InboxModel, InboxView, Item, SEARCH_DEBOUNCE, Section, Status, Target, Verdict,
-    answer_interrupt, fetch_threads, parse_threads, patch_thread,
+    Clock, Failure, InboxEvent, InboxModel, InboxView, Item, SEARCH_DEBOUNCE, Section, Status,
+    Target, Verdict, answer_interrupt, fetch_threads, parse_threads, patch_thread,
 };
 use client_gpui::shell::i18n::Catalog;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AnyWindowHandle, AppContext as _, Bounds, Entity, Focusable as _, Point, ScrollDelta,
-    TestAppContext, WindowBounds, WindowOptions, point, px, size,
+    Subscription, TestAppContext, WindowBounds, WindowOptions, point, px, size,
 };
 use serde_json::{Value, json};
 
@@ -610,6 +610,88 @@ fn sample_hub() -> (Arc<Hub>, String) {
     ];
     let api = spawn_hub(hub.clone());
     (hub, api)
+}
+
+// ---- a row opens its thread -----------------------------------------------------------------------
+
+/// Two rows, both with a workspace; `th_need` also has an open approval (Allow / Deny).
+fn sample_hub_with_workspaces() -> (Arc<Hub>, String) {
+    let hub = Arc::new(Hub::default());
+    let mut need = needing("th_need", "Needs me");
+    need["workspace"] = json!("/work/repo");
+    let mut run = thread("th_run", "Fix login", "running");
+    run["workspace"] = json!("/work/other");
+    *hub.threads.lock().expect("lock") = vec![need, run];
+    let api = spawn_hub(hub.clone());
+    (hub, api)
+}
+
+/// Every event the inbox emits from now on, in order.
+fn record_events(
+    cx: &mut TestAppContext,
+    view: &Entity<InboxView>,
+) -> (Arc<Mutex<Vec<InboxEvent>>>, Subscription) {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let subscription = cx.update(|cx| {
+        cx.subscribe(view, move |_, event: &InboxEvent, _| {
+            sink.lock().expect("lock").push(event.clone());
+        })
+    });
+    (events, subscription)
+}
+
+#[gpui_kit::test]
+fn a_row_click_opens_that_rows_thread_with_its_workspace(cx: &mut TestAppContext) {
+    let (_hub, api) = sample_hub_with_workspaces();
+    let (window, view) = open_inbox(cx, ManualClock::new());
+    let (events, _subscription) = record_events(cx, &view);
+    point_at(cx, window, &view, &api);
+    wait_until(cx, window, &view, |window, _| {
+        window.try_find("inbox-open-th_run").is_some()
+    });
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-open-th_run", cx);
+    })
+    .expect("window");
+    assert_eq!(
+        *events.lock().expect("lock"),
+        [InboxEvent::OpenThread {
+            thread_id: "th_run".to_owned(),
+            workspace: Some("/work/other".to_owned()),
+        }]
+    );
+}
+
+#[gpui_kit::test]
+fn quick_allow_answers_and_does_not_open_the_thread(cx: &mut TestAppContext) {
+    let (hub, api) = sample_hub_with_workspaces();
+    let (window, view) = open_inbox(cx, ManualClock::new());
+    let (events, _subscription) = record_events(cx, &view);
+    point_at(cx, window, &view, &api);
+    wait_until(cx, window, &view, |window, _| {
+        window.try_find("inbox-allow-th_need").is_some()
+    });
+    // The title click opens the thread; the Allow click after it must add no open.
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-open-th_need", cx);
+    })
+    .expect("window");
+    let opened = events.lock().expect("lock").len();
+    assert_eq!(opened, 1, "the title click opens the thread");
+
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-allow-th_need", cx);
+    })
+    .expect("window");
+    wait_until(cx, window, &view, |_, _| {
+        !hub.answers.lock().expect("lock").is_empty()
+    });
+    assert_eq!(
+        events.lock().expect("lock").len(),
+        opened,
+        "Allow must not emit an open"
+    );
 }
 
 #[gpui_kit::test]
