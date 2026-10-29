@@ -50,3 +50,21 @@ compose-invalid-agent-not-on-machine = That machine does not have the chosen age
 compose-invalid-no-workspace = Enter the workspace folder.
 compose-invalid-no-prompt = Write what the agent should do.
 compose-draft-error = The draft could not be saved: { $detail }
+
+# Thread composer (src/compose/thread.rs): slash commands, mode and model pickers, queue, Stop.
+compose-thread-region-a11y = Message composer
+compose-thread-prompt-a11y = Message to the agent
+compose-thread-placeholder = Message the agent. Type / for commands. Press { $shortcut } to send.
+compose-thread-slash-a11y = Commands
+compose-thread-slash-command-a11y = Command /{ $name }: { $description }
+compose-thread-mode = Mode
+compose-thread-model = Model
+compose-thread-choice-a11y = { $label } { $name }
+compose-thread-choice-selected-a11y = { $label } { $name }, selected
+compose-thread-queued = Queued
+compose-thread-queued-empty = (empty message)
+compose-thread-queued-a11y = Queued message: { $preview }
+compose-thread-queued-remove = Remove
+compose-thread-queued-remove-a11y = Remove queued message: { $preview }
+compose-thread-stop = Stop
+compose-thread-stop-a11y = Stop the running task

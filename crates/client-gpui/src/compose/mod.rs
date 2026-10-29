@@ -3,7 +3,10 @@
 //!
 //! Shortcut: Cmd+Enter on macOS, Ctrl+Enter elsewhere sends (context `Compose`).
 
+mod commands;
 mod new;
+mod queue;
+mod thread;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -19,10 +22,16 @@ use gpui_kit::*;
 
 use crate::shell::i18n::Catalog;
 
+pub use commands::{
+    ChoiceOption, ComposerEvent, ConfigSelect, ModeOption, SessionOptions, SlashAccept,
+    SlashCommand, ThreadRequest, accept_command, cap_from_features, filter_commands, slash_query,
+};
 pub use new::{
     AGENTS, DRAFT_FILE, Draft, Invalid, MODES, MachineOption, NewTaskModel, PreparedSend, SPAWNS,
     execute, fetch_machines, parse_machines,
 };
+pub use queue::{QueuedChip, queued_chips, remove_request, running_task, stop_intent};
+pub use thread::ThreadComposer;
 
 /// The composer's English strings (`locales/en/compose.ftl`).
 pub const EN_FTL: &str = include_str!("../../locales/en/compose.ftl");
@@ -33,11 +42,11 @@ fn catalog() -> &'static Catalog {
         .get_or_init(|| Catalog::from_source("en", EN_FTL).expect("locales/en/compose.ftl parses"))
 }
 
-fn tr(id: &str) -> String {
+pub(crate) fn tr(id: &str) -> String {
     catalog().tr(id, &[])
 }
 
-fn tr_args(id: &str, args: &[(&str, &str)]) -> String {
+pub(crate) fn tr_args(id: &str, args: &[(&str, &str)]) -> String {
     catalog().tr(id, args)
 }
 
@@ -64,6 +73,7 @@ pub fn init(cx: &mut App) {
     };
     cx.bind_keys([KeyBinding::new(send, SendTask, Some("Compose > Input"))]);
     cx.bind_keys([KeyBinding::new(send, SendTask, Some(CONTEXT))]);
+    thread::init(cx);
 }
 
 /// Where and as whom requests go: the `…/v1` base URL and the bearer token.
