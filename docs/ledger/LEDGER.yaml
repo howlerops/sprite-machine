@@ -3915,7 +3915,8 @@ items:
     title: 'client: new-task composer'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; client-gpui clippy clean, 61 tests passed on merged tree; mode cap follow-up M3-004a"
     assignee: "sonnet"
     attempt: 1
     lane: client
@@ -6391,6 +6392,9 @@ items:
     title: 'Spec + runner + composer: a remotely requested permission mode is capped by the machine local mode (never looser; plan §4.10 "the local permission mode applies"); the composer only offers modes the machine allows and says when it was capped'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: high
