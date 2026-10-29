@@ -1,0 +1,125 @@
+name: deploy-hub
+
+# M2-015: deploys the v2 hub Worker (crates/hub) to Cloudflare, environment `production` of
+# crates/hub/wrangler.toml. v1's workflow is deploy.yml and is not touched. See docs/ops/hub.md.
+#
+# Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID. Variable or secret: HUB_URL (the hub's
+# public https origin, for the post-deploy /healthz check). Without CLOUDFLARE_API_TOKEN (forks,
+# a repo that has not set it up) the job ends green after a notice and deploys nothing.
+# Prerequisite, not deployed here: the Workspace DO Worker `sm-workspace` (workers/workspace,
+# bound as WORKSPACE with script_name) must already exist in the account; see docs/ops/hub.md.
+
+on:
+  push:
+    branches: [v2]
+    paths:
+      - 'crates/hub/**'
+      - 'crates/protocol/**'
+      - 'web/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/deploy-hub.yml'
+  workflow_dispatch:
+
+# One deploy at a time, and a running deploy is never cancelled half way (migrations + deploy).
+concurrency:
+  group: deploy-hub
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HUB_URL: ${{ vars.HUB_URL || secrets.HUB_URL }}
+    steps:
+      - name: Check deploy credentials
+        id: creds
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice title=deploy-hub skipped::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set; nothing deployed. See docs/ops/hub.md."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.enabled == 'true'
+
+      - name: Toolchain (from rust-toolchain.toml, includes wasm32-unknown-unknown)
+        if: steps.creds.outputs.enabled == 'true'
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.creds.outputs.enabled == 'true'
+
+      - name: Install worker-build 0.8.7
+        if: steps.creds.outputs.enabled == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: worker-build@0.8.7
+
+      - name: Build cli (its `wasm strip-names` runs after worker-build)
+        if: steps.creds.outputs.enabled == 'true'
+        run: cargo build -p cli
+
+      - name: Set up Node 22
+        if: steps.creds.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The wasm-release profile build happens in wrangler's [build] command (crates/hub/wrangler.toml:
+      # worker-build --profile wasm-release, then strip-names). `strip` breaks worker-build 0.8.7.
+      - name: Apply D1 migrations (remote)
+        if: steps.creds.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v3.14.1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.154.0'
+          workingDirectory: crates/hub
+          command: d1 migrations apply DB --remote --env production
+
+      - name: Deploy hub Worker
+        if: steps.creds.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v3.14.1
+        env:
+          CARGO_PROFILE_RELEASE_STRIP: 'false'
+          HUB_STRIP_BIN: ${{ github.workspace }}/target/debug/cli
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.154.0'
+          workingDirectory: crates/hub
+          command: deploy --env production
+
+      - name: Post-deploy health check (/healthz must be 200)
+        if: steps.creds.outputs.enabled == 'true'
+        run: |
+          if [ -z "$HUB_URL" ]; then
+            echo "::notice title=health check skipped::HUB_URL is not set (repo variable or secret); /healthz not checked."
+            exit 0
+          fi
+          url="${HUB_URL%/}/healthz"
+          code=000
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)
+            echo "attempt $i: GET /healthz -> $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::error::/healthz returned $code, expected 200"
+          exit 1
