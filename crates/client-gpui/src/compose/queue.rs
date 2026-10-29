@@ -4,8 +4,6 @@
 use client_core::ThreadView;
 use client_core::outbox::Intent;
 
-use super::commands::ThreadRequest;
-
 /// One queued message, shown as a chip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueuedChip {
@@ -51,12 +49,12 @@ pub fn stop_intent(thread: &ThreadView) -> Option<Intent> {
     })
 }
 
-/// The request that drops a queued message.
-pub fn remove_request(thread: &ThreadView, task_id: &str) -> Option<ThreadRequest> {
+/// The intent that drops a queued message.
+pub fn remove_request(thread: &ThreadView, task_id: &str) -> Option<Intent> {
     queued_chips(thread)
         .iter()
         .any(|chip| chip.task_id == task_id)
-        .then(|| ThreadRequest::RemovePending {
+        .then(|| Intent::RemovePending {
             thread_id: thread.thread_id().to_owned(),
             task_id: task_id.to_owned(),
         })

@@ -26,9 +26,9 @@ pub mod view;
 pub use cache::{Cache, CacheError};
 pub use connectivity::{Connection, Connectivity, banner_state};
 pub use outbox::{
-    Clock, FlushReport, HttpTransport, Intent, IntentState, ManualClock, Outbox, OutboxError,
-    PostRequest, PostResponse, QueuedIntent, Random, RetryPolicy, SystemClock, SystemRandom,
-    Transport, TransportError,
+    Clock, FlushReport, HttpTransport, Intent, IntentState, ManualClock, Method, Outbox,
+    OutboxError, PostRequest, PostResponse, QueuedIntent, Random, RetryPolicy, SessionConfig,
+    StartedRemoval, SystemClock, SystemRandom, Transport, TransportError,
 };
 pub use sync::{Applied, Subscription, SubscriptionError, SyncError, ThreadSync};
 pub use threads::{CreateThread, CreateThreadError, FirstPrompt, ThreadCreated, create_thread};

@@ -24,7 +24,7 @@ use crate::shell::i18n::Catalog;
 
 pub use commands::{
     ChoiceOption, ComposerEvent, ConfigSelect, ModeOption, SessionOptions, SlashAccept,
-    SlashCommand, ThreadRequest, accept_command, cap_from_features, filter_commands, slash_query,
+    SlashCommand, accept_command, cap_from_features, filter_commands, slash_query,
 };
 pub use new::{
     AGENTS, DRAFT_FILE, Draft, Invalid, MODES, MachineOption, NewTaskModel, PreparedSend, SPAWNS,

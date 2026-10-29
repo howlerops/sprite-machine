@@ -11,8 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agui_fixture::{FixtureConfig, Scenario, start};
 use client_core::cache::Cache;
 use client_core::outbox::{
-    FixedRandom, Intent, IntentState, ManualClock, Outbox, PostRequest, PostResponse, Random,
-    RetryPolicy, Transport, TransportError, new_idempotency_key,
+    FixedRandom, Intent, IntentState, ManualClock, Method, Outbox, PostRequest, PostResponse,
+    Random, RetryPolicy, SessionConfig, Transport, TransportError, new_idempotency_key,
 };
 use client_core::{Applied, Subscription, ThreadSync};
 use protocol::tunnel::{Actor, ActorKind, ContentPart, Outcome};
@@ -359,6 +359,7 @@ async fn a_409_is_terminal_and_names_the_device_that_answered_first() {
         IntentState::Conflict {
             status: 409,
             resolved_by: Some(phone.clone()),
+            error: Some("already_resolved".to_owned()),
         }
     );
     let conflicts = outbox.conflicts();
@@ -449,4 +450,269 @@ async fn a_replayed_key_gets_the_original_answer_without_a_second_effect() {
         "same key and body: the stored answer is replayed"
     );
     drop(subscription);
+}
+
+// ---- session set and pending remove (client-api.md §5.3, §5.5a) ----------------------------
+
+fn set_mode(thread: &str) -> Intent {
+    Intent::SetSession {
+        thread_id: thread.to_owned(),
+        mode_id: Some("plan".to_owned()),
+        config: None,
+    }
+}
+
+fn set_model(thread: &str) -> Intent {
+    Intent::SetSession {
+        thread_id: thread.to_owned(),
+        mode_id: None,
+        config: Some(SessionConfig {
+            id: "model".to_owned(),
+            value: "opus".to_owned(),
+        }),
+    }
+}
+
+fn remove(thread: &str, task: &str) -> Intent {
+    Intent::RemovePending {
+        thread_id: thread.to_owned(),
+        task_id: task.to_owned(),
+    }
+}
+
+#[test]
+fn session_and_remove_intents_have_the_documented_requests() {
+    let both = Intent::SetSession {
+        thread_id: "th_1".to_owned(),
+        mode_id: Some("plan".to_owned()),
+        config: Some(SessionConfig {
+            id: "model".to_owned(),
+            value: "opus".to_owned(),
+        }),
+    };
+    assert_eq!(
+        (both.method(), both.path()),
+        (Method::Post, "/threads/th_1/session".to_owned())
+    );
+    assert_eq!(
+        both.body(),
+        json!({"mode_id": "plan", "config": {"id": "model", "value": "opus"}})
+    );
+    assert_eq!(set_mode("th_1").body(), json!({"mode_id": "plan"}));
+    assert_eq!(
+        set_model("th_1").body(),
+        json!({"config": {"id": "model", "value": "opus"}})
+    );
+    let drop = remove("th_1", "tk_2");
+    assert_eq!(
+        (drop.method(), drop.path()),
+        (Method::Delete, "/threads/th_1/pending/tk_2".to_owned())
+    );
+    assert_eq!(drop.body(), serde_json::Value::Null);
+    assert_eq!(drop.thread_id(), "th_1");
+}
+
+#[tokio::test]
+async fn session_and_remove_go_out_with_method_path_body_and_their_own_keys() {
+    let cache = Cache::open_in_memory().expect("cache");
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let mode = outbox
+        .enqueue(&cache, set_mode("th_1"), 0)
+        .expect("enqueues");
+    let model = outbox
+        .enqueue(&cache, set_model("th_1"), 0)
+        .expect("enqueues");
+    let drop = outbox
+        .enqueue(&cache, remove("th_1", "tk_2"), 0)
+        .expect("enqueues");
+    let transport = Scripted::new(vec![
+        reply(202, json!({})),
+        reply(202, json!({})),
+        reply(204, json!(null)),
+    ]);
+    let report = outbox
+        .flush(
+            &cache,
+            &transport,
+            "http://hub/v1/",
+            &ManualClock::new(0),
+            &mut FixedRandom(0),
+        )
+        .await
+        .expect("flush");
+    assert_eq!(report.done, 3);
+    let seen = transport.seen.lock().expect("lock");
+    let shape = |request: &PostRequest| {
+        (
+            request.method,
+            request.url.clone(),
+            request.body.clone(),
+            request.idempotency_key.clone(),
+        )
+    };
+    assert_eq!(
+        shape(&seen[0]),
+        (
+            Method::Post,
+            "http://hub/v1/threads/th_1/session".to_owned(),
+            json!({"mode_id": "plan"}),
+            outbox.get(mode).expect("entry").idempotency_key.clone(),
+        )
+    );
+    assert_eq!(
+        shape(&seen[1]),
+        (
+            Method::Post,
+            "http://hub/v1/threads/th_1/session".to_owned(),
+            json!({"config": {"id": "model", "value": "opus"}}),
+            outbox.get(model).expect("entry").idempotency_key.clone(),
+        )
+    );
+    assert_eq!(
+        shape(&seen[2]),
+        (
+            Method::Delete,
+            "http://hub/v1/threads/th_1/pending/tk_2".to_owned(),
+            serde_json::Value::Null,
+            outbox.get(drop).expect("entry").idempotency_key.clone(),
+        )
+    );
+    let keys: std::collections::HashSet<_> =
+        seen.iter().map(|r| r.idempotency_key.clone()).collect();
+    assert_eq!(keys.len(), 3, "each intent has its own key");
+    assert!(keys.iter().all(|key| key.starts_with("idk_")));
+}
+
+#[tokio::test]
+async fn a_retried_remove_reuses_its_key_and_survives_a_restart() {
+    let path = temp_db("remove-retry");
+    let cache = Cache::open(&path).expect("cache");
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let id = outbox
+        .enqueue(&cache, remove("th_1", "tk_2"), 0)
+        .expect("enqueues");
+    let key = outbox.get(id).expect("entry").idempotency_key.clone();
+    let clock = ManualClock::new(0);
+    let transport = Scripted::new(vec![Err(TransportError("down".to_owned()))]);
+    outbox
+        .flush(
+            &cache,
+            &transport,
+            "http://hub",
+            &clock,
+            &mut FixedRandom(0),
+        )
+        .await
+        .expect("flush");
+    assert_eq!(outbox.get(id).expect("entry").state, IntentState::Queued);
+    drop(outbox);
+
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("reloads");
+    assert_eq!(
+        outbox.get(id).expect("entry").intent,
+        remove("th_1", "tk_2")
+    );
+    let transport = Scripted::new(vec![reply(204, json!(null))]);
+    outbox
+        .flush(
+            &cache,
+            &transport,
+            "http://hub",
+            &clock,
+            &mut FixedRandom(0),
+        )
+        .await
+        .expect("flush");
+    let seen = transport.seen.lock().expect("lock");
+    assert_eq!(seen[0].method, Method::Delete);
+    assert_eq!(seen[0].idempotency_key, key);
+    assert!(matches!(
+        outbox.get(id).expect("entry").state,
+        IntentState::Done { status: 204, .. }
+    ));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn a_409_task_started_on_remove_is_terminal_and_reported_as_a_started_removal() {
+    let cache = Cache::open_in_memory().expect("cache");
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let id = outbox
+        .enqueue(&cache, remove("th_1", "tk_2"), 0)
+        .expect("enqueues");
+    let transport = Scripted::new(vec![reply(
+        409,
+        json!({"error": "task_started", "message": "already running"}),
+    )]);
+    let clock = ManualClock::new(0);
+    let report = outbox
+        .flush(
+            &cache,
+            &transport,
+            "http://hub",
+            &clock,
+            &mut FixedRandom(0),
+        )
+        .await
+        .expect("flush");
+    assert_eq!(report.conflicts, 1);
+    assert_eq!(
+        outbox.get(id).expect("entry").state,
+        IntentState::Conflict {
+            status: 409,
+            resolved_by: None,
+            error: Some("task_started".to_owned()),
+        }
+    );
+    let started = outbox.started_removals();
+    assert_eq!(started.len(), 1);
+    assert_eq!(
+        (started[0].thread_id.as_str(), started[0].task_id.as_str()),
+        ("th_1", "tk_2")
+    );
+    assert!(
+        outbox.conflicts().is_empty(),
+        "it is not an approval conflict"
+    );
+
+    // Never retried.
+    clock.advance(3_600_000);
+    let again = outbox
+        .flush(
+            &cache,
+            &transport,
+            "http://hub",
+            &clock,
+            &mut FixedRandom(0),
+        )
+        .await
+        .expect("flush");
+    assert_eq!(again.sent, 0);
+}
+
+#[tokio::test]
+async fn session_set_rejections_are_terminal() {
+    let cache = Cache::open_in_memory().expect("cache");
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let id = outbox
+        .enqueue(&cache, set_mode("th_1"), 0)
+        .expect("enqueues");
+    let transport = Scripted::new(vec![reply(400, json!({"error": "invalid_request"}))]);
+    outbox
+        .flush(
+            &cache,
+            &transport,
+            "http://hub",
+            &ManualClock::new(0),
+            &mut FixedRandom(0),
+        )
+        .await
+        .expect("flush");
+    assert_eq!(
+        outbox.get(id).expect("entry").state,
+        IntentState::Rejected {
+            status: 400,
+            error: "invalid_request".to_owned()
+        }
+    );
 }

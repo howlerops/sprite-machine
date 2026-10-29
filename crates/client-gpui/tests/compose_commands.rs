@@ -4,11 +4,11 @@
 use std::sync::{Arc, Mutex};
 
 use client_core::ThreadView;
-use client_core::outbox::Intent;
+use client_core::outbox::{Intent, Method, SessionConfig};
 use client_gpui::compose::{
-    ComposerEvent, SessionOptions, SlashAccept, SlashCommand, ThreadComposer, ThreadRequest,
-    accept_command, cap_from_features, filter_commands, queued_chips, remove_request, running_task,
-    slash_query, stop_intent,
+    ComposerEvent, SessionOptions, SlashAccept, SlashCommand, ThreadComposer, accept_command,
+    cap_from_features, filter_commands, queued_chips, remove_request, running_task, slash_query,
+    stop_intent,
 };
 use client_gpui::shell::i18n::Catalog;
 use gpui_kit::test::TestWindowExt as _;
@@ -175,7 +175,7 @@ fn queued_chips_are_removable_and_stop_targets_the_running_task() {
     assert_eq!(chips[0].preview, "then add tests");
     assert_eq!(
         remove_request(&view, "tk_3"),
-        Some(ThreadRequest::RemovePending {
+        Some(Intent::RemovePending {
             thread_id: "th_1".into(),
             task_id: "tk_3".into()
         })
@@ -199,34 +199,38 @@ fn queued_chips_are_removable_and_stop_targets_the_running_task() {
 }
 
 #[test]
-fn requests_have_the_hub_shapes() {
-    let mode = ThreadRequest::SetMode {
+fn composer_intents_have_the_hub_shapes() {
+    let mode = Intent::SetSession {
         thread_id: "th_1".into(),
-        mode_id: "plan".into(),
+        mode_id: Some("plan".into()),
+        config: None,
     };
     assert_eq!(
         (mode.method(), mode.path()),
-        ("POST", "/threads/th_1/session".to_owned())
+        (Method::Post, "/threads/th_1/session".to_owned())
     );
-    assert_eq!(mode.body(), Some(json!({"mode_id": "plan"})));
-    let model = ThreadRequest::SetConfig {
+    assert_eq!(mode.body(), json!({"mode_id": "plan"}));
+    let model = Intent::SetSession {
         thread_id: "th_1".into(),
-        id: "model".into(),
-        value: "opus".into(),
+        mode_id: None,
+        config: Some(SessionConfig {
+            id: "model".into(),
+            value: "opus".into(),
+        }),
     };
     assert_eq!(
         model.body(),
-        Some(json!({"config": {"id": "model", "value": "opus"}}))
+        json!({"config": {"id": "model", "value": "opus"}})
     );
-    let remove = ThreadRequest::RemovePending {
+    let remove = Intent::RemovePending {
         thread_id: "th_1".into(),
         task_id: "tk_2".into(),
     };
     assert_eq!(
         (remove.method(), remove.path()),
-        ("DELETE", "/threads/th_1/pending/tk_2".to_owned())
+        (Method::Delete, "/threads/th_1/pending/tk_2".to_owned())
     );
-    assert_eq!(remove.body(), None);
+    assert_eq!(remove.body(), Value::Null);
 }
 
 #[test]
@@ -419,14 +423,18 @@ fn the_pickers_ask_for_changes_and_hide_modes_beyond_the_runner(cx: &mut TestApp
     assert_eq!(
         events.lock().expect("lock").as_slice(),
         [
-            ComposerEvent::Request(ThreadRequest::SetMode {
+            ComposerEvent::Intent(Intent::SetSession {
                 thread_id: "th_1".into(),
-                mode_id: "plan".into()
+                mode_id: Some("plan".into()),
+                config: None,
             }),
-            ComposerEvent::Request(ThreadRequest::SetConfig {
+            ComposerEvent::Intent(Intent::SetSession {
                 thread_id: "th_1".into(),
-                id: "model".into(),
-                value: "opus".into()
+                mode_id: None,
+                config: Some(SessionConfig {
+                    id: "model".into(),
+                    value: "opus".into()
+                }),
             }),
         ]
     );
@@ -449,7 +457,7 @@ fn queued_chips_remove_and_stop_cancels(cx: &mut TestAppContext) {
     assert_eq!(
         events.lock().expect("lock").as_slice(),
         [
-            ComposerEvent::Request(ThreadRequest::RemovePending {
+            ComposerEvent::Intent(Intent::RemovePending {
                 thread_id: "th_1".into(),
                 task_id: "tk_3".into()
             }),

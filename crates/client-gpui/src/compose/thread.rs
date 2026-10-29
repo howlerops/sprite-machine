@@ -5,6 +5,7 @@
 //! [`ThreadComposer::set_thread`] again.
 
 use client_core::ThreadView;
+use client_core::outbox::{Intent, SessionConfig};
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -13,8 +14,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use super::commands::{
-    ComposerEvent, SessionOptions, SlashAccept, SlashCommand, ThreadRequest, accept_command,
-    filter_commands, slash_query,
+    ComposerEvent, SessionOptions, SlashAccept, SlashCommand, accept_command, filter_commands,
+    slash_query,
 };
 use super::queue::{QueuedChip, queued_chips, remove_request, stop_intent};
 use super::{send_shortcut_label, tr, tr_args};
@@ -206,9 +207,10 @@ impl ThreadComposer {
         {
             return;
         }
-        cx.emit(ComposerEvent::Request(ThreadRequest::SetMode {
+        cx.emit(ComposerEvent::Intent(Intent::SetSession {
             thread_id,
-            mode_id: mode_id.to_owned(),
+            mode_id: Some(mode_id.to_owned()),
+            config: None,
         }));
     }
 
@@ -223,10 +225,13 @@ impl ThreadComposer {
         if !model.options.iter().any(|choice| choice.value == value) {
             return;
         }
-        cx.emit(ComposerEvent::Request(ThreadRequest::SetConfig {
+        cx.emit(ComposerEvent::Intent(Intent::SetSession {
             thread_id,
-            id: model.id,
-            value: value.to_owned(),
+            mode_id: None,
+            config: Some(SessionConfig {
+                id: model.id,
+                value: value.to_owned(),
+            }),
         }));
     }
 
@@ -244,7 +249,7 @@ impl ThreadComposer {
             .as_ref()
             .and_then(|thread| remove_request(thread, task_id))
         {
-            cx.emit(ComposerEvent::Request(request));
+            cx.emit(ComposerEvent::Intent(request));
         }
     }
 
