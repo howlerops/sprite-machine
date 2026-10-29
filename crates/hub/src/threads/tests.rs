@@ -2045,3 +2045,95 @@ fn the_http_layer_routes_patch_and_delete_to_the_core() {
     assert_eq!(api::handle(&mut core, &delete, NOW).status, 204);
     assert!(core.index_row(NOW).expect("row").deleted);
 }
+
+fn init_with_running_task(core: &mut ThreadCore<MemoryStore>, task: Value) -> api::ApiResponse {
+    let init = request(
+        "POST",
+        "/internal/threads/th_1/init",
+        "ignored",
+        None,
+        json!({
+            "machine_id": "mch_1",
+            "agent": "claude",
+            "title": "typed offline",
+            "running_task": task,
+        }),
+    );
+    api::handle(core, &init, NOW)
+}
+
+#[test]
+fn a_task_the_runner_started_before_it_registered_is_busy_for_the_first_shared_prompt() {
+    let mut core = core();
+    // `thread_open` names the task the runner is running; its events have not arrived yet.
+    assert_eq!(
+        init_with_running_task(&mut core, json!("tk_off")).status,
+        200
+    );
+
+    // A phone prompt and a terminal prompt wait; nothing goes down to the runner.
+    let phone = core
+        .submit_prompt(&actor("usr_1"), "idk_p1", prompt("tk_ph1", "phone"), NOW)
+        .expect("phone");
+    assert_eq!(
+        phone.body,
+        json!({"task_id": "tk_ph1", "status": "pending", "position": 1})
+    );
+    let local = machine_prompt(&mut core, "tk_loc", "typed here");
+    assert_eq!(local.body["status"], "pending");
+    assert!(prompt_tasks(&core).is_empty());
+
+    // Then the runner's own history arrives (a `UserMessage` the hub did not write, `RunStarted`).
+    let opened = envelope(
+        Some("tk_off"),
+        None,
+        protocol::turn_event::UserMessage {
+            message_id: "msg_off".into(),
+            parts: vec![ContentPart::Text {
+                text: "typed offline".into(),
+            }],
+            author: actor("local:mch_1"),
+        },
+    );
+    append(&mut core, opened);
+    append(&mut core, started("tk_off", "run_off"));
+    assert!(prompt_tasks(&core).is_empty());
+
+    // When the offline task ends the phone's prompt runs once, then the terminal's.
+    append(&mut core, success("tk_off", "run_off"));
+    assert_eq!(prompt_tasks(&core), ["tk_ph1"]);
+    append(&mut core, started("tk_ph1", "run_2"));
+    append(&mut core, success("tk_ph1", "run_2"));
+    assert_eq!(prompt_tasks(&core), ["tk_ph1", "tk_loc"]);
+}
+
+#[test]
+fn a_registration_without_a_running_task_leaves_the_thread_idle_and_a_bad_task_id_is_refused() {
+    let mut core = core();
+    assert_eq!(
+        init_with_running_task(&mut core, json!("bad id")).status,
+        400
+    );
+    assert_eq!(init_with_running_task(&mut core, json!(7)).status, 400);
+    let idle = core
+        .submit_prompt(&actor("usr_1"), "idk_p1", prompt("tk_ph1", "phone"), NOW)
+        .expect("phone");
+    assert_eq!(idle.body["status"], "started");
+}
+
+#[test]
+fn a_cancel_of_the_offline_task_goes_down_as_a_cancel_command() {
+    let mut core = core();
+    assert_eq!(
+        init_with_running_task(&mut core, json!("tk_off")).status,
+        200
+    );
+    let cancel = core
+        .cancel(&actor("usr_1"), "idk_c1", "tk_off", NOW)
+        .expect("cancel");
+    assert_eq!(cancel.body["status"], "cancelling");
+    assert!(matches!(
+        commands(&core).as_slice(),
+        [Command::Cancel { task_id, .. }] if task_id == "tk_off"
+    ));
+}

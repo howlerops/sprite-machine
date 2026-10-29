@@ -1731,3 +1731,79 @@ fn a_runner_prompt_for_a_foreign_thread_is_nacked_and_a_retransmit_queues_one_ta
         .collect();
     assert_eq!(tasks, ["tk_once"]);
 }
+
+// ---- a task the runner started before /rc (M2B-019f, tunnel.md §3.4) -------------------------
+
+/// `/rc` while the agent runs a task the runner started offline: `thread_open` names it, so the
+/// hub counts it busy from the moment the thread exists. A phone prompt that arrives before the
+/// runner's history does waits in the queue (it is not sent down to a bridge that would refuse
+/// it), and goes down once, after the offline task ended.
+#[test]
+fn a_task_started_before_the_thread_was_opened_makes_the_first_phone_prompt_wait() {
+    let machine = unique("mch", "offlinetask");
+    let thread = unique("th", "offlinetask");
+    let credential = dev_credential(&machine);
+    let mut runner = Runner::first(&machine, &credential);
+    runner.thread = thread.clone();
+    runner.up_frame(json!({
+        "t": "thread_open",
+        "event_id": format!("evt_open_{thread}"),
+        "thread_id": thread,
+        "title": "typed offline",
+        "agent": "claude",
+        "workspace": {"path": "/tmp/work"},
+        "running_task": "tk_off",
+    }));
+    runner.read_acks();
+    assert!(runner.nacks.is_empty(), "nacks: {:?}", runner.nacks);
+
+    // The phone prompts before the runner's events reach the hub: it waits.
+    let reply = prompt(&thread, "tk_ph1", "idk_offlinetask_1");
+    assert_eq!(reply.status, 202, "{}", reply.body);
+    assert_eq!(reply.json()["status"], "pending", "{}", reply.body);
+    assert_eq!(reply.json()["position"], 1);
+
+    // The runner's history follows: the offline task's own message, run and end.
+    runner.event(envelope(
+        &thread,
+        Some("tk_off"),
+        None,
+        json!({
+            "type": "UserMessage",
+            "message_id": "msg_off",
+            "parts": [{"type": "text", "text": "typed offline"}],
+            "author": {"kind": "user", "id": "local", "name": "terminal"},
+        }),
+    ));
+    runner.event(envelope(
+        &thread,
+        Some("tk_off"),
+        Some("run_off"),
+        started(),
+    ));
+    runner.read_acks();
+    assert!(runner.nacks.is_empty(), "nacks: {:?}", runner.nacks);
+    assert!(
+        runner.commands.is_empty(),
+        "nothing goes down while the offline task runs: {:?}",
+        runner.commands
+    );
+
+    // It ends: the phone's prompt goes down, once.
+    runner.event(envelope(
+        &thread,
+        Some("tk_off"),
+        Some("run_off"),
+        finished(),
+    ));
+    runner.read_commands(1);
+    runner.ack_down();
+    assert_eq!(runner.commands.len(), 1);
+    assert_eq!(runner.commands[0]["command"]["task_id"], "tk_ph1");
+    let messages: Vec<String> = thread_events(&thread)
+        .iter()
+        .filter(|e| type_of(e) == "UserMessage")
+        .map(|e| e["task_id"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(messages, ["tk_off", "tk_ph1"]);
+}

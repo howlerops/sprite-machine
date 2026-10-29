@@ -275,12 +275,16 @@ where
             title,
             agent,
             workspace,
+            running_task,
         } => {
-            let info = json!({
+            let mut info = json!({
                 "agent": agent,
                 "title": title,
                 "workspace": workspace,
             });
+            if let (Some(task), Some(map)) = (running_task, info.as_object_mut()) {
+                map.insert("running_task".to_owned(), json!(task));
+            }
             thread_open(core, host, (seq, &event_id, &thread_id), info, now_ms, emit).await?;
         }
         Frame::InterruptAnswer {

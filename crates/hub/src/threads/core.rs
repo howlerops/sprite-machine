@@ -20,7 +20,7 @@
 //! together.
 
 use protocol::mapping::acp_turn::SequenceValidator;
-use protocol::tunnel::{Actor, Command, ContentPart, Outcome, Workspace};
+use protocol::tunnel::{Actor, ActorKind, Command, ContentPart, Outcome, Workspace};
 use protocol::turn_event::{
     Envelope, Event, InterruptKind, InterruptResolved, MAX_ENVELOPE_BYTES, PatchOp, PatchOpKind,
     ResolvedOutcome, RunError, RunErrorReason, RunOutcome, RunReason, RunStarted, StateDelta,
@@ -421,6 +421,14 @@ impl<S: ThreadStore> ThreadCore<S> {
                         has_run: false,
                         cancel_requested: false,
                     });
+                if task.message_id.is_empty() {
+                    // The placeholder of a task announced by `thread_open`: the message is here.
+                    task.message_id = message.message_id.clone();
+                    task.parts = message.parts.clone();
+                    task.author = message.author.clone();
+                    task.preview = preview_of(&message.parts);
+                    task.queued_at = envelope.ts.clone();
+                }
                 task.status = TaskStatus::Running;
                 self.store.put_task(&task)?;
                 // A new prompt starts the thread again: it is no longer `done`.
@@ -603,7 +611,16 @@ impl<S: ThreadStore> ThreadCore<S> {
                 merged.insert(key.to_owned(), value.clone());
             }
         }
-        self.store.put_meta("info", &Value::Object(merged))?;
+        self.store
+            .put_meta("info", &Value::Object(merged.clone()))?;
+        if let Some(task) = info.get("running_task") {
+            let task_id = task
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| ApiError::invalid_request("running_task must be a string"))?;
+            let machine = text_of(&merged, "machine_id");
+            self.note_running_task(checked_id("running_task", task_id)?, &machine, now_ms)?;
+        }
         match self.store.state_at(StateScope::Thread, self.head)? {
             None => {
                 let snapshot = self.new_thread_state()?;
@@ -627,6 +644,41 @@ impl<S: ThreadStore> ThreadCore<S> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// A task the runner started on its own before it registered the thread (`thread_open`'s
+    /// `running_task`, tunnel.md §3.4). It counts as running from now on, so a prompt that
+    /// arrives before the runner's events do waits in the queue instead of starting. The runner's
+    /// `UserMessage` for the task fills in the record and its end event finishes it. A task the
+    /// hub already knows is left alone.
+    fn note_running_task(
+        &mut self,
+        task_id: String,
+        machine_id: &str,
+        now_ms: u64,
+    ) -> Result<(), ApiError> {
+        if self.store.get_task(&task_id)?.is_some() {
+            return Ok(());
+        }
+        self.store.put_task(&TaskRecord {
+            task_id,
+            status: TaskStatus::Running,
+            message_id: String::new(),
+            parts: Vec::new(),
+            author: Actor {
+                kind: ActorKind::User,
+                id: format!("local:{machine_id}"),
+                name: None,
+                device_id: None,
+            },
+            preview: String::new(),
+            queued_at: format_timestamp(now_ms),
+            idempotency_key: String::new(),
+            // The runner has it: a cancel goes down as a `cancel` command, never retracted.
+            has_run: true,
+            cancel_requested: false,
+        })?;
         Ok(())
     }
 
