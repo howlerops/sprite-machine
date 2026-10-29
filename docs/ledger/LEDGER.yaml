@@ -4136,7 +4136,8 @@ items:
     title: 'desktop shell: its own machines feed for runner caps (not the new-task composer list)'
     milestone: M3
     phase: P4
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 273 passed 0 failed; shell 74 passed 3/3; clippy clean; fmt ok. Leader fix: send_waits test held socket down (15/15)."
     attempt: 1
     assignee: "sonnet (with M3-012a)"
     lane: client
@@ -4667,7 +4668,8 @@ items:
     title: 'desktop shell: mount AgentsView on the Agents page, fed by GET /v1/machines (shared with runner caps, M3-005d) and refreshed'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 273 passed 0 failed; shell 74 passed 3/3; clippy clean; fmt ok. Leader fix: send_waits test held socket down (15/15)."
     attempt: 1
     assignee: "sonnet"
     lane: client
