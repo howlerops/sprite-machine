@@ -1585,6 +1585,9 @@ fn wait_for_connection_banner(
 
 #[gpui_kit::test]
 fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
+    // The window's shell runs its own session link on a real thread (like the link tests below);
+    // without this the test scheduler flags that thread's wake-ups as non-deterministic.
+    cx.executor().allow_parking();
     // Offline: the hub refuses the socket. Then it comes up, the subscription goes live, and
     // the outbox's first answer brings the whole connection online.
     let up = Arc::new(AtomicBool::new(false));
