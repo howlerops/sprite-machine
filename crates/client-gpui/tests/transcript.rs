@@ -12,13 +12,15 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use client_core::ThreadView;
+use client_gpui::diff::view::{OPEN_ID as DIFF_OPEN_ID, PANE_ID as DIFF_PANE_ID};
 use client_gpui::shell::i18n::{self, Catalog};
 use client_gpui::task::tools::{activity_rows, tool_rows};
 use client_gpui::task::transcript::{
-    MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, MORE_ID, PANE_ID, ROW_HEIGHT, ROW_ID,
-    WRAP_COLS, sanitize, thread_rows, thread_rows_expanded, wrap_lines,
+    CLOSE_DIFF_ID, DIFF_PANEL_ID, MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, MORE_ID,
+    PANE_ID, ROW_HEIGHT, ROW_ID, VIEW_DIFF_ID, WRAP_COLS, sanitize, thread_rows,
+    thread_rows_expanded, wrap_lines,
 };
-use client_gpui::task::{Row, RowKind, TranscriptPane};
+use client_gpui::task::{Row, RowKind, TranscriptEvent, TranscriptPane};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
     AppContext, Bounds, Entity, Point, ScrollDelta, TestAppContext, WindowBounds, WindowOptions,
@@ -469,7 +471,8 @@ fn long_bodies_are_capped_with_a_more_row() {
         "{}",
         terminal.len()
     );
-    assert!(diff.len() <= MAX_DIFF_LINES + 2, "{}", diff.len());
+    // Title, summary (M3-010a), the capped lines, "more".
+    assert!(diff.len() <= MAX_DIFF_LINES + 3, "{}", diff.len());
     for rows in [&tool, &terminal, &diff] {
         assert!(
             rows.iter()
@@ -647,11 +650,15 @@ fn ten_thousand_events_are_virtualized_and_within_budget(cx: &mut TestAppContext
             .find(|row| row.visible())
             .expect("a visible row");
         assert_eq!(first.label(), Some(labels[0].as_str()));
-        // Rows far below the viewport are not built at all.
+        // Rows far below the viewport are not built at all (pick one whose text is unique:
+        // the diff summary rows repeat).
+        let far = (300..labels.len())
+            .find(|&ix| labels.iter().filter(|label| **label == labels[ix]).count() == 1)
+            .expect("a unique row");
         assert!(
             laid_out
                 .iter()
-                .all(|row| row.label() != Some(labels[300].as_str()))
+                .all(|row| row.label() != Some(labels[far].as_str()))
         );
 
         // Scroll down through the transcript, one screen at a time, timing each frame.
@@ -822,4 +829,132 @@ fn clicking_more_lines_expands_the_body_and_show_less_collapses_it(cx: &mut Test
     .expect("window is open");
     cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
     assert!(rows_text(cx).contains(&"line 39".to_owned()));
+}
+
+// ---- M3-010a: the diff viewer in the task view -----------------------------------------------
+
+fn diff_thread(path: &str, old: &str, new: &str, extra: serde_json::Value) -> ThreadView {
+    let mut content = json!({"path": path, "old_text": old, "new_text": new});
+    content
+        .as_object_mut()
+        .expect("object")
+        .extend(extra.as_object().expect("object").clone());
+    thread_with(vec![json!({"type": "Activity", "activity_id": "d",
+        "activity_type": "diff", "mode": "snapshot", "content": content})])
+}
+
+fn captured(
+    cx: &mut TestAppContext,
+    pane: &Entity<TranscriptPane>,
+) -> std::rc::Rc<std::cell::RefCell<Vec<TranscriptEvent>>> {
+    let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = log.clone();
+    cx.update(|cx| {
+        cx.subscribe(pane, move |_, event: &TranscriptEvent, _| {
+            sink.borrow_mut().push(event.clone());
+        })
+        .detach();
+    });
+    log
+}
+
+#[test]
+fn a_diff_activity_has_a_summary_row_with_a_view_diff_action() {
+    let thread = diff_thread("src/lib.rs", "a\nb\nc\n", "a\nB\nc\nd\n", json!({}));
+    let rows = thread_rows(&thread);
+    let summary: Vec<&Row> = rows
+        .iter()
+        .filter(|row| row.kind == RowKind::DiffSummary)
+        .collect();
+    assert_eq!(summary.len(), 1, "{:#?}", texts(&rows));
+    assert_eq!(summary[0].text, "src/lib.rs: +2 -1");
+    assert_eq!(summary[0].view_diff.as_deref(), Some("d"));
+    // The minimal lines are still there under it.
+    assert!(texts(&rows).contains(&"- b".to_owned()));
+}
+
+#[test]
+fn a_diff_still_arriving_has_no_view_diff_action() {
+    let thread = diff_thread(
+        "src/lib.rs",
+        "a\n",
+        "b\n",
+        json!({"chunk": {"index": 0, "last": false}}),
+    );
+    let rows = thread_rows(&thread);
+    assert!(rows.iter().any(|row| row.kind == RowKind::DiffTitle));
+    assert!(rows.iter().all(|row| row.view_diff.is_none()));
+}
+
+#[gpui_kit::test]
+fn view_diff_opens_a_diff_view_over_the_pane_and_close_removes_it(cx: &mut TestAppContext) {
+    let thread = diff_thread("src/lib.rs", "a\nb\nc\n", "a\nB\nc\n", json!({}));
+    let (window, pane) = open_pane(cx, options(900., 600.));
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find_all(DIFF_PANEL_ID).is_empty());
+        assert!(window.find_all(DIFF_PANE_ID).is_empty());
+        assert_eq!(window.find_all(VIEW_DIFF_ID).len(), 1);
+        window.click(VIEW_DIFF_ID, cx);
+        window.render_frame(cx);
+        assert_eq!(window.find_all(DIFF_PANEL_ID).len(), 1);
+        assert_eq!(window.find_all(DIFF_PANE_ID).len(), 1);
+        window.click(CLOSE_DIFF_ID, cx);
+        window.render_frame(cx);
+        assert!(window.find_all(DIFF_PANEL_ID).is_empty());
+        assert!(window.find_all(DIFF_PANE_ID).is_empty());
+    })
+    .expect("window is open");
+    assert_eq!(
+        cx.update(|cx| pane.read(cx).open_diff_id().map(str::to_owned)),
+        None
+    );
+}
+
+#[gpui_kit::test]
+fn open_file_from_the_diff_is_re_emitted_with_the_workspace_root(cx: &mut TestAppContext) {
+    let old = numbered_lines(20) + "\n";
+    let new = old.replace("line 12\n", "twelve\n");
+    let thread = diff_thread("src/lib.rs", &old, &new, json!({}));
+    let (window, pane) = open_pane(cx, options(900., 600.));
+    let log = captured(cx, &pane);
+    cx.update(|cx| {
+        pane.update(cx, |pane, cx| {
+            pane.set_workspace_root(Some(PathBuf::from("/work/repo")), cx);
+            pane.set_thread(&thread, cx);
+        })
+    });
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(VIEW_DIFF_ID, cx);
+        window.render_frame(cx);
+        assert_eq!(window.find_all(DIFF_OPEN_ID).len(), 1);
+        window.click(DIFF_OPEN_ID, cx);
+    })
+    .expect("window is open");
+    assert_eq!(
+        *log.borrow(),
+        vec![TranscriptEvent::OpenFile {
+            path: PathBuf::from("/work/repo/src/lib.rs"),
+            line: 13
+        }]
+    );
+}
+
+#[gpui_kit::test]
+fn without_a_workspace_root_the_diff_offers_no_open_file(cx: &mut TestAppContext) {
+    let thread = diff_thread("src/lib.rs", "a\nb\n", "a\nc\n", json!({}));
+    let (window, pane) = open_pane(cx, options(900., 600.));
+    let log = captured(cx, &pane);
+    cx.update(|cx| pane.update(cx, |pane, cx| pane.set_thread(&thread, cx)));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(VIEW_DIFF_ID, cx);
+        window.render_frame(cx);
+        assert_eq!(window.find_all(DIFF_PANE_ID).len(), 1);
+        assert!(window.find_all(DIFF_OPEN_ID).is_empty());
+    })
+    .expect("window is open");
+    assert!(log.borrow().is_empty());
 }

@@ -12,6 +12,7 @@ use protocol::turn_event::{
     StepOutcome, ToolKind,
 };
 
+use crate::diff::{DiffInput, DiffModel};
 use crate::shell::i18n::{tr, tr_args};
 use crate::task::transcript::{
     MAX_BODY_LINES, MAX_DIFF_LINES, MAX_TERMINAL_LINES, Row, RowKind, Tone, cap, push_body,
@@ -147,6 +148,24 @@ pub fn activity_rows(activity: &ActivityView, expanded: bool, out: &mut Vec<Row>
                     1,
                     tr_args(id, &[("detail", &sanitize(&diff.path))]),
                 ));
+                if activity.complete {
+                    let model = DiffModel::build(&DiffInput::from(&diff));
+                    let mut summary = Row::new(
+                        RowKind::DiffSummary,
+                        Tone::Muted,
+                        2,
+                        tr_args(
+                            "transcript-diff-summary",
+                            &[
+                                ("detail", &sanitize(&diff.path)),
+                                ("choice", &model.added.to_string()),
+                                ("code", &model.removed.to_string()),
+                            ],
+                        ),
+                    );
+                    summary.view_diff = Some(activity.activity_id.clone());
+                    out.push(summary);
+                }
                 diff_lines(diff.old_text.as_deref(), &diff.new_text, expanded, out);
             }
             None => generic(activity, out),

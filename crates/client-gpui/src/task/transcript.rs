@@ -10,6 +10,7 @@
 //! [`crate::task::tools`]). Row wrapping is by character count, not measured pixels.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use client_core::TaskStatus;
@@ -25,6 +26,7 @@ use protocol::tunnel::ActorKind;
 use protocol::turn_event::MachinePresence;
 
 use crate::approval::{self, ApprovalCard, CardHandler};
+use crate::diff::{DiffEvent, DiffInput, DiffView};
 use crate::shell::i18n::{tr, tr_args};
 use crate::task::tools;
 
@@ -36,6 +38,12 @@ pub const PANE_ID: &str = "transcript";
 pub const ROW_ID: &str = "transcript-row";
 /// Element id of a clickable "more lines" / "show less" row.
 pub const MORE_ID: &str = "transcript-more";
+/// Element id of a "View diff" action.
+pub const VIEW_DIFF_ID: &str = "view-diff-action";
+/// Element id of the diff panel that covers the pane while a diff is open.
+pub const DIFF_PANEL_ID: &str = "diff-panel-overlay";
+/// Element id of the diff panel's close button.
+pub const CLOSE_DIFF_ID: &str = "diff-panel-close";
 /// Characters per wrapped line.
 pub const WRAP_COLS: usize = 110;
 /// Lines shown from a tool input/output, a reasoning block or a diff before "N more lines".
@@ -56,6 +64,8 @@ pub enum RowKind {
     ToolTitle,
     ToolDetail,
     DiffTitle,
+    /// `path: +added -removed` with the "View diff" action (see [`Row::view_diff`]).
+    DiffSummary,
     DiffLine,
     Plan,
     Terminal,
@@ -90,6 +100,8 @@ pub struct Row {
     pub text: String,
     /// For a "more" or "less" row: the key of the item it expands or collapses.
     pub expand: Option<usize>,
+    /// For a [`RowKind::DiffSummary`] row: the id of the diff activity its "View diff" opens.
+    pub view_diff: Option<String>,
 }
 
 impl Row {
@@ -100,6 +112,7 @@ impl Row {
             indent,
             text: text.into(),
             expand: None,
+            view_diff: None,
         }
     }
 
@@ -395,6 +408,26 @@ pub struct TranscriptPane {
     expanded: BTreeSet<usize>,
     approvals: Vec<ApprovalCard>,
     approval_handler: Option<CardHandler>,
+    workspace_root: Option<PathBuf>,
+    open_diff: Option<OpenDiff>,
+}
+
+/// What the pane asks its host to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TranscriptEvent {
+    /// Open `path` (resolved inside the workspace root) at 1-based `line`; re-emitted from the
+    /// diff viewer's `DiffEvent::OpenFile`.
+    OpenFile { path: PathBuf, line: u32 },
+}
+
+impl EventEmitter<TranscriptEvent> for TranscriptPane {}
+
+/// The diff shown over the pane.
+struct OpenDiff {
+    activity_id: String,
+    input: DiffInput,
+    view: Entity<DiffView>,
+    _subscription: Subscription,
 }
 
 impl Default for TranscriptPane {
@@ -414,7 +447,78 @@ impl TranscriptPane {
             expanded: BTreeSet::new(),
             approvals: Vec::new(),
             approval_handler: None,
+            workspace_root: None,
+            open_diff: None,
         }
+    }
+
+    /// The workspace root of the open thread. "Open file" is offered by the diff viewer only
+    /// with a root, and only for paths inside it.
+    pub fn set_workspace_root(&mut self, root: Option<PathBuf>, cx: &mut Context<Self>) {
+        self.workspace_root = root.clone();
+        if let Some(open) = &self.open_diff {
+            open.view
+                .update(cx, |view, cx| view.set_workspace_root(root, cx));
+        }
+        cx.notify();
+    }
+
+    /// The id of the diff activity shown over the pane, if any.
+    pub fn open_diff_id(&self) -> Option<&str> {
+        self.open_diff
+            .as_ref()
+            .map(|open| open.activity_id.as_str())
+    }
+
+    /// The diff viewer shown over the pane, if any.
+    pub fn open_diff_view(&self) -> Option<&Entity<DiffView>> {
+        self.open_diff.as_ref().map(|open| &open.view)
+    }
+
+    /// Shows the diff activity `activity_id` over the transcript. Returns `false` when the
+    /// thread has no complete diff activity with that id.
+    pub fn view_diff(&mut self, activity_id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(input) = self.diff_input(activity_id) else {
+            return false;
+        };
+        let view = cx.new(|_| DiffView::new(input.clone(), self.workspace_root.clone()));
+        let subscription = cx.subscribe(&view, |_, _, event: &DiffEvent, cx| match event {
+            DiffEvent::OpenFile { path, line } => cx.emit(TranscriptEvent::OpenFile {
+                path: path.clone(),
+                line: *line,
+            }),
+        });
+        self.open_diff = Some(OpenDiff {
+            activity_id: activity_id.to_owned(),
+            input,
+            view,
+            _subscription: subscription,
+        });
+        cx.notify();
+        true
+    }
+
+    /// Closes the diff panel.
+    pub fn close_diff(&mut self, cx: &mut Context<Self>) {
+        if self.open_diff.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn diff_input(&self, activity_id: &str) -> Option<DiffInput> {
+        let thread = self.thread.as_ref()?;
+        thread
+            .tasks()
+            .iter()
+            .flat_map(|task| task.transcript().items())
+            .find_map(|item| match item {
+                Item::Activity(activity)
+                    if activity.activity_id == activity_id && activity.complete =>
+                {
+                    activity.diff().map(|diff| DiffInput::from(&diff))
+                }
+                _ => None,
+            })
     }
 
     pub fn rows(&self) -> &[Row] {
@@ -460,10 +564,74 @@ impl TranscriptPane {
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let Some(thread) = &self.thread else { return };
         self.rows = thread_rows_with_cards(thread, &self.expanded, &self.approvals);
+        self.refresh_open_diff(cx);
         if self.item_sizes.len() != self.rows.len() {
             self.item_sizes = Rc::new(vec![size(px(100.), ROW_HEIGHT); self.rows.len()]);
         }
         cx.notify();
+    }
+
+    /// Follows the open diff when its activity changes; closes it when the activity is gone.
+    fn refresh_open_diff(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = &self.open_diff else { return };
+        match self.diff_input(&open.activity_id) {
+            None => self.open_diff = None,
+            Some(input) if input != open.input => {
+                let view = open.view.clone();
+                view.update(cx, |view, cx| view.set_input(input.clone(), cx));
+                if let Some(open) = &mut self.open_diff {
+                    open.input = input;
+                }
+            }
+            Some(_) => {}
+        }
+    }
+
+    fn render_diff_panel(&self, open: &OpenDiff, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (background, border, foreground) = (theme.background, theme.border, theme.foreground);
+        let close = tr("transcript-close-diff");
+        v_flex()
+            .id(DIFF_PANEL_ID)
+            .test_support()
+            .aria_label(tr_args(
+                "transcript-diff-panel",
+                &[("detail", &sanitize(&open.input.path))],
+            ))
+            .absolute()
+            .size_full()
+            .bg(background)
+            .text_color(foreground)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .h(ROW_HEIGHT)
+                    .px_3()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(
+                        div()
+                            .truncate()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(sanitize(&open.input.path)),
+                    )
+                    .child(
+                        div()
+                            .id(CLOSE_DIFF_ID)
+                            .test_support()
+                            .aria_label(SharedString::from(close.clone()))
+                            .px_2()
+                            .cursor_pointer()
+                            .text_sm()
+                            .on_click(cx.listener(|pane, _, _, cx| pane.close_diff(cx)))
+                            .child(close),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(open.view.clone()))
     }
 
     fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -484,7 +652,9 @@ impl TranscriptPane {
         );
         let shaded = matches!(row.kind, RowKind::User);
         let background = theme.secondary;
+        let accent = theme.primary;
         let expand = row.expand;
+        let view_diff = row.view_diff.clone();
         let outer_id: ElementId = if expand.is_some() {
             MORE_ID.into()
         } else {
@@ -516,6 +686,22 @@ impl TranscriptPane {
                     .when_some(mono, |el, family| el.font_family(family))
                     .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
                     .when(shaded, |el| el.bg(background))
+                    .when_some(view_diff, |el, activity_id| {
+                        let label = tr("transcript-view-diff");
+                        el.flex().flex_row().items_center().gap_2().child(
+                            div()
+                                .id(VIEW_DIFF_ID)
+                                .test_support()
+                                .aria_label(SharedString::from(label.clone()))
+                                .flex_none()
+                                .cursor_pointer()
+                                .text_color(accent)
+                                .on_click(cx.listener(move |pane, _, _, cx| {
+                                    pane.view_diff(&activity_id, cx);
+                                }))
+                                .child(label),
+                        )
+                    })
                     .child(div().truncate().child(text)),
             )
     }
@@ -542,24 +728,34 @@ impl Render for TranscriptPane {
                 ))
             })
             .child(
-                div().flex_1().min_h_0().relative().child(
-                    v_flex()
-                        .id("transcript-scroll")
-                        .relative()
-                        .size_full()
-                        .child(
-                            v_virtual_list(
-                                cx.entity().clone(),
-                                "transcript-list",
-                                self.item_sizes.clone(),
-                                |pane, visible_range, _, cx| {
-                                    visible_range.map(|ix| pane.render_row(ix, cx)).collect()
-                                },
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .when_some(
+                        self.open_diff
+                            .as_ref()
+                            .map(|open| self.render_diff_panel(open, cx)),
+                        |el, panel| el.child(panel),
+                    )
+                    .child(
+                        v_flex()
+                            .id("transcript-scroll")
+                            .relative()
+                            .size_full()
+                            .child(
+                                v_virtual_list(
+                                    cx.entity().clone(),
+                                    "transcript-list",
+                                    self.item_sizes.clone(),
+                                    |pane, visible_range, _, cx| {
+                                        visible_range.map(|ix| pane.render_row(ix, cx)).collect()
+                                    },
+                                )
+                                .track_scroll(&self.scroll_handle),
                             )
-                            .track_scroll(&self.scroll_handle),
-                        )
-                        .scrollbar(&self.scroll_handle, ScrollbarAxis::Vertical),
-                ),
+                            .scrollbar(&self.scroll_handle, ScrollbarAxis::Vertical),
+                    ),
             )
     }
 }
