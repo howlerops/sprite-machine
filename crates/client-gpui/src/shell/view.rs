@@ -1,7 +1,7 @@
 //! [`AppShell`]: the root view. Login screen, or sidebar + content once signed in. Thin over
 //! [`ShellModel`]; every decision lives there.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +29,7 @@ use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
 use crate::inbox::InboxEvent;
-use crate::task::TranscriptPane;
+use crate::task::{TranscriptEvent, TranscriptPane};
 
 actions!(shell, [GoNewTask, NextSection, PreviousSection]);
 
@@ -79,6 +79,8 @@ pub struct AppShell {
     _appearance: Subscription,
     _hub_input_events: Subscription,
     _inbox_events: Subscription,
+    /// Follows the open thread's pane; replaced with the pane.
+    _pane_events: Subscription,
     connectivity_task: Option<Task<()>>,
     /// The signed-in session's hub link; present exactly while a session is.
     link: Option<SessionLink>,
@@ -88,6 +90,8 @@ pub struct AppShell {
     /// The thread shown in the Inbox page, if one was opened.
     open_thread: Option<String>,
     pane: Entity<TranscriptPane>,
+    /// The last "open file" request from the open thread's diff: absolute path and 1-based line.
+    last_open_file: Option<(PathBuf, u32)>,
     snapshot_task: Option<Task<()>>,
     tick_task: Option<Task<()>>,
     link_retry: Duration,
@@ -138,6 +142,7 @@ impl AppShell {
             this.open_thread(thread_id, workspace.as_deref(), cx);
         });
         let pane = cx.new(|_| TranscriptPane::new());
+        let pane_events = Self::subscribe_pane(&pane, cx);
         let mut shell = Self {
             model,
             driver,
@@ -148,6 +153,7 @@ impl AppShell {
             _appearance: appearance,
             _hub_input_events: hub_input_events,
             _inbox_events: inbox_events,
+            _pane_events: pane_events,
             connectivity_task: None,
             link: None,
             link_thread: config.link_thread,
@@ -155,6 +161,7 @@ impl AppShell {
             presets_path,
             open_thread: None,
             pane,
+            last_open_file: None,
             snapshot_task: None,
             tick_task: None,
             link_retry,
@@ -238,9 +245,29 @@ impl AppShell {
         &self.pane
     }
 
+    /// The last "open file" request the open thread's diff made: the absolute path (inside the
+    /// thread's workspace) and the 1-based line. There is no editor yet, so nothing else acts on
+    /// it.
+    pub fn last_open_file(&self) -> Option<(&Path, u32)> {
+        self.last_open_file
+            .as_ref()
+            .map(|(path, line)| (path.as_path(), *line))
+    }
+
+    fn subscribe_pane(pane: &Entity<TranscriptPane>, cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe(pane, |this, _, event: &TranscriptEvent, cx| match event {
+            TranscriptEvent::OpenFile { path, line } => {
+                this.last_open_file = Some((path.clone(), *line));
+                cx.notify();
+            }
+        })
+    }
+
     /// Shows `thread_id` on the Inbox page and makes it the thread the session link follows
     /// (the inbox calls this when a row is opened). `workspace` is the thread's workspace, for
-    /// `allow_always` presets. Does nothing while signed out.
+    /// `allow_always` presets and the root that "Open file" resolves paths against; `None` or an
+    /// empty string means no workspace, so the diff offers no "Open file". Does nothing while
+    /// signed out.
     pub fn open_thread(
         &mut self,
         thread_id: &str,
@@ -257,6 +284,7 @@ impl AppShell {
                 pane.set_follow_tail(true);
                 pane
             });
+            self._pane_events = Self::subscribe_pane(&self.pane, cx);
             // The link may already hold this thread (opened again after going back).
             let current = self
                 .link
@@ -266,6 +294,12 @@ impl AppShell {
                 self.apply_snapshot(snapshot, cx);
             }
         }
+        // Also for a thread that is already open: its workspace may have been set since.
+        let root = workspace
+            .filter(|workspace| !workspace.is_empty())
+            .map(PathBuf::from);
+        self.pane
+            .update(cx, |pane, cx| pane.set_workspace_root(root, cx));
         self.model.nav.select(Section::Inbox);
         cx.notify();
     }
