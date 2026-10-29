@@ -1815,6 +1815,36 @@ fn presence_is_mirrored_into_d1() {
 }
 
 #[test]
+fn the_list_relays_the_machines_local_permission_mode() {
+    let db = Fake::new();
+    let control = FakeControl::default();
+    let admin = dev_admin(&db);
+    let created = block_on(admin::create_machine(
+        &db,
+        &control,
+        &admin,
+        &json!({"name": "m"}),
+        "r",
+    ))
+    .expect("create");
+    let id = created["machine"]["id"].as_str().expect("id").to_owned();
+    block_on(admin::record_capabilities(
+        &db,
+        &id,
+        &json!({
+            "host_mode": "local", "harnesses": ["claude"], "max_sessions": 2,
+            "spawn": ["same_dir"], "features": ["terminals", "permission_mode:plan"],
+        }),
+    ))
+    .expect("capabilities");
+    let listed = block_on(admin::list_machines(&db, &admin)).expect("list");
+    assert_eq!(
+        listed["machines"][0]["capabilities"]["permission_mode"],
+        "plan"
+    );
+}
+
+#[test]
 fn the_list_is_the_client_api_shape_scoped_to_the_org_and_leaves_out_revoked() {
     let db = Fake::new();
     let control = FakeControl::default();

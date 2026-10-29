@@ -81,7 +81,8 @@ All paths are under `https://<hub>/v1`.
       "capabilities": {
         "harnesses": ["claude", "opencode"],
         "spawn": ["same_dir", "worktree"],
-        "max_sessions": 32
+        "max_sessions": 32,
+        "permission_mode": "default"
       }
     }
   ]
@@ -110,6 +111,12 @@ hub creates the Thread DO, records the machine as the thread's host, and queues 
 ```
 
 → 201 `{ "thread_id": "th_01JBX2", "task_id": "tk_01JBX0", "status": "started" }`.
+`permission_mode` is a request: the machine runs the thread in it only if it is the same or
+stricter than the machine's own local mode (`plan` < `default` < `acceptEdits` <
+`bypassPermissions`), otherwise in the local mode (tunnel.md §3.5, `dispatch`). The machine
+advertises that local mode as `capabilities.permission_mode` in `GET /v1/machines` (omitted when
+unknown), and clients offer only modes up to it and say when a choice was lowered. The thread's
+`current_mode_id` state shows the effective mode.
 `prompt` may be omitted (thread created idle). `task_id`/`message_id` are optional client-chosen
 ids (so an offline client can render its own message before the hub answers); the hub generates
 them when absent. Threads started on the runner itself (TUI, `/rc`) appear through tunnel

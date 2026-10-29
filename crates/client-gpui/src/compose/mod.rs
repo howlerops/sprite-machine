@@ -499,9 +499,9 @@ impl ComposeView {
             tr("compose-mode-default-choice"),
             String::new(),
         )];
-        items.extend(MODES.iter().map(|mode| {
+        items.extend(self.model.modes().into_iter().map(|mode| {
             (
-                (*mode).to_owned(),
+                mode.to_owned(),
                 tr(&format!("compose-mode-{mode}")),
                 String::new(),
             )
@@ -523,9 +523,31 @@ impl ComposeView {
             })
             .collect();
         let current = Some(selected.unwrap_or_else(|| "default-choice".to_owned()));
+        // What the machine's local mode does to the choices (plan §4.10): never looser.
+        let note = match (self.model.capped_from(), self.model.local_mode()) {
+            (Some(from), Some(local)) => Some(tr_args(
+                "compose-mode-capped",
+                &[
+                    ("from", &tr(&format!("compose-mode-{from}"))),
+                    ("local", &tr(&format!("compose-mode-{local}"))),
+                ],
+            )),
+            (None, Some(local)) if local != "bypassPermissions" => Some(tr_args(
+                "compose-mode-local",
+                &[("local", &tr(&format!("compose-mode-{local}")))],
+            )),
+            _ => None,
+        };
         v_flex()
             .gap_1()
             .child(div().child(tr("compose-mode")))
+            .children(note.map(|note| {
+                div()
+                    .id("compose-mode-note")
+                    .test_support()
+                    .aria_label(note.clone())
+                    .child(note)
+            }))
             .child(self.choices("mode", items, current, cx, |this, mode, _| {
                 this.model
                     .set_mode((mode != "default-choice").then_some(mode));

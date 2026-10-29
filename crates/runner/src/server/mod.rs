@@ -117,6 +117,27 @@ impl PermissionMode {
         }
     }
 
+    /// How strict the mode is: `plan` < `default` < `acceptEdits` < `bypassPermissions` by how
+    /// much the agent may do without asking, so a lower rank is the stricter mode.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Plan => 0,
+            Self::Default => 1,
+            Self::AcceptEdits => 2,
+            Self::BypassPermissions => 3,
+        }
+    }
+
+    /// The mode a remotely requested `requested` runs in on a machine whose local mode is
+    /// `self` (plan §4.10, "the local permission mode applies"): the request when it is the
+    /// same or stricter, otherwise the local mode. An unknown request gets the local mode.
+    pub fn capped(self, requested: &str) -> Self {
+        match Self::parse(requested) {
+            Some(requested) if requested.rank() <= self.rank() => requested,
+            _ => self,
+        }
+    }
+
     /// The ACP session mode id.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -329,6 +350,11 @@ async fn run_with(
     worktree::sweep(&options.state_dir.join("worktrees"), &keep).await;
 
     let mut capabilities = harness::capabilities(&found, options.capacity);
+    // The machine's local mode caps what a remote request may ask for; the composer reads it.
+    capabilities.features.push(format!(
+        "permission_mode:{}",
+        options.permission_mode.as_str()
+    ));
     // The saved / chosen mode first: it is the one a dispatch without a preference gets.
     capabilities
         .spawn

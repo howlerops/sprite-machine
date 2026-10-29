@@ -29,6 +29,8 @@ use serde_json::{Value, json};
 struct Hub {
     posts: Mutex<Vec<(HeaderMap, Value)>>,
     machine_gets: Mutex<Vec<HeaderMap>>,
+    /// Replaces [`machines_body`] when set.
+    machines: Mutex<Option<Value>>,
 }
 
 fn machines_body() -> Value {
@@ -45,7 +47,8 @@ fn machines_body() -> Value {
 
 async fn list_machines(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Json<Value> {
     hub.machine_gets.lock().expect("lock").push(headers);
-    Json(machines_body())
+    let body = hub.machines.lock().expect("lock").clone();
+    Json(body.unwrap_or_else(machines_body))
 }
 
 async fn create_thread(
@@ -140,6 +143,61 @@ fn machines_parse_and_the_first_online_machine_is_chosen() {
     model.set_machine("mch_old");
     assert_eq!(model.draft().agent, "claude");
     assert_eq!(model.draft().spawn, "same_dir");
+}
+
+fn capped_machines(local: &str) -> Value {
+    json!({ "machines": [
+        { "machine_id": "mch_capped", "name": "capped-box", "kind": "local",
+          "presence": { "state": "online", "since": "2026-10-27T22:00:00.000Z" },
+          "capabilities": { "harnesses": ["claude"], "spawn": ["same_dir"], "max_sessions": 4,
+                            "permission_mode": local } },
+        { "machine_id": "mch_open", "name": "open-box", "kind": "local",
+          "presence": { "state": "online", "since": "2026-10-27T22:00:00.000Z" },
+          "capabilities": { "harnesses": ["claude"], "spawn": ["same_dir"], "max_sessions": 4 } },
+    ]})
+}
+
+#[test]
+fn modes_looser_than_the_machines_local_mode_are_not_offered() {
+    let mut model = NewTaskModel::open(None);
+    model.set_machines(parse_machines(&capped_machines("default")));
+    assert_eq!(model.local_mode(), Some("default"));
+    assert_eq!(model.modes(), ["default", "plan"]);
+    model.set_mode(Some("bypassPermissions"));
+    model.set_mode(Some("acceptEdits"));
+    assert_eq!(model.draft().mode, None, "a looser mode is refused");
+    model.set_mode(Some("plan"));
+    assert_eq!(model.draft().mode.as_deref(), Some("plan"));
+
+    model.set_machines(parse_machines(&capped_machines("plan")));
+    assert_eq!(model.modes(), ["plan"]);
+    model.set_machines(parse_machines(&capped_machines("acceptEdits")));
+    assert_eq!(model.modes(), ["default", "acceptEdits", "plan"]);
+    model.set_machines(parse_machines(&capped_machines("bypassPermissions")));
+    assert_eq!(model.modes().len(), 4);
+    // A machine that does not say offers everything.
+    model.set_machine("mch_open");
+    assert_eq!(model.local_mode(), None);
+    assert_eq!(model.modes().len(), 4);
+}
+
+#[test]
+fn a_mode_chosen_before_switching_to_a_stricter_machine_is_lowered_and_says_so() {
+    let mut model = NewTaskModel::open(None);
+    model.set_machines(parse_machines(&capped_machines("default")));
+    model.set_machine("mch_open");
+    model.set_mode(Some("bypassPermissions"));
+    assert_eq!(model.capped_from(), None);
+    model.set_machine("mch_capped");
+    assert_eq!(model.draft().mode.as_deref(), Some("default"));
+    assert_eq!(model.capped_from(), Some("bypassPermissions"));
+    model.set_workspace_path("/w");
+    model.set_prompt("go");
+    let sent = model.prepare_send().expect("valid");
+    assert_eq!(sent.request.permission_mode.as_deref(), Some("default"));
+    // Picking a mode again clears the note.
+    model.set_mode(Some("plan"));
+    assert_eq!(model.capped_from(), None);
 }
 
 #[test]
@@ -379,6 +437,56 @@ fn wait_until(
         std::thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out");
+}
+
+#[gpui_kit::test]
+fn the_view_offers_only_modes_the_machine_allows_and_says_when_it_capped(cx: &mut TestAppContext) {
+    let hub = Arc::new(Hub::default());
+    *hub.machines.lock().expect("lock") = Some(capped_machines("default"));
+    let api = spawn_hub(hub.clone());
+    let (window, view) = open_composer(cx, None);
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_target(
+                Some(Target {
+                    api: api.clone(),
+                    token: None,
+                }),
+                window,
+                cx,
+            );
+        });
+    })
+    .expect("window");
+    wait_until(cx, window, &view, |window, cx| {
+        view.read(cx).model().selected_machine().is_some() && window.find("mode-plan").visible()
+    });
+    cx.update_window(window, |_, window, cx| {
+        assert!(window.try_find("mode-default").is_some());
+        assert!(window.try_find("mode-acceptEdits").is_none());
+        assert!(window.try_find("mode-bypassPermissions").is_none());
+        assert!(
+            window.try_find("compose-mode-note").is_some(),
+            "the cap is explained"
+        );
+        // Switching to a machine without a cap brings the loose modes back.
+        window.click("machine-mch_open", cx);
+        window.render_frame(cx);
+        assert!(window.find("mode-bypassPermissions").visible());
+        assert!(window.try_find("compose-mode-note").is_none());
+        // A loose choice carried to the capped machine is lowered, and the note says so.
+        window.click("mode-bypassPermissions", cx);
+        window.click("machine-mch_capped", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("mode-bypassPermissions").is_none());
+        let note = window.find("compose-mode-note").label().map(str::to_owned);
+        assert!(
+            note.as_deref()
+                .is_some_and(|n| n.contains("looser than this machine allows")),
+            "{note:?}"
+        );
+    })
+    .expect("window");
 }
 
 #[gpui_kit::test]

@@ -198,9 +198,21 @@ impl Conn {
         agent: &str,
         workspace: Value,
     ) -> String {
+        self.dispatch_with_mode(thread, task, agent, workspace, "default")
+            .await
+    }
+
+    async fn dispatch_with_mode(
+        &mut self,
+        thread: &str,
+        task: &str,
+        agent: &str,
+        workspace: Value,
+        mode: &str,
+    ) -> String {
         self.command(json!({
             "kind": "dispatch", "thread_id": thread, "task_id": task, "agent": agent,
-            "workspace": workspace, "permission_mode": "default", "message_id": format!("msg_{task}"),
+            "workspace": workspace, "permission_mode": mode, "message_id": format!("msg_{task}"),
             "parts": [{ "type": "text", "text": "hi" }],
             "author": { "kind": "user", "id": "usr_1", "device_id": "dev_1" },
         }))
@@ -575,6 +587,120 @@ async fn the_permission_mode_is_in_force_before_the_first_prompt() {
     assert!(
         at("session/set_mode:plan") < at("session/prompt"),
         "{methods:?}"
+    );
+    running.stop().await;
+}
+
+fn all_modes(script: &mut Value) {
+    script["modes"] = json!({
+        "currentModeId": "default",
+        "availableModes": [
+            { "id": "default", "name": "Default" }, { "id": "plan", "name": "Plan" },
+            { "id": "acceptEdits", "name": "Accept edits" },
+            { "id": "bypassPermissions", "name": "Bypass" },
+        ]
+    });
+}
+
+/// Runs one dispatch asking for `requested` on a machine whose local mode is `local`, and
+/// returns what the agent received up to its first prompt.
+async fn modes_received(local: PermissionMode, requested: &str) -> Vec<String> {
+    let mut script = one("done");
+    all_modes(&mut script);
+    let rig = Rig::new(&[script]).await;
+    let mut options = rig.options();
+    options.permission_mode = local;
+    let running = start(options);
+    let (mut conn, _) = rig.hub.accept().await;
+
+    conn.dispatch_with_mode(
+        "th_1",
+        "tk_1",
+        "opencode",
+        json!({ "path": rig.work() }),
+        requested,
+    )
+    .await;
+    conn.until(run_finished("tk_1")).await;
+    let methods = received(&rig, |m| m.iter().any(|x| x == "session/prompt")).await;
+    running.stop().await;
+    methods
+}
+
+#[tokio::test]
+async fn a_remote_bypass_request_on_a_default_machine_runs_in_default() {
+    let methods = modes_received(PermissionMode::Default, "bypassPermissions").await;
+    assert!(
+        !methods.iter().any(|m| m.starts_with("session/set_mode")),
+        "the agent stays in default: {methods:?}"
+    );
+    let methods = modes_received(PermissionMode::Default, "acceptEdits").await;
+    assert!(
+        !methods.iter().any(|m| m.starts_with("session/set_mode")),
+        "{methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_remote_plan_request_runs_in_plan() {
+    let methods = modes_received(PermissionMode::Default, "plan").await;
+    let at = |name: &str| methods.iter().position(|m| m == name).unwrap();
+    assert!(
+        at("session/set_mode:plan") < at("session/prompt"),
+        "{methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_request_is_capped_by_the_local_mode_in_both_directions() {
+    // Looser than a plan machine: plan. Equal: kept. Stricter than acceptEdits: kept.
+    let methods = modes_received(PermissionMode::Plan, "default").await;
+    assert!(
+        methods.contains(&"session/set_mode:plan".to_owned()),
+        "{methods:?}"
+    );
+    let methods = modes_received(PermissionMode::AcceptEdits, "bypassPermissions").await;
+    assert!(
+        methods.contains(&"session/set_mode:acceptEdits".to_owned()),
+        "{methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m.contains("bypassPermissions")),
+        "{methods:?}"
+    );
+    let methods = modes_received(PermissionMode::AcceptEdits, "plan").await;
+    assert!(
+        methods.contains(&"session/set_mode:plan".to_owned()),
+        "{methods:?}"
+    );
+}
+
+#[test]
+fn the_cap_orders_plan_default_accept_edits_bypass() {
+    use PermissionMode::{AcceptEdits, BypassPermissions, Default, Plan};
+    let order = [Plan, Default, AcceptEdits, BypassPermissions];
+    for (i, local) in order.iter().enumerate() {
+        for (j, requested) in order.iter().enumerate() {
+            let expected = order[i.min(j)];
+            assert_eq!(local.capped(requested.as_str()), expected);
+        }
+        assert_eq!(local.capped("nonsense"), *local);
+    }
+}
+
+#[tokio::test]
+async fn hello_advertises_the_local_permission_mode() {
+    let rig = Rig::new(&[one("x")]).await;
+    let mut options = rig.options();
+    options.permission_mode = PermissionMode::AcceptEdits;
+    let running = start(options);
+    let (_conn, hello) = rig.hub.accept().await;
+    assert!(
+        hello["capabilities"]["features"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("permission_mode:acceptEdits")),
+        "{hello}"
     );
     running.stop().await;
 }
