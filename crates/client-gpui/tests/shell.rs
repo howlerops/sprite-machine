@@ -88,6 +88,12 @@ struct HubState {
     machines: Mutex<Vec<Value>>,
     /// How many times `GET /v1/machines` was asked.
     machine_gets: AtomicUsize,
+    /// How many times `GET /v1/threads` was asked.
+    thread_gets: AtomicUsize,
+    /// How long `GET /v1/threads` takes to answer, in ms (a slow list for the in-flight test).
+    list_delay_ms: AtomicUsize,
+    /// The status `GET /v1/threads` answers (0 means 200).
+    list_status: AtomicUsize,
 }
 
 #[derive(Debug, Clone)]
@@ -325,9 +331,20 @@ async fn list_machines(State(state): State<Arc<HubState>>) -> Json<Value> {
 }
 
 /// The inbox's list: the rows the test put in `threads`, on one page.
-async fn list_threads(State(state): State<Arc<HubState>>) -> Json<Value> {
+async fn list_threads(State(state): State<Arc<HubState>>) -> Response {
+    state.thread_gets.fetch_add(1, Ordering::SeqCst);
+    let delay = state.list_delay_ms.load(Ordering::SeqCst);
+    if delay > 0 {
+        tokio::time::sleep(Duration::from_millis(delay as u64)).await;
+    }
+    let status = state.list_status.load(Ordering::SeqCst);
+    if status != 0 {
+        return StatusCode::from_u16(status as u16)
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+    }
     let threads = state.threads.lock().expect("lock").clone();
-    Json(json!({ "threads": threads, "next_cursor": null }))
+    Json(json!({ "threads": threads, "next_cursor": null })).into_response()
 }
 
 fn spawn_hub(state: Arc<HubState>) -> String {
@@ -3638,4 +3655,198 @@ fn the_notification_settings_are_on_the_settings_page(cx: &mut TestAppContext) {
         assert!(window.try_find("notify-row-failed").is_some());
     })
     .expect("window");
+}
+
+// ---- the inbox refreshes itself ---------------------------------------------------------------
+
+/// Pump the window (50 ms of test clock per step) until `done` holds.
+fn pump_until(cx: &mut TestAppContext, what: &str, done: impl Fn(&mut TestAppContext) -> bool) {
+    for _ in 0..400 {
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        if done(cx) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for {what}");
+}
+
+fn applied(cx: &mut TestAppContext, view: &Entity<AppShell>) -> u64 {
+    cx.update(|cx| view.read(cx).inbox().read(cx).lists_applied())
+}
+
+#[gpui_kit::test]
+fn the_inbox_refetches_on_a_timer_and_a_status_change_notifies_once(cx: &mut TestAppContext) {
+    let (state, _hub, _window, view) = notify_shell(
+        cx,
+        vec![
+            inbox_row("th_a", "Fix login", "running", "/work/repo"),
+            inbox_row("th_b", "Other", "running", "/work/other"),
+        ],
+    );
+    let gets = state.thread_gets.load(Ordering::SeqCst);
+    let lists = applied(cx, &view);
+    set_status(&state, "th_a", "needs_you");
+    // No user action: only the clock moves.
+    cx.executor()
+        .advance_clock(client_gpui::inbox::REFRESH_EVERY);
+    pump_until(cx, "the timer refresh", |cx| {
+        applied(cx, &view) > lists && toasts(cx, &view) == 1
+    });
+    assert!(state.thread_gets.load(Ordering::SeqCst) > gets);
+    // Another interval with the same status: refetched, no second toast.
+    let lists = applied(cx, &view);
+    cx.executor()
+        .advance_clock(client_gpui::inbox::REFRESH_EVERY);
+    pump_until(cx, "the second refresh", |cx| applied(cx, &view) > lists);
+    assert_eq!(toasts(cx, &view), 1);
+}
+
+#[gpui_kit::test]
+fn the_inbox_refetches_when_the_window_comes_to_the_front(cx: &mut TestAppContext) {
+    let (state, _hub, window, view) = notify_shell(
+        cx,
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")],
+    );
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |shell, cx| shell.activate(false, window, cx));
+    })
+    .expect("window");
+    set_status(&state, "th_a", "done");
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |shell, cx| shell.activate(true, window, cx));
+    })
+    .expect("window");
+    pump_until(cx, "the refetch on focus", |cx| toasts(cx, &view) == 1);
+}
+
+#[gpui_kit::test]
+fn a_refresh_does_not_stack_and_a_failed_one_keeps_the_list(cx: &mut TestAppContext) {
+    let (state, _hub, _window, view) = notify_shell(
+        cx,
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")],
+    );
+    let gets = state.thread_gets.load(Ordering::SeqCst);
+    let lists = applied(cx, &view);
+    state.list_delay_ms.store(3000, Ordering::SeqCst);
+    cx.executor()
+        .advance_clock(client_gpui::inbox::REFRESH_EVERY);
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(150));
+    // A second tick while the first answer is still on its way.
+    cx.executor()
+        .advance_clock(client_gpui::inbox::REFRESH_EVERY);
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(state.thread_gets.load(Ordering::SeqCst), gets + 1);
+    pump_until(cx, "the slow answer", |cx| applied(cx, &view) > lists);
+
+    // A failing hub: the next tick fetches, the rows stay.
+    state.list_delay_ms.store(0, Ordering::SeqCst);
+    state.list_status.store(500, Ordering::SeqCst);
+    let gets = state.thread_gets.load(Ordering::SeqCst);
+    cx.executor()
+        .advance_clock(client_gpui::inbox::REFRESH_EVERY);
+    pump_until(cx, "the failed refresh", |cx| {
+        cx.update(|cx| view.read(cx).inbox().read(cx).model().error().is_some())
+    });
+    assert!(state.thread_gets.load(Ordering::SeqCst) > gets);
+    cx.update(|cx| {
+        let inbox = view.read(cx).inbox().read(cx);
+        assert!(inbox.model().row("th_a").is_some(), "the list is kept");
+    });
+}
+
+#[gpui_kit::test]
+fn a_filtered_list_is_not_refreshed_by_the_timer(cx: &mut TestAppContext) {
+    let (state, _hub, window, view) = notify_shell(
+        cx,
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")],
+    );
+    cx.update_window(window, |_, window, cx| {
+        let inbox = view.read(cx).inbox().clone();
+        inbox.update(cx, |inbox, cx| {
+            inbox.set_status_filter(Some(client_gpui::inbox::Status::Running), window, cx)
+        });
+    })
+    .expect("window");
+    pump_until(cx, "the filtered list", |cx| {
+        cx.update(|cx| {
+            view.read(cx)
+                .inbox()
+                .read(cx)
+                .model()
+                .filters()
+                .status
+                .is_some()
+        })
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    cx.run_until_parked();
+    let gets = state.thread_gets.load(Ordering::SeqCst);
+    set_status(&state, "th_a", "done");
+    cx.executor()
+        .advance_clock(client_gpui::inbox::REFRESH_EVERY);
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(state.thread_gets.load(Ordering::SeqCst), gets);
+    assert_eq!(toasts(cx, &view), 0);
+}
+
+#[gpui_kit::test]
+fn the_open_threads_snapshot_notifies_and_the_list_does_not_repeat_it(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    *state.threads.lock().expect("lock") =
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")];
+    state
+        .frames
+        .lock()
+        .expect("lock")
+        .insert("th_a".to_owned(), vec![run_started_frame(1)]);
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    wait_for_inbox(cx, window, "inbox-open-th_a");
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-open-th_a", cx);
+    })
+    .expect("window");
+    wait_until_true("a subscription to th_a", || {
+        *state.subscribed.lock().expect("lock") == ["th_a"]
+    });
+    // In the background the open thread notifies like any other.
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |shell, cx| shell.activate(false, window, cx));
+    })
+    .expect("window");
+    push_live(
+        &state,
+        "th_a",
+        event_frame(
+            2,
+            "th_a",
+            json!({ "type": "RunError", "reason": "error", "code": "protocol",
+                    "message": "the agent crashed" }),
+        ),
+    );
+    pump_until(cx, "the snapshot's failure", |cx| toasts(cx, &view) == 1);
+
+    // The list still says running (it is behind), then agrees: still one toast.
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 1);
+    set_status(&state, "th_a", "failed");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 1, "one run, one notification");
+    set_status(&state, "th_a", "failed");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 1);
 }
