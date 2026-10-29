@@ -8,7 +8,7 @@
 //! atomic.
 
 use protocol::tunnel::{Actor, Command, ContentPart};
-use protocol::turn_event::{Envelope, InterruptKind, ResolvedOutcome, StateScope};
+use protocol::turn_event::{Envelope, InterruptKind, InterruptOption, ResolvedOutcome, StateScope};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -98,6 +98,12 @@ pub struct InterruptRecord {
     pub kind: InterruptKind,
     /// `option_id`s of an approval; empty when the interrupt lists none.
     pub option_ids: Vec<String>,
+    /// The interrupt's title (empty for a record stored before M2-010h).
+    #[serde(default)]
+    pub title: String,
+    /// The options exactly as the agent sent them (empty for a record stored before M2-010h).
+    #[serde(default)]
+    pub options: Vec<InterruptOption>,
     pub expires_at: String,
     pub resolved: Option<Resolution>,
 }

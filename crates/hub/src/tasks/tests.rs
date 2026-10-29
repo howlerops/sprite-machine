@@ -15,7 +15,8 @@ use rusqlite::{Connection, params_from_iter};
 use serde_json::Value;
 
 use super::index::{
-    IndexRow, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING, changes_index,
+    IndexRow, PendingInterrupt, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING,
+    changes_index,
 };
 use super::query::{ListQuery, parse_list_query};
 use super::store::{ThreadSummary, list_threads, paginate, reconcile_candidates, stored, upsert};
@@ -139,6 +140,7 @@ fn row(thread: &str, title: &str, updated_at: &str) -> IndexRow {
         status: STATUS_OPEN,
         archived: false,
         deleted: false,
+        pending_interrupts: Vec::new(),
         updated_at: updated_at.to_owned(),
         last_seq: 3,
     }
@@ -184,6 +186,9 @@ fn an_upsert_is_listed_with_the_client_shape() {
             "status": "idle",
             "updated_at": "2026-10-28T10:00:00.000Z",
             "last_seq": 3,
+            "workspace": "/src/app",
+            "archived": false,
+            "pending_interrupts": [],
         })
     );
 }
@@ -522,4 +527,50 @@ fn a_done_status_is_listed_as_done_and_found_by_the_status_filter() {
     assert_eq!(list(&db, "org_a", &query), ["th_1"]);
     let rows = block_on(list_threads(&db, "org_a", &ListQuery::default(), 10)).expect("list");
     assert_eq!(rows[0].to_json()["status"], "done");
+}
+
+#[test]
+fn rows_carry_workspace_archived_and_the_pending_approvals_of_needs_you_rows() {
+    use protocol::turn_event::{InterruptOption, PermissionOptionKind};
+    let db = Fake::new();
+    let at = "2026-10-28T10:00:00.000Z";
+    let mut waiting = row("th_wait", "waits", at);
+    waiting.status = STATUS_WAITING;
+    waiting.pending_interrupts = vec![PendingInterrupt {
+        interrupt_id: "int_1".to_owned(),
+        title: "Run cargo test?".to_owned(),
+        options: vec![InterruptOption {
+            option_id: "opt_a".to_owned(),
+            name: "Allow".to_owned(),
+            kind: PermissionOptionKind::AllowOnce,
+        }],
+    }];
+    block_on(upsert(&db, "org_a", &waiting)).expect("waiting");
+    let mut bare = row("th_bare", "no workspace", "2026-10-28T09:00:00.000Z");
+    bare.workspace_path = String::new();
+    bare.archived = true;
+    block_on(upsert(&db, "org_a", &bare)).expect("bare");
+
+    let query = parse_list_query(Some("archived=true")).expect("query");
+    let rows = block_on(list_threads(&db, "org_a", &query, 100)).expect("list");
+    let json: Vec<Value> = rows.iter().map(ThreadSummary::to_json).collect();
+    assert_eq!(json[0]["thread_id"], "th_wait");
+    assert_eq!(json[0]["workspace"], "/src/app");
+    assert_eq!(json[0]["archived"], false);
+    assert_eq!(
+        json[0]["pending_interrupts"],
+        serde_json::json!([{
+            "interrupt_id": "int_1",
+            "title": "Run cargo test?",
+            "options": [{ "option_id": "opt_a", "name": "Allow", "kind": "allow_once" }],
+        }])
+    );
+    assert_eq!(json[1]["workspace"], Value::Null);
+    assert_eq!(json[1]["archived"], true);
+    assert_eq!(json[1]["pending_interrupts"], serde_json::json!([]));
+    // The stored row round-trips for the reconcile.
+    let stored = block_on(stored(&db, "org_a", "th_wait"))
+        .expect("stored")
+        .expect("row");
+    assert!(stored.is_current(&waiting));
 }

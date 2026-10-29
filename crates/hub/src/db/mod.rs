@@ -79,6 +79,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0014_github_oauth.sql",
         include_str!("../../migrations/0014_github_oauth.sql"),
     ),
+    (
+        "0015_task_pending_interrupts.sql",
+        include_str!("../../migrations/0015_task_pending_interrupts.sql"),
+    ),
 ];
 
 /// One result row: column name to JSON value (what D1 returns for an object row).

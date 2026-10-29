@@ -38,7 +38,9 @@ use super::store::{
     TaskRecord, TaskStatus, ThreadStore,
 };
 use super::timestamp::parse_timestamp;
-use crate::tasks::index::{IndexRow, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING};
+use crate::tasks::index::{
+    IndexRow, PendingInterrupt, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING,
+};
 use crate::tasks::title::derive_title;
 
 /// The longest title a client may set (`POST /v1/threads`, `PATCH /v1/threads/{id}`).
@@ -483,6 +485,8 @@ impl<S: ThreadStore> ThreadCore<S> {
                         .flatten()
                         .map(|option| option.option_id.clone())
                         .collect(),
+                    title: interrupt.title.clone(),
+                    options: interrupt.options.clone().unwrap_or_default(),
                     expires_at: interrupt.expires_at.clone(),
                     resolved: None,
                 })?;
@@ -896,12 +900,24 @@ impl<S: ThreadStore> ThreadCore<S> {
         let info = self.info()?;
         let (title, title_source) = self.effective_title()?;
         let mut status = STATUS_OPEN;
+        let mut pending_interrupts = Vec::new();
         for task in self.store.tasks_with_status(TaskStatus::Running)? {
-            status = STATUS_RUNNING;
-            if !self.store.open_interrupts(&task.task_id)?.is_empty() {
-                status = STATUS_WAITING;
-                break;
+            if status == STATUS_OPEN {
+                status = STATUS_RUNNING;
             }
+            let open = self.store.open_interrupts(&task.task_id)?;
+            if !open.is_empty() {
+                status = STATUS_WAITING;
+            }
+            pending_interrupts.extend(
+                open.into_iter()
+                    .filter(|record| record.kind == InterruptKind::Approval)
+                    .map(|record| PendingInterrupt {
+                        interrupt_id: record.interrupt_id,
+                        title: record.title,
+                        options: record.options,
+                    }),
+            );
         }
         // `done`: the last task ended in success and nothing is running or queued. It lasts
         // until the next prompt (`finished_ok` is cleared by the next `UserMessage`).
@@ -929,6 +945,7 @@ impl<S: ThreadStore> ThreadCore<S> {
             status,
             archived: self.flag("archived")?,
             deleted: self.flag("deleted")?,
+            pending_interrupts,
             updated_at: format_timestamp(now_ms),
             last_seq: i64::try_from(self.head).unwrap_or(i64::MAX),
         })

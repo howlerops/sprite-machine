@@ -122,8 +122,23 @@ ids (so an offline client can render its own message before the hub answers); th
 them when absent. Threads started on the runner itself (TUI, `/rc`) appear through tunnel
 `thread_open` instead; clients learn about them from `GET /v1/threads`.
 
-**`GET /v1/threads?machine_id=&status=&q=&cursor=`** → 200 `{ "threads": [ { "thread_id", "title", "machine_id", "agent", "status": "idle|running|needs_you|done", "updated_at", "last_seq" } ], "next_cursor": null }`
+**`GET /v1/threads?machine_id=&status=&agent=&workspace=&q=&archived=&cursor=`** → 200 `{ "threads": [ { "thread_id", "title", "machine_id", "agent", "status": "idle|running|needs_you|done", "updated_at", "last_seq", "workspace", "archived", "pending_interrupts" } ], "next_cursor": null }`
 (the D1 task index; `q` is FTS search, M2-\*).
+
+- `workspace`: the thread's workspace path (the `workspace.path` it was created with), or `null`
+  when it has none.
+- `archived`: `true` for an archived thread. Archived threads are left out of the list unless
+  the query has `archived=true`, which lists them **in addition to** the active ones (each row
+  says which it is); deleted threads are never listed.
+- `pending_interrupts`: the thread's open **approval** interrupts, oldest first, each
+  `{ "interrupt_id", "title", "options": [ { "option_id", "name", "kind" } ] }` with the ACP
+  options exactly as the agent sent them (`kind` is `allow_once|allow_always|reject_once|reject_always`).
+  Only `needs_you` rows have entries; every other row has `[]`. Open `form` and `auth`
+  interrupts also make a row `needs_you` but are not listed here (answer them from the thread:
+  `GET /v1/threads/{thread_id}` and the subscription carry the `Interrupt` event). The array
+  comes from the index row, written in the same upsert as `status`, so it is as fresh as
+  `status` and costs no per-row lookup. Answer with
+  `POST /v1/threads/{thread_id}/interrupts/{interrupt_id}` (§5.4).
 
 - `status`: `idle` (no task started, or the last run ended in an error or cancel), `running`,
   `needs_you` (an approval is open), `done` (the last task ended in `RunFinished{success}` and
