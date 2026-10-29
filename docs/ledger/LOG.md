@@ -317,3 +317,4 @@
 - 2026-10-29 leader: merged M3-005 (composer pieces, not yet wired: M3-005a; intents: M3-005b). The worker wrongly thought the shared target was gone and built a private 5.4 GB target; deleted.
 - 2026-10-29 leader: merged M3-014 (palette + shortcuts); verified M3-005, M3-011j, M3-014 together on v2 (client 258 passed, shell+palette 3/3). Filed M3-014a/b. M3-005a now after M3-005b. Assigned M3-005b (sonnet), M2-010i (haiku).
 - 2026-10-29 leader: merged M3-005b (SetSession/RemovePending intents; 263 passed). Fixed stale admin comment in hub threads/routes.rs. Assigned M3-005a (sonnet).
+- 2026-10-29 leader: merged M3-005a (composer wired) and M2-010i (form/auth on list rows; hub 337 passed, live tasks+thread_do). Leader fix: banner test allow_parking (40/40). Filed M2-010k (inbox must pick the approval, regression risk from M2-010i), M3-005c, M3-005d. Assigned M2-010k (haiku), M3-005c (sonnet).

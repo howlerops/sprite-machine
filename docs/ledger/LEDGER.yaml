@@ -4044,7 +4044,8 @@ items:
     title: 'desktop: wire ThreadComposer into the task view (Send/Cancel via the link outbox, ThreadRequest via authenticated hub call, set_thread per snapshot, set_runner_mode from machine capabilities)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-core+client-gpui 269 passed with 1 flake (banner test, pre-existing on v2 per worker); leader fix allow_parking -> tests/shell 40/40 runs pass; clippy clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4080,6 +4081,55 @@ items:
       - 'crates/client-gpui/tests/compose_commands.rs'
     acceptance:
       - 'Intent::SetSession and Intent::RemovePending map to client-api.md §5.3/§5.5 requests with Idempotency-Key (outbox tests); composer emits them instead of raw ThreadRequest'
+  - id: M2-010k
+    title: 'client inbox: read pending_interrupts[].kind; quick Allow/Deny uses the first approval, row detail shows the first pending title'
+    milestone: M3
+    phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M2-010i]
+    paths:
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/tests/inbox.rs'
+    acceptance:
+      - 'A row whose first pending entry is a form still offers quick Allow/Deny for its approval; a row with only form/auth shows no quick buttons and the form title (tests)'
+  - id: M3-005c
+    title: "desktop composer: surface Rejected SetSession/RemovePending outbox entries; disable Send until the thread's first snapshot; prune started-removal conflicts for finished tasks"
+    milestone: M3
+    phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-005a]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/tests/shell.rs'
+      - 'crates/client-gpui/locales/en/compose.ftl'
+    acceptance:
+      - 'A 403/400 on mode change or chip removal shows a message on the composer; Send is disabled before set_thread; conflicts for finished tasks are dismissed (tests)'
+  - id: M3-005d
+    title: 'desktop shell: its own machines feed for runner caps (not the new-task composer list)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-005a]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Runner cap known even when the new-task composer never fetched machines (test)'
 
   - id: M3-006
     title: 'client: attachments (picker, paste, drag-drop) + inline images'
@@ -6094,7 +6144,8 @@ items:
     title: 'hub: list form/auth interrupts on needs_you rows (pending_interrupts kind) so the inbox can show them'
     milestone: M2
     phase: P4
-    status: "assigned"
+    status: "done"
+    evidence: "merged 9dd7b40; leader verify on v2: clippy hub clean; cargo test -p hub 337 passed 0 failed; hub-test tasks + thread_do PASS"
     attempt: 1
     assignee: "haiku"
     lane: rust
