@@ -311,3 +311,4 @@
 - 2026-10-29 leader: merged M3-011g (151 passed). Filed M3-011k (HTTP-failed card cannot be retried from the UI). Assigned M3-010d (haiku).
 - 2026-10-29 leader: merged M3-009 (plan + usage widgets, not yet placed: M3-009a). Filed M3-009a/b/c.
 - 2026-10-29 leader: merged M3-010d; verified M3-009 + M3-010d on v2 (client-gpui 163 passed). Filed M3-010f. Assigned M3-009a (haiku).
+- 2026-10-29 leader: merged M3-011k (retry from card; 410 now final) and M3-009a (plan/usage beside transcript). v2: client 219 passed. M3-011k haiku worker made a read-only read_documentation call against the rule (3rd haiku breach this session; nothing changed). Assigned M3-011j (haiku), M3-014 (sonnet).

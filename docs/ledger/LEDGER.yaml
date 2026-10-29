@@ -4129,7 +4129,8 @@ items:
     title: 'desktop task view: show the plan and usage widgets for the open thread (PlanModel::from_thread, UsageTracker::observe after each apply)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-core+client-gpui 219 passed 0 failed (an earlier 149/1 run was a shared-target race while the worker built; re-run clean); worker mutation check"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4472,7 +4473,9 @@ items:
     title: 'client-gpui tests: the_banner_follows_a_client_core_connection waits on conditions, not fixed sleeps (flaked once)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
@@ -4485,7 +4488,8 @@ items:
     title: 'approval card: an HTTP-failed answer on a still-open request stays answerable (retry from the card)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2 (with M3-009a): client-core+client-gpui 219 passed 0 failed, clippy client-core/gpui/runner clean, fmt ok; worker fail-check: 3 fix tests fail without change"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4538,6 +4542,9 @@ items:
     title: 'client: command palette + shortcuts'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-002]
     paths:
