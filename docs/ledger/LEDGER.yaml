@@ -6467,7 +6467,8 @@ items:
     title: 'runner: a thread keeps its effective (capped) permission mode across an idle-close reopen, instead of falling back to the looser local mode'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; runner clippy clean, 249 passed on merged tree (reopen and -c keep the recorded mode)"
     assignee: "haiku"
     attempt: 1
     lane: rust

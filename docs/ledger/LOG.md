@@ -293,3 +293,4 @@
 2026-10-29T02:23Z M3-004a verify green → done
 2026-10-29T02:23Z assign M3-007 (sonnet, client lane)
 2026-10-29T02:24Z M3-004c back (haiku): effective mode recorded per thread, reopen re-caps it; the -c path has the same gap and is in its paths → sent back to fix on the same attempt. Note: leader's exe prune during worker builds caused a 'can't find crate' rerun; prune only when no worker is building from now on
+2026-10-29T02:27Z M3-004c (with -c fix) merged, runner 249/0 → done
