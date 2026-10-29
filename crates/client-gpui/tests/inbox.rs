@@ -208,8 +208,6 @@ fn a_failed_status_is_its_own_status_and_sits_with_done() {
     assert_eq!(Status::parse("failed"), Status::Failed);
     assert_eq!(Status::Failed.as_query(), "failed");
     assert_eq!(Section::of(Status::Failed), Section::Done);
-    // Unknown strings are still idle.
-    assert_eq!(Status::parse("cancelled"), Status::Idle);
     let (model, _) = model_with(vec![
         thread("th_bad", "Broke", "failed"),
         thread("th_run", "Run", "running"),
@@ -221,6 +219,50 @@ fn a_failed_status_is_its_own_status_and_sits_with_done() {
         .map(|row| row.thread_id.clone())
         .collect();
     assert_eq!(done, ["th_bad"]);
+}
+
+#[test]
+fn a_cancelled_status_is_its_own_status_and_sits_with_done() {
+    assert_eq!(Status::parse("cancelled"), Status::Cancelled);
+    assert_eq!(Status::Cancelled.as_query(), "cancelled");
+    assert_eq!(Section::of(Status::Cancelled), Section::Done);
+    let (model, _) = model_with(vec![
+        thread("th_stop", "Stopped", "cancelled"),
+        thread("th_run", "Run", "running"),
+    ]);
+    assert_eq!(model.row("th_stop").expect("row").status, Status::Cancelled);
+    let done: Vec<_> = model
+        .section(Section::Done)
+        .iter()
+        .map(|row| row.thread_id.clone())
+        .collect();
+    assert_eq!(done, ["th_stop"]);
+}
+
+#[test]
+fn an_unknown_status_is_idle_and_sits_with_done() {
+    assert_eq!(Status::parse("paused"), Status::Idle);
+    assert_eq!(Section::of(Status::parse("paused")), Section::Done);
+    let (model, _) = model_with(vec![thread("th_odd", "Odd", "paused")]);
+    assert_eq!(model.row("th_odd").expect("row").status, Status::Idle);
+    assert_eq!(model.section(Section::Done).len(), 1);
+}
+
+#[test]
+fn the_failed_and_cancelled_filters_send_their_own_query_value() {
+    let (mut model, _) = model_with(vec![]);
+    assert!(model.set_status_filter(Some(Status::Failed)));
+    let status = |model: &mut InboxModel| {
+        model
+            .list_request()
+            .query
+            .iter()
+            .find(|(k, _)| k == "status")
+            .map(|(_, v)| v.clone())
+    };
+    assert_eq!(status(&mut model).as_deref(), Some("failed"));
+    assert!(model.set_status_filter(Some(Status::Cancelled)));
+    assert_eq!(status(&mut model).as_deref(), Some("cancelled"));
 }
 
 #[test]
@@ -628,7 +670,7 @@ fn every_string_id_the_inbox_uses_is_in_the_catalog() {
             }
         }
     }
-    for slug in ["all", "needs_you", "running", "done"] {
+    for slug in ["all", "needs_you", "running", "done", "failed", "cancelled"] {
         ids.insert(format!("inbox-filter-status-{slug}"));
     }
     for section in Section::ALL {
@@ -861,6 +903,36 @@ fn a_row_with_only_a_form_or_auth_shows_no_quick_buttons(cx: &mut TestAppContext
     })
     .expect("window");
     assert!(hub.answers.lock().expect("lock").is_empty());
+}
+
+#[gpui_kit::test]
+fn failed_and_cancelled_rows_show_their_own_labels_in_the_done_section(cx: &mut TestAppContext) {
+    let hub = Arc::new(Hub::default());
+    *hub.threads.lock().expect("lock") = vec![
+        thread("th_fail", "Broke", "failed"),
+        thread("th_stop", "Stopped", "cancelled"),
+        thread("th_done", "Upgrade axum", "done"),
+    ];
+    let api = spawn_hub(hub.clone());
+    let (window, view) = open_inbox(cx, ManualClock::new());
+    point_at(cx, window, &view, &api);
+    wait_until(cx, window, &view, |window, _| {
+        window.try_find("inbox-section-done").is_some()
+    });
+    cx.update_window(window, |_, window, _| {
+        assert!(window.try_find("inbox-section-needs-you").is_none());
+        let rows = window.find_all("inbox-row");
+        let labels: Vec<_> = rows.iter().filter_map(|r| r.label()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Broke, claude, Failed",
+                "Stopped, claude, Cancelled",
+                "Upgrade axum, claude, Done"
+            ]
+        );
+    })
+    .expect("window");
 }
 
 #[gpui_kit::test]

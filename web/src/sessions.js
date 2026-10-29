@@ -8,7 +8,15 @@ export const POLL_MS = 5000;
 const MAX_PAGES = 4;
 
 const PRESENCE = { online: 'Online', asleep: 'Asleep', offline: 'Offline' };
-const STATUS = { idle: 'Idle', running: 'Running', needs_you: 'Needs you', done: 'Done' };
+// client-api.md §5.2. An unknown status is shown as Done (see threadHtml).
+const STATUS = {
+  idle: 'Idle',
+  running: 'Running',
+  needs_you: 'Needs you',
+  done: 'Done',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
 
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -52,7 +60,7 @@ export function group(machines, threads) {
 }
 
 function threadHtml(thread, now) {
-  const status = STATUS[thread.status] ? thread.status : 'done';
+  const status = Object.hasOwn(STATUS, thread.status) ? thread.status : 'done';
   const href = `#/t/${encodeURIComponent(thread.thread_id)}`;
   return (
     `<li><a class="thread" href="${esc(href)}">` +

@@ -464,11 +464,13 @@ impl InboxView {
 
     fn render_filters(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let filters = self.model.filters().clone();
-        let statuses: [(Option<Status>, &str); 4] = [
+        let statuses: [(Option<Status>, &str); 6] = [
             (None, "all"),
             (Some(Status::NeedsYou), "needs_you"),
             (Some(Status::Running), "running"),
             (Some(Status::Done), "done"),
+            (Some(Status::Failed), "failed"),
+            (Some(Status::Cancelled), "cancelled"),
         ];
         h_flex()
             .gap_2()
@@ -636,6 +638,7 @@ impl InboxView {
                 Status::Running => "running",
                 Status::Done | Status::Idle => "done",
                 Status::Failed => "failed",
+                Status::Cancelled => "cancelled",
             }
         ));
         let meta = [
