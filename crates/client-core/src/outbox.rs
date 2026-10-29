@@ -11,6 +11,7 @@
 //!   before the removal arrived, so the caller should cancel instead
 //!   ([`Outbox::started_removals`]).
 //! - Other 4xx responses (and 410 `expired`) are terminal and surface as `Rejected`.
+//! - The stored queue stays bounded: see [`DEFAULT_MAX_DONE`].
 
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
@@ -327,6 +328,19 @@ pub struct Conflict {
     pub resolved_by: Option<Actor>,
 }
 
+/// How many accepted (`Done`) entries the outbox keeps by default.
+///
+/// Retention rule: once an entry becomes `Done`, only the newest [`DEFAULT_MAX_DONE`] `Done`
+/// entries (by enqueue order) are kept; older ones are deleted from memory and the cache.
+/// Nothing else is ever pruned automatically: `Queued` entries still have to be sent, `Conflict`
+/// and `Rejected` entries are shown to the user until dismissed or superseded, and `Exhausted`
+/// ones are the user's to retry or dismiss. What readers need of a `Done` entry is short-lived:
+/// the approval controller only maps a `Done` answer to "delivered" (a missing entry means the
+/// same), and the session-link tidy only compares against the newest accepted session/remove
+/// request, which is always among the newest `Done` entries. So a window of recent entries
+/// keeps every reader working while the table cannot grow without bound.
+pub const DEFAULT_MAX_DONE: usize = 64;
+
 // ---- retry policy --------------------------------------------------------------------------
 
 /// Backoff parameters.
@@ -469,6 +483,7 @@ pub struct Outbox {
     entries: BTreeMap<i64, QueuedIntent>,
     policy: RetryPolicy,
     connectivity: Connectivity,
+    max_done: usize,
 }
 
 /// A fresh idempotency key: `idk_` plus 32 random hex digits.
@@ -496,7 +511,32 @@ impl Outbox {
             entries,
             policy,
             connectivity: Connectivity::default(),
+            max_done: DEFAULT_MAX_DONE,
         })
+    }
+
+    /// Keeps at most `max_done` accepted entries (default [`DEFAULT_MAX_DONE`]) and prunes the
+    /// surplus now.
+    pub fn with_max_done(mut self, cache: &Cache, max_done: usize) -> Result<Self, OutboxError> {
+        self.max_done = max_done;
+        self.prune_done(cache)?;
+        Ok(self)
+    }
+
+    /// Deletes the oldest `Done` entries beyond the retention bound (see [`DEFAULT_MAX_DONE`]).
+    fn prune_done(&mut self, cache: &Cache) -> Result<(), OutboxError> {
+        let done: Vec<i64> = self
+            .entries
+            .values()
+            .filter(|entry| matches!(entry.state, IntentState::Done { .. }))
+            .map(|entry| entry.local_id)
+            .collect();
+        let surplus = done.len().saturating_sub(self.max_done);
+        for local_id in done.into_iter().take(surplus) {
+            self.entries.remove(&local_id);
+            cache.delete_outbox(local_id)?;
+        }
+        Ok(())
     }
 
     pub fn policy(&self) -> RetryPolicy {
@@ -797,6 +837,9 @@ impl Outbox {
         };
         entry.state = state.clone();
         self.save(cache, local_id)?;
+        if matches!(state, IntentState::Done { .. }) {
+            self.prune_done(cache)?;
+        }
         Ok(state)
     }
 

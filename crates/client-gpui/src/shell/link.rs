@@ -84,10 +84,49 @@ pub enum RefusalKind {
 /// A refused `SetSession` / `RemovePending` request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
+    /// The outbox entry behind this refusal; [`Refusal::dismiss`] removes it.
+    pub local_id: i64,
     pub kind: RefusalKind,
     pub status: u16,
     pub error: String,
+    pub dismiss: DismissHandle,
 }
+
+impl Refusal {
+    /// Dismisses the refused outbox entry on the link thread; the next snapshot no longer lists
+    /// this refusal. Does nothing once the link has stopped.
+    pub fn dismiss(&self) {
+        self.dismiss.dismiss(self.local_id);
+    }
+}
+
+/// A way back into the link from a snapshot: dismisses one outbox entry. It holds the command
+/// channel weakly, so a snapshot someone keeps does not keep the link alive. Every handle
+/// compares equal: a refusal is identified by its `local_id`.
+#[derive(Clone)]
+pub struct DismissHandle(mpsc::WeakUnboundedSender<Command>);
+
+impl DismissHandle {
+    fn dismiss(&self, local_id: i64) {
+        if let Some(commands) = self.0.upgrade() {
+            let _ = commands.send(Command::Dismiss(local_id));
+        }
+    }
+}
+
+impl std::fmt::Debug for DismissHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DismissHandle")
+    }
+}
+
+impl PartialEq for DismissHandle {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for DismissHandle {}
 
 fn is_session_or_remove(intent: &Intent) -> bool {
     matches!(
@@ -99,7 +138,12 @@ fn is_session_or_remove(intent: &Intent) -> bool {
 /// Keeps the outbox free of what the composer no longer needs: removals that came too late for
 /// a task the view shows finished, and refusals older than a later accepted request. Returns the
 /// refusals of the thread that are still current.
-fn tidy_outbox(outbox: &mut Outbox, cache: &Cache, view: &ThreadView) -> Vec<Refusal> {
+fn tidy_outbox(
+    outbox: &mut Outbox,
+    cache: &Cache,
+    view: &ThreadView,
+    dismiss_handle: &DismissHandle,
+) -> Vec<Refusal> {
     let thread_id = view.thread_id();
     let last_done = outbox
         .entries()
@@ -144,9 +188,11 @@ fn tidy_outbox(outbox: &mut Outbox, cache: &Cache, view: &ThreadView) -> Vec<Ref
                 };
                 if id == thread_id {
                     refusals.push(Refusal {
+                        local_id: entry.local_id,
                         kind,
                         status: *status,
                         error: error.clone(),
+                        dismiss: dismiss_handle.clone(),
                     });
                 }
             }
@@ -179,6 +225,8 @@ enum Command {
     },
     With(Job),
     Refresh,
+    /// Dismiss one refused outbox entry (see [`Refusal::dismiss`]).
+    Dismiss(i64),
 }
 
 /// The running link. Dropping it stops the connection: its thread ends at the next wake-up.
@@ -201,9 +249,10 @@ impl SessionLink {
         let (publish, feed) = watch::channel(Connectivity::Connecting);
         let (snapshot_tx, snapshots) = watch::channel(None);
         let hub = config.hub.clone();
+        let weak = commands.downgrade();
         std::thread::Builder::new()
             .name("session-link".to_owned())
-            .spawn(move || runtime.block_on(run(config, inbox, publish, snapshot_tx)))
+            .spawn(move || runtime.block_on(run(config, inbox, weak, publish, snapshot_tx)))
             .map_err(|error| error.to_string())?;
         Ok(Self {
             commands,
@@ -309,11 +358,14 @@ struct Core {
     random: SystemRandom,
     connectivity: watch::Sender<Connectivity>,
     snapshots: watch::Sender<Option<ThreadSnapshot>>,
+    /// Weak, so the link still stops when the `SessionLink` is dropped.
+    commands: mpsc::WeakUnboundedSender<Command>,
 }
 
 async fn run(
     config: LinkConfig,
     mut inbox: mpsc::UnboundedReceiver<Command>,
+    commands: mpsc::WeakUnboundedSender<Command>,
     connectivity: watch::Sender<Connectivity>,
     snapshots: watch::Sender<Option<ThreadSnapshot>>,
 ) {
@@ -344,6 +396,7 @@ async fn run(
         random: SystemRandom,
         connectivity,
         snapshots,
+        commands,
     };
     if !initial.is_empty() {
         core.open_thread(&initial, "").await;
@@ -399,6 +452,16 @@ impl Core {
                     self.flush().await;
                     self.publish_snapshot(true);
                 }
+            }
+            Command::Dismiss(local_id) => {
+                let rejected = self
+                    .outbox
+                    .get(local_id)
+                    .is_some_and(|entry| matches!(entry.state, IntentState::Rejected { .. }));
+                if rejected {
+                    let _ = self.outbox.dismiss(&self.cache, local_id);
+                }
+                self.publish_snapshot(true);
             }
             Command::Refresh => {
                 self.flush().await;
@@ -523,7 +586,8 @@ impl Core {
             return;
         };
         let view = sub.sync_mut().view_mut();
-        let refusals = tidy_outbox(&mut self.outbox, &self.cache, view);
+        let handle = DismissHandle(self.commands.clone());
+        let refusals = tidy_outbox(&mut self.outbox, &self.cache, view, &handle);
         approvals.sync(&self.outbox, view);
         let snapshot = ThreadSnapshot {
             thread_id: view.thread_id().to_owned(),

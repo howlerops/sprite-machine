@@ -716,3 +716,71 @@ async fn session_set_rejections_are_terminal() {
         }
     );
 }
+
+#[tokio::test]
+async fn done_entries_are_pruned_to_a_bound_but_refusals_and_conflicts_stay() {
+    use client_core::outbox::DEFAULT_MAX_DONE;
+    let cache = Cache::open_in_memory().expect("cache");
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    let clock = ManualClock::new(0);
+    let mut rng = FixedRandom(0);
+
+    // One refusal and one lost race come first; neither may be pruned for age.
+    let rejected = outbox
+        .enqueue(&cache, set_mode("th_1"), 0)
+        .expect("enqueues");
+    let conflict = outbox
+        .enqueue(&cache, answer("th_1", "int_1", "allow", &user("u")), 0)
+        .expect("enqueues");
+    let transport = Scripted::new(vec![
+        reply(400, json!({"error": "invalid_request"})),
+        reply(409, json!({"error": "already_resolved"})),
+    ]);
+    outbox
+        .flush(&cache, &transport, "http://hub", &clock, &mut rng)
+        .await
+        .expect("flush");
+
+    let total = DEFAULT_MAX_DONE * 3;
+    let mut last = 0;
+    for _ in 0..total {
+        last = outbox.enqueue(&cache, prompt("th_1"), 0).expect("enqueues");
+        let transport = Scripted::new(vec![reply(200, json!({"ok": true}))]);
+        outbox
+            .flush(&cache, &transport, "http://hub", &clock, &mut rng)
+            .await
+            .expect("flush");
+        assert!(
+            outbox.entries().count() <= DEFAULT_MAX_DONE + 2,
+            "the outbox grew past its bound"
+        );
+    }
+
+    let done = outbox
+        .entries()
+        .filter(|entry| matches!(entry.state, IntentState::Done { .. }))
+        .count();
+    assert_eq!(done, DEFAULT_MAX_DONE, "the newest Done entries are kept");
+    assert!(outbox.get(last).is_some(), "the newest entry is kept");
+    assert!(
+        matches!(
+            outbox.get(rejected).map(|entry| &entry.state),
+            Some(IntentState::Rejected { .. })
+        ),
+        "a refusal stays until it is dismissed"
+    );
+    assert_eq!(outbox.conflicts().len(), 1);
+    assert!(outbox.get(conflict).is_some());
+    // The stored rows follow the in-memory queue, and a reload sees the same.
+    assert_eq!(
+        cache.outbox_rows().expect("rows").len(),
+        outbox.entries().count()
+    );
+    let reloaded = Outbox::load(&cache, RetryPolicy::default()).expect("reloads");
+    assert_eq!(reloaded.entries().count(), outbox.entries().count());
+
+    // A smaller bound prunes at once, oldest first.
+    let small = reloaded.with_max_done(&cache, 3).expect("prunes");
+    assert_eq!(small.entries().count(), 3 + 2);
+    assert!(small.get(last).is_some());
+}

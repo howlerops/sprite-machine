@@ -297,6 +297,7 @@ async fn record_write(
         let error = match status {
             409 => "task_started",
             403 => "forbidden",
+            418 => "teapot",
             _ => "invalid_request",
         };
         return (code, Json(json!({ "error": error }))).into_response();
@@ -3023,7 +3024,8 @@ fn refused_mode_change_and_chip_removal_are_named_on_the_composer(cx: &mut TestA
     wait_for_shown(cx, window, "thread-refused-0");
     let text = label_of(cx, window, "thread-refused-0").expect("label");
     assert!(text.contains("mode"), "{text}");
-    assert!(text.contains("invalid_request"), "{text}");
+    assert!(text.contains("The request was not valid."), "{text}");
+    assert!(!text.contains("invalid_request"), "{text}");
 
     cx.update_window(window, |_, window, cx| {
         window.click("queued-remove-tk_q", cx)
@@ -3032,7 +3034,8 @@ fn refused_mode_change_and_chip_removal_are_named_on_the_composer(cx: &mut TestA
     wait_for_shown(cx, window, "thread-refused-1");
     let text = label_of(cx, window, "thread-refused-1").expect("label");
     assert!(text.contains("remove"), "{text}");
-    assert!(text.contains("forbidden"), "{text}");
+    assert!(text.contains("You are not allowed to do that."), "{text}");
+    assert!(!text.contains("forbidden"), "{text}");
 
     // The next successful request clears both.
     state.session_status.store(0, Ordering::SeqCst);
@@ -3042,6 +3045,112 @@ fn refused_mode_change_and_chip_removal_are_named_on_the_composer(cx: &mut TestA
     .expect("window");
     wait_for_gone(cx, window, "thread-refused-0");
     wait_for_gone(cx, window, "thread-refused-1");
+}
+
+/// How many outbox entries are `Rejected`, read on the link thread.
+fn rejected_entries(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+) -> usize {
+    cx.update_window(window, |_, _, cx| {
+        view.read(cx).link().expect("link").with_thread(|access| {
+            access
+                .outbox
+                .entries()
+                .filter(|entry| matches!(entry.state, client_core::IntentState::Rejected { .. }))
+                .count()
+        })
+    })
+    .expect("window")
+    .recv()
+    .expect("outbox")
+}
+
+fn wait_for_rejected(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+    want: usize,
+) {
+    let mut seen = rejected_entries(cx, window, view);
+    for _ in 0..400 {
+        if seen == want {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+        seen = rejected_entries(cx, window, view);
+    }
+    panic!("{seen} rejected entries, wanted {want}");
+}
+
+#[gpui_kit::test]
+fn a_refusal_has_a_dismiss_control_that_removes_the_line_and_the_entry(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.session_status.store(400, Ordering::SeqCst);
+    state.delete_status.store(418, Ordering::SeqCst);
+    let (window, view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-plan");
+    cx.update_window(window, |_, window, cx| window.click("thread-mode-plan", cx))
+        .expect("window");
+    wait_for_shown(cx, window, "thread-refused-0");
+    wait_for_shown(cx, window, "thread-refused-dismiss-0");
+    assert_eq!(rejected_entries(cx, window, &view), 1);
+    // An unmapped code falls back to the code itself.
+    cx.update_window(window, |_, window, cx| {
+        window.click("queued-remove-tk_q", cx)
+    })
+    .expect("window");
+    wait_for_shown(cx, window, "thread-refused-1");
+    let text = label_of(cx, window, "thread-refused-1").expect("label");
+    assert!(text.contains("teapot"), "{text}");
+    assert_eq!(rejected_entries(cx, window, &view), 2);
+
+    // Dismissing the first line drops it and its outbox entry; the other stays.
+    cx.update_window(window, |_, window, cx| {
+        window.click("thread-refused-dismiss-0", cx)
+    })
+    .expect("window");
+    wait_for_gone(cx, window, "thread-refused-1");
+    wait_for_rejected(cx, window, &view, 1);
+    wait_for_shown(cx, window, "thread-refused-0");
+    let text = label_of(cx, window, "thread-refused-0").expect("label");
+    assert!(text.contains("remove"), "{text}");
+    cx.update_window(window, |_, window, cx| {
+        window.click("thread-refused-dismiss-0", cx)
+    })
+    .expect("window");
+    wait_for_gone(cx, window, "thread-refused-0");
+    wait_for_rejected(cx, window, &view, 0);
+}
+
+#[gpui_kit::test]
+fn refusals_clear_when_the_thread_is_switched(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.session_status.store(400, Ordering::SeqCst);
+    let (window, view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-plan");
+    cx.update_window(window, |_, window, cx| window.click("thread-mode-plan", cx))
+        .expect("window");
+    wait_for_shown(cx, window, "thread-refused-0");
+    assert_eq!(rejected_entries(cx, window, &view), 1);
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| {
+            shell.open_thread("th_b", Some("/work/other"), cx)
+        });
+    })
+    .expect("window");
+    wait_for_gone(cx, window, "thread-refused-0");
+    wait_for_rejected(cx, window, &view, 0);
+    // Back on the first thread nothing resurfaces.
+    open_thread_a(cx, window, &view);
+    wait_for_shown(cx, window, "thread-mode-plan");
+    assert!(
+        cx.update_window(window, |_, window, _| window
+            .try_find("thread-refused-0")
+            .is_none())
+            .expect("window")
+    );
 }
 
 #[gpui_kit::test]
