@@ -4104,11 +4104,17 @@ items:
     title: 'client: plan view + cost/context meters'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-008]
     paths:
-      - 'crates/client-gpui/src/task/plan*'
-      - 'crates/client-gpui/src/task/usage*'
+      - "crates/client-gpui/src/task/plan*"
+      - "crates/client-gpui/src/task/usage*"
+      - "crates/client-gpui/src/task/mod.rs"
+      - "crates/client-gpui/locales/en/task.ftl"
+      - "crates/client-gpui/tests/plan_usage.rs"
     context:
       - 'docs/PLAN-v2-ade.md §1.1 (plan, usage rows)'
       - 'docs/specs/turn-event.md (Activity{plan}, StateDelta{usage})'
