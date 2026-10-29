@@ -30,7 +30,10 @@ use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
 use crate::compose::{ComposerEvent, ThreadComposer};
-use crate::inbox::InboxEvent;
+use crate::inbox::{Filters, InboxEvent};
+use crate::notify::{
+    EventQueue, Notifier, NotifyConfig, NotifyEvent, NotifySettingsView, ToastSink, hub_link_thread,
+};
 use crate::palette::{
     self, CommandId, NextThread, OpenPalette, PaletteEvent, PaletteView, PreviousThread, ShortcutId,
 };
@@ -41,6 +44,9 @@ use crate::task::{
 actions!(shell, [GoNewTask, NextSection, PreviousSection]);
 
 const CONTEXT: &str = "Shell";
+
+/// How often clicks on notifications are picked up.
+pub const NOTIFY_TICK: Duration = Duration::from_millis(100);
 
 /// How often the open thread's approval cards are recomputed (time left).
 pub const APPROVAL_TICK: Duration = Duration::from_secs(1);
@@ -132,6 +138,23 @@ pub struct AppShell {
     hub_feedback: Option<HubOutcome>,
     /// Why the shell is on the login screen without the user having signed out.
     notice: Option<String>,
+    /// Decides which inbox changes notify; shows them through `toasts`.
+    notifier: Notifier,
+    toasts: ToastSink,
+    /// Clicks on notifications, waiting for [`AppShell::pump_notifications`].
+    notify_events: EventQueue,
+    notify_settings: Entity<NotifySettingsView>,
+    /// Whether the window is the active one; a background window notifies for every thread.
+    window_active: bool,
+    /// Toasts shown so far.
+    toasts_shown: usize,
+    /// The first inbox list is a baseline, not a burst of notifications.
+    inbox_seeded: bool,
+    /// [`crate::inbox::InboxView::lists_applied`] as of the last look.
+    lists_seen: u64,
+    _inbox_lists: Subscription,
+    _activation: Subscription,
+    _notify_task: Option<Task<()>>,
 }
 
 impl AppShell {
@@ -151,6 +174,7 @@ impl AppShell {
             .as_deref()
             .and_then(|p| p.parent())
             .map(|dir| dir.join("approval-presets.json"));
+        let notify_dir = draft_dir.clone();
         let link_retry =
             Duration::from_millis((1000 / u64::from(config.poll_speedup.max(1))).max(5));
         let model = ShellModel::new(config.store, config.prefs, config.prefs_path, &config.hub);
@@ -173,6 +197,25 @@ impl AppShell {
             } = event;
             this.open_thread(thread_id, workspace.as_deref(), cx);
         });
+        let inbox_lists = cx.observe_in(&inbox, window, |this, _, window, cx| {
+            this.on_inbox_changed(window, cx);
+        });
+        let activation = cx.observe_window_activation(window, |this, window, cx| {
+            let active = window.is_window_active();
+            this.set_window_active(active, cx);
+        });
+        let notify_events = EventQueue::default();
+        let toasts = ToastSink::new(notify_events.clone());
+        let notify_prefs_path = notify_dir
+            .unwrap_or_else(std::env::temp_dir)
+            .join("notifications.json");
+        let notifier = Notifier::new(
+            &NotifyConfig {
+                prefs_path: notify_prefs_path,
+            },
+            Box::new(toasts.clone()),
+        );
+        let notify_settings = cx.new(|_| NotifySettingsView::new(notifier.prefs().clone()));
         let palette = cx.new(|cx| PaletteView::new(window, cx));
         let palette_events = cx.subscribe_in(&palette, window, Self::on_palette_event);
         let pane = cx.new(|_| TranscriptPane::new());
@@ -214,7 +257,19 @@ impl AppShell {
             cache_path,
             hub_feedback: None,
             notice: None,
+            notifier,
+            toasts,
+            notify_events,
+            notify_settings,
+            window_active: true,
+            toasts_shown: 0,
+            inbox_seeded: false,
+            lists_seen: 0,
+            _inbox_lists: inbox_lists,
+            _activation: activation,
+            _notify_task: None,
         };
+        shell.start_notify_task(window, cx);
         shell.apply_theme(window, cx);
         shell.refresh_link(cx);
         shell
@@ -252,6 +307,8 @@ impl AppShell {
                 self.snapshot_task = None;
                 self.tick_task = None;
                 self.open_thread = None;
+                self.inbox_seeded = false;
+                self.sync_notify_focus();
                 self.set_connectivity(Connectivity::Connecting, cx);
             }
             return;
@@ -279,6 +336,11 @@ impl AppShell {
             }
             Err(_) => self.set_connectivity(Connectivity::Offline, cx),
         }
+    }
+
+    /// The inbox list.
+    pub fn inbox(&self) -> &Entity<crate::inbox::InboxView> {
+        &self.inbox
     }
 
     /// The new-task composer.
@@ -377,6 +439,111 @@ impl AppShell {
         }
     }
 
+    // ---- notifications and links --------------------------------------------------------------
+
+    /// The thread that must not notify: the open one while the window is the active one.
+    fn sync_notify_focus(&mut self) {
+        let focused = if self.window_active {
+            self.open_thread.as_deref()
+        } else {
+            None
+        };
+        self.notifier.set_focused(focused);
+    }
+
+    /// Tell the shell the window went to the foreground or the background. A background window
+    /// notifies for the open thread too.
+    pub fn set_window_active(&mut self, active: bool, _cx: &mut Context<Self>) {
+        self.window_active = active;
+        self.sync_notify_focus();
+    }
+
+    /// The notifier's prefs, shared with the notification settings.
+    pub fn notify_settings(&self) -> &Entity<NotifySettingsView> {
+        &self.notify_settings
+    }
+
+    /// Clicks on notifications queue here; [`AppShell::pump_notifications`] acts on them.
+    pub fn notify_events(&self) -> EventQueue {
+        self.notify_events.clone()
+    }
+
+    /// How many toasts the shell has shown.
+    pub fn toasts_shown(&self) -> usize {
+        self.toasts_shown
+    }
+
+    /// Show the queued toasts and act on the clicked ones (`Open` opens the thread).
+    pub fn pump_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toasts_shown += self.toasts.flush(window, cx);
+        for event in self.notify_events.drain() {
+            match event {
+                NotifyEvent::Open { thread_id } => self.open_inbox_thread(&thread_id, cx),
+            }
+        }
+    }
+
+    fn start_notify_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self._notify_task = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(NOTIFY_TICK).await;
+                if this
+                    .update_in(cx, |this, window, cx| this.pump_notifications(window, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// A fetched inbox list is in: the first one is the baseline, later ones notify for threads
+    /// that moved to `needs_you`, `done` or `failed`. A filtered or searched list is not looked at:
+    /// it holds threads the user has not seen change.
+    fn on_inbox_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let inbox = self.inbox.read(cx);
+        let applied = inbox.lists_applied();
+        if applied == self.lists_seen {
+            return;
+        }
+        self.lists_seen = applied;
+        let model = inbox.model();
+        if *model.filters() != Filters::default() || !model.search_text().trim().is_empty() {
+            return;
+        }
+        let rows: Vec<(String, &'static str)> = model
+            .rows()
+            .iter()
+            .map(|row| (row.thread_id.clone(), row.status.as_query()))
+            .collect();
+        let threads = rows.iter().map(|(id, status)| (id.as_str(), *status));
+        if self.inbox_seeded {
+            self.notifier.observe_all(threads);
+        } else {
+            self.notifier.seed(threads);
+            self.inbox_seeded = true;
+        }
+        self.pump_notifications(window, cx);
+    }
+
+    /// Open a hub link (`https://<hub>/t/<thread_id>`) in the app. Returns whether it opened a
+    /// thread; any other URL is ignored.
+    pub fn open_url(&mut self, url: &str, cx: &mut Context<Self>) -> bool {
+        let hub = self
+            .model
+            .session()
+            .map(|session| session.hub.clone())
+            .unwrap_or_else(|| self.model.hub().to_string());
+        let Some(thread_id) = hub_link_thread(url, &hub) else {
+            return false;
+        };
+        if self.link.is_none() {
+            return false;
+        }
+        self.open_inbox_thread(&thread_id, cx);
+        true
+    }
+
     /// The thread the Inbox page shows, if one was opened.
     pub fn open_thread_id(&self) -> Option<&str> {
         self.open_thread.as_deref()
@@ -455,6 +622,7 @@ impl AppShell {
         self.pane
             .update(cx, |pane, cx| pane.set_workspace_root(root, cx));
         self.model.nav.select(Section::Inbox);
+        self.sync_notify_focus();
         cx.notify();
     }
 
@@ -464,6 +632,7 @@ impl AppShell {
             if let Some(link) = &self.link {
                 link.forget_refusals();
             }
+            self.sync_notify_focus();
             cx.notify();
         }
     }
@@ -1007,6 +1176,7 @@ impl AppShell {
                         el.child(Self::status("hub-feedback", hub_feedback_text(outcome), cx))
                     }),
             )
+            .child(self.notify_settings.clone())
             .child(
                 div()
                     .id("account")

@@ -40,6 +40,7 @@ use client_gpui::task::usage::{
 };
 use gpui_kit::Focusable as _;
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
     AppContext, Bounds, Entity, Point, TestAppContext, WindowBounds, WindowOptions, px, size,
@@ -3251,4 +3252,230 @@ fn a_started_removal_is_dropped_from_the_outbox_once_its_task_finished(cx: &mut 
         left = lingering(cx);
     }
     assert_eq!(left, 0, "the conflict lingers in the outbox");
+}
+
+// ---- notifications, hub links, notification settings --------------------------------------------
+
+/// Fetch the inbox list again and wait for it to land (the refresh runs on a worker).
+fn refresh_inbox(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+) {
+    let applied =
+        |cx: &mut TestAppContext| cx.update(|cx| view.read(cx).inbox().read(cx).lists_applied());
+    let before = applied(cx);
+    cx.update_window(window, |_, window, cx| {
+        let inbox = view.read(cx).inbox().clone();
+        inbox.update(cx, |inbox, cx| inbox.refresh(window, cx));
+    })
+    .expect("window");
+    for _ in 0..400 {
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        if applied(cx) > before {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("the inbox list never landed");
+}
+
+fn toasts(cx: &mut TestAppContext, view: &Entity<AppShell>) -> usize {
+    cx.update(|cx| view.read(cx).toasts_shown())
+}
+
+fn set_status(state: &HubState, thread: &str, status: &str) {
+    for row in state.threads.lock().expect("lock").iter_mut() {
+        if row["thread_id"] == thread {
+            row["status"] = json!(status);
+        }
+    }
+}
+
+fn notify_shell(
+    cx: &mut TestAppContext,
+    rows: Vec<Value>,
+) -> (
+    Arc<HubState>,
+    String,
+    gpui_kit::AnyWindowHandle,
+    Entity<AppShell>,
+) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    *state.threads.lock().expect("lock") = rows;
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    wait_for_inbox(cx, window, "inbox-open-th_a");
+    (state, hub, window, view)
+}
+
+#[gpui_kit::test]
+fn a_thread_moving_to_needs_you_notifies_once_and_the_first_fetch_is_only_a_baseline(
+    cx: &mut TestAppContext,
+) {
+    let (state, _hub, window, view) = notify_shell(
+        cx,
+        vec![
+            inbox_row("th_a", "Fix login", "running", "/work/repo"),
+            inbox_row("th_b", "Already waiting", "needs_you", "/work/repo"),
+        ],
+    );
+    assert_eq!(toasts(cx, &view), 0, "the seeded list shows no toast");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 0, "the same statuses show none");
+
+    set_status(&state, "th_a", "needs_you");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 1);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.notifications(cx).len(),
+            1,
+            "the toast is in the window"
+        );
+    })
+    .expect("window");
+
+    refresh_inbox(cx, window, &view);
+    assert_eq!(
+        toasts(cx, &view),
+        1,
+        "a second refresh with the same status shows none"
+    );
+}
+
+#[gpui_kit::test]
+fn the_open_thread_does_not_notify_unless_the_window_is_in_the_background(cx: &mut TestAppContext) {
+    let (state, _hub, window, view) = notify_shell(
+        cx,
+        vec![
+            inbox_row("th_a", "Fix login", "running", "/work/repo"),
+            inbox_row("th_b", "Other", "running", "/work/other"),
+        ],
+    );
+    cx.update_window(window, |_, window, cx| {
+        window.click("inbox-open-th_a", cx);
+    })
+    .expect("window");
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), Some("th_a")));
+
+    set_status(&state, "th_a", "needs_you");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 0, "the thread on screen stays quiet");
+
+    // The window goes to the background: the open thread notifies like any other.
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.set_window_active(false, cx));
+    })
+    .expect("window");
+    set_status(&state, "th_a", "done");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 1);
+
+    // Back in front, a thread that is not the open one still notifies.
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.set_window_active(true, cx));
+    })
+    .expect("window");
+    set_status(&state, "th_b", "needs_you");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 2);
+}
+
+#[gpui_kit::test]
+fn a_failed_transition_notifies(cx: &mut TestAppContext) {
+    let (state, _hub, window, view) = notify_shell(
+        cx,
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")],
+    );
+    set_status(&state, "th_a", "failed");
+    refresh_inbox(cx, window, &view);
+    assert_eq!(toasts(cx, &view), 1);
+}
+
+#[gpui_kit::test]
+fn a_click_on_a_notification_opens_its_thread(cx: &mut TestAppContext) {
+    let (state, _hub, window, view) = notify_shell(
+        cx,
+        vec![
+            inbox_row("th_a", "Fix login", "running", "/work/repo"),
+            inbox_row("th_b", "Other", "running", "/work/other"),
+        ],
+    );
+    assert!(state.subscribed.lock().expect("lock").is_empty());
+    let events = cx.update(|cx| view.read(cx).notify_events());
+    events.push(client_gpui::notify::NotifyEvent::Open {
+        thread_id: "th_b".to_owned(),
+    });
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |shell, cx| shell.pump_notifications(window, cx));
+    })
+    .expect("window");
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), Some("th_b")));
+    wait_until_true("a subscription to th_b", || {
+        *state.subscribed.lock().expect("lock") == ["th_b"]
+    });
+}
+
+#[gpui_kit::test]
+fn a_hub_link_opens_its_thread_and_other_urls_are_ignored(cx: &mut TestAppContext) {
+    let (state, hub, window, view) = notify_shell(
+        cx,
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")],
+    );
+    let open = |cx: &mut TestAppContext, url: &str| {
+        let url = url.to_owned();
+        cx.update_window(window, |_, _, cx| {
+            view.update(cx, |shell, cx| shell.open_url(&url, cx))
+        })
+        .expect("window")
+    };
+    for url in [
+        "https://evil.test/t/th_b".to_owned(),
+        format!("{hub}/threads/th_b"),
+        format!("{hub}/t/th_b/extra"),
+        "not a url".to_owned(),
+    ] {
+        assert!(!open(cx, &url), "{url}");
+    }
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), None));
+    assert!(state.subscribed.lock().expect("lock").is_empty());
+
+    assert!(open(cx, &format!("{hub}/t/th_b")));
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), Some("th_b")));
+    wait_until_true("a subscription to th_b", || {
+        *state.subscribed.lock().expect("lock") == ["th_b"]
+    });
+}
+
+#[gpui_kit::test]
+fn the_notification_settings_are_on_the_settings_page(cx: &mut TestAppContext) {
+    let (_state, _hub, window, view) = notify_shell(
+        cx,
+        vec![inbox_row("th_a", "Fix login", "running", "/work/repo")],
+    );
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("notify-settings").is_none());
+        view.update(cx, |shell, cx| shell.select(Section::Settings, cx));
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("notify-settings").label(),
+            Some("Notification settings")
+        );
+        assert!(window.try_find("notify-row-needs_you").is_some());
+        assert!(window.try_find("notify-row-failed").is_some());
+    })
+    .expect("window");
 }

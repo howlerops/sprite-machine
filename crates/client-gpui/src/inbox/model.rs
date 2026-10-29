@@ -49,6 +49,9 @@ pub enum Status {
     Running,
     NeedsYou,
     Done,
+    /// The last run failed. Not one of the four names client-api.md §5.2 lists today (the hub
+    /// folds a failed run into `done`), so it appears only when a hub reports `failed`.
+    Failed,
 }
 
 impl Status {
@@ -57,6 +60,7 @@ impl Status {
             "running" => Self::Running,
             "needs_you" => Self::NeedsYou,
             "done" => Self::Done,
+            "failed" => Self::Failed,
             _ => Self::Idle,
         }
     }
@@ -68,6 +72,7 @@ impl Status {
             Self::Running => "running",
             Self::NeedsYou => "needs_you",
             Self::Done => "done",
+            Self::Failed => "failed",
         }
     }
 }
@@ -96,7 +101,7 @@ impl Section {
         match status {
             Status::NeedsYou => Self::NeedsYou,
             Status::Running => Self::Running,
-            Status::Done | Status::Idle => Self::Done,
+            Status::Done | Status::Failed | Status::Idle => Self::Done,
         }
     }
 }

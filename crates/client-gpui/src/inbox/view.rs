@@ -72,6 +72,8 @@ pub struct InboxView {
     model: InboxModel,
     target: Option<Target>,
     loading: bool,
+    /// How many list answers the model has taken; the shell compares it to see a new fetch.
+    lists_applied: u64,
     list_rx: Option<(u64, Receiver<ListAnswer>)>,
     op_rx: Vec<(u64, Receiver<OpAnswer>)>,
     renaming: Option<String>,
@@ -124,6 +126,7 @@ impl InboxView {
             model: InboxModel::new(clock),
             target: None,
             loading: false,
+            lists_applied: 0,
             list_rx: None,
             op_rx: Vec::new(),
             renaming: None,
@@ -138,6 +141,13 @@ impl InboxView {
 
     pub fn model(&self) -> &InboxModel {
         &self.model
+    }
+
+    /// How many fetched lists the model has taken so far. It grows by one for every list that
+    /// replaced the rows (a late answer to an older request does not count), so an observer can
+    /// tell a fresh fetch from any other repaint.
+    pub fn lists_applied(&self) -> u64 {
+        self.lists_applied
     }
 
     pub fn search_input(&self) -> &Entity<InputState> {
@@ -224,7 +234,9 @@ impl InboxView {
                 self.loading = false;
                 match answer {
                     Ok(rows) => {
-                        self.model.apply_list(generation, rows);
+                        if self.model.apply_list(generation, rows) {
+                            self.lists_applied += 1;
+                        }
                     }
                     Err(failure) => {
                         if generation == self.model_generation() {
@@ -623,6 +635,7 @@ impl InboxView {
                 Status::NeedsYou => "needs_you",
                 Status::Running => "running",
                 Status::Done | Status::Idle => "done",
+                Status::Failed => "failed",
             }
         ));
         let meta = [
