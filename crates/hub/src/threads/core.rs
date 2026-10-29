@@ -909,15 +909,19 @@ impl<S: ThreadStore> ThreadCore<S> {
             if !open.is_empty() {
                 status = STATUS_WAITING;
             }
-            pending_interrupts.extend(
-                open.into_iter()
-                    .filter(|record| record.kind == InterruptKind::Approval)
-                    .map(|record| PendingInterrupt {
-                        interrupt_id: record.interrupt_id,
-                        title: record.title,
-                        options: record.options,
-                    }),
-            );
+            pending_interrupts.extend(open.into_iter().map(|record| {
+                // Only an approval has options to answer with; a form or auth request has none.
+                let options = match record.kind {
+                    InterruptKind::Approval => record.options,
+                    InterruptKind::Form | InterruptKind::Auth => Vec::new(),
+                };
+                PendingInterrupt {
+                    interrupt_id: record.interrupt_id,
+                    title: record.title,
+                    kind: record.kind,
+                    options,
+                }
+            }));
         }
         // `done`: the last task ended in success and nothing is running or queued. It lasts
         // until the next prompt (`finished_ok` is cleared by the next `UserMessage`).

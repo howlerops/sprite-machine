@@ -158,7 +158,7 @@ pub struct ThreadSummary {
     /// The thread's workspace path; empty when the thread has none (listed as `null`).
     pub workspace_path: String,
     pub archived: bool,
-    /// The open approval interrupts; only `needs_you` rows have any.
+    /// The open interrupts (approval, form, auth); only `needs_you` rows have any.
     pub pending_interrupts: Vec<PendingInterrupt>,
     /// The row's `seq`, the tie-breaker of the cursor.
     pub seq: i64,
@@ -251,7 +251,8 @@ pub async fn list_threads(
     rows.iter().map(summary_from_row).collect()
 }
 
-/// The row's `pending_interrupts` JSON; a malformed or missing value reads as none.
+/// The row's `pending_interrupts` JSON (every open interrupt of a `needs_you` row); a malformed
+/// or missing value reads as none.
 fn parse_pending(row: &Row) -> Vec<PendingInterrupt> {
     text(row, "pending_interrupts")
         .ok()

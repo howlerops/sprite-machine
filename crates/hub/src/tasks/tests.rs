@@ -9,7 +9,7 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use protocol::tunnel::{Actor, ActorKind};
-use protocol::turn_event::{Envelope, StateDelta, StateScope, UserMessage};
+use protocol::turn_event::{Envelope, InterruptKind, StateDelta, StateScope, UserMessage};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 use serde_json::Value;
@@ -536,15 +536,24 @@ fn rows_carry_workspace_archived_and_the_pending_approvals_of_needs_you_rows() {
     let at = "2026-10-28T10:00:00.000Z";
     let mut waiting = row("th_wait", "waits", at);
     waiting.status = STATUS_WAITING;
-    waiting.pending_interrupts = vec![PendingInterrupt {
-        interrupt_id: "int_1".to_owned(),
-        title: "Run cargo test?".to_owned(),
-        options: vec![InterruptOption {
-            option_id: "opt_a".to_owned(),
-            name: "Allow".to_owned(),
-            kind: PermissionOptionKind::AllowOnce,
-        }],
-    }];
+    waiting.pending_interrupts = vec![
+        PendingInterrupt {
+            interrupt_id: "int_1".to_owned(),
+            title: "Run cargo test?".to_owned(),
+            kind: InterruptKind::Approval,
+            options: vec![InterruptOption {
+                option_id: "opt_a".to_owned(),
+                name: "Allow".to_owned(),
+                kind: PermissionOptionKind::AllowOnce,
+            }],
+        },
+        PendingInterrupt {
+            interrupt_id: "int_2".to_owned(),
+            title: "Which branch?".to_owned(),
+            kind: InterruptKind::Form,
+            options: Vec::new(),
+        },
+    ];
     block_on(upsert(&db, "org_a", &waiting)).expect("waiting");
     let mut bare = row("th_bare", "no workspace", "2026-10-28T09:00:00.000Z");
     bare.workspace_path = String::new();
@@ -559,11 +568,20 @@ fn rows_carry_workspace_archived_and_the_pending_approvals_of_needs_you_rows() {
     assert_eq!(json[0]["archived"], false);
     assert_eq!(
         json[0]["pending_interrupts"],
-        serde_json::json!([{
-            "interrupt_id": "int_1",
-            "title": "Run cargo test?",
-            "options": [{ "option_id": "opt_a", "name": "Allow", "kind": "allow_once" }],
-        }])
+        serde_json::json!([
+            {
+                "interrupt_id": "int_1",
+                "title": "Run cargo test?",
+                "kind": "approval",
+                "options": [{ "option_id": "opt_a", "name": "Allow", "kind": "allow_once" }],
+            },
+            {
+                "interrupt_id": "int_2",
+                "title": "Which branch?",
+                "kind": "form",
+                "options": [],
+            },
+        ])
     );
     assert_eq!(json[1]["workspace"], Value::Null);
     assert_eq!(json[1]["archived"], true);
