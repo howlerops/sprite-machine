@@ -19,7 +19,7 @@
 //! | `POST /v1/dev/threads/{id}/events`                   | same, and 404 unless `DEV_FIXTURES=1` |
 //!
 //! Roles and audit (M2-003a, `auth/policy.rs`): reads need viewer; prompts, approvals and cancel
-//! need member; deleting a pending task needs admin. Every mutation writes an audit row first.
+//! need member, and so does deleting a pending task (M2-008k). Every mutation writes an audit row first.
 //!
 //! The authenticated actor travels to the DO in the `x-sm-actor` header; a client-supplied one
 //! is overwritten. The DO's `/internal/...` routes are not registered here, so only another
