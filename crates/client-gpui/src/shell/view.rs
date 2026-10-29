@@ -35,6 +35,7 @@ pub fn init(cx: &mut App) {
     } else {
         "ctrl-n"
     };
+    crate::compose::init(cx);
     cx.bind_keys([
         KeyBinding::new(new_task, GoNewTask, Some(CONTEXT)),
         KeyBinding::new("ctrl-tab", NextSection, Some(CONTEXT)),
@@ -58,6 +59,7 @@ pub struct AppShell {
     driver: LoginDriver,
     focus: FocusHandle,
     hub_input: Entity<InputState>,
+    compose: Entity<crate::compose::ComposeView>,
     _appearance: Subscription,
     _hub_input_events: Subscription,
     connectivity_task: Option<Task<()>>,
@@ -65,6 +67,11 @@ pub struct AppShell {
 
 impl AppShell {
     pub fn new(config: AppConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let draft_dir = config
+            .prefs_path
+            .as_deref()
+            .and_then(|p| p.parent())
+            .map(PathBuf::from);
         let model = ShellModel::new(config.store, config.prefs, config.prefs_path, &config.hub);
         let driver = LoginDriver::new(model.hub().to_string(), config.browser)
             .with_sleep_divisor(config.poll_speedup);
@@ -75,11 +82,13 @@ impl AppShell {
         let hub = model.hub().to_string();
         let hub_input = cx.new(|cx| InputState::new(window, cx).default_value(hub));
         let hub_input_events = cx.subscribe_in(&hub_input, window, Self::on_hub_event);
+        let compose = cx.new(|cx| crate::compose::ComposeView::new(draft_dir, window, cx));
         let shell = Self {
             model,
             driver,
             focus,
             hub_input,
+            compose,
             _appearance: appearance,
             _hub_input_events: hub_input_events,
             connectivity_task: None,
@@ -340,6 +349,8 @@ impl AppShell {
             }));
         let content = if current == Section::Settings {
             self.render_settings(slots, cx).into_any_element()
+        } else if current == Section::NewTask {
+            self.compose.clone().into_any_element()
         } else {
             let text = tr_args("content-placeholder", &[("section", &current.title())]);
             div().child(text).into_any_element()
@@ -502,6 +513,12 @@ impl Render for AppShell {
         if window.focused(cx).is_none() {
             window.focus(&self.focus, cx);
         }
+        let target = self.model.session().map(|session| crate::compose::Target {
+            api: format!("{}/v1", session.hub.trim_end_matches('/')),
+            token: Some(session.grant.token.clone()),
+        });
+        self.compose
+            .update(cx, |compose, cx| compose.set_target(target, window, cx));
         let slots = self.model.focus_order();
         let body = match self.model.screen() {
             Screen::Login => self.render_login(&slots, cx).into_any_element(),
