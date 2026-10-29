@@ -444,6 +444,41 @@ fn a_list_needs_a_session_and_a_valid_query() {
     assert_eq!(bad_status.json()["error"], "invalid_request");
 }
 
+#[test]
+fn failed_and_cancelled_are_status_filters_that_never_match_a_done_thread() {
+    let dev = "dev";
+    let mch = machine(dev);
+    let thread = create_thread(dev, &mch, Some("Finishes ok"), None);
+    let task = unique("tk");
+    assert_eq!(prompt(&thread, &task).status, 202);
+    runner_event(
+        &thread,
+        &task,
+        "run_a",
+        json!({ "type": "RunStarted", "reason": "prompt" }),
+    );
+    runner_event(
+        &thread,
+        &task,
+        "run_a",
+        json!({ "type": "RunFinished", "outcome": { "type": "success", "stop_reason": "end_turn" } }),
+    );
+    let query = format!("machine_id={mch}");
+    let has = |wanted: &str| listed(dev, &format!("{query}&status={wanted}")).contains(&thread);
+    assert!(has("done"));
+    assert!(!has("failed") && !has("cancelled"));
+    for wanted in ["failed", "cancelled"] {
+        let reply = http(
+            "GET",
+            &format!("/v1/threads?{query}&status={wanted}"),
+            Some(dev),
+            &[],
+            None,
+        );
+        assert_eq!(reply.status, 200, "{wanted}: {}", reply.body);
+    }
+}
+
 /// A runner event on `thread` through the dev append route (needs `DEV_FIXTURES=1`).
 fn runner_event(thread: &str, task: &str, run: &str, event: Value) {
     let envelope = json!({

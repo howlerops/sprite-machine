@@ -16,15 +16,20 @@ const STATUS_NAMES: &[(&str, &[&str])] = &[
     ("idle", &["open"]),
     ("running", &["running"]),
     ("needs_you", &["waiting"]),
-    ("done", &["done", "failed", "cancelled"]),
+    ("done", &["done"]),
+    ("failed", &["failed"]),
+    ("cancelled", &["cancelled"]),
 ];
 
-/// The client status of a stored task status (`open` is `idle`, `waiting` is `needs_you`).
+/// The client status of a stored task status (`open` is `idle`, `waiting` is `needs_you`;
+/// `failed` and `cancelled` are reported as themselves, not folded into `done`).
 pub fn api_status(stored: &str) -> &'static str {
     match stored {
         "open" => "idle",
         "running" => "running",
         "waiting" => "needs_you",
+        "failed" => "failed",
+        "cancelled" => "cancelled",
         _ => "done",
     }
 }
@@ -97,7 +102,7 @@ pub fn parse_list_query(raw: Option<&str>) -> Result<ListQuery, ApiError> {
                     .map(|(_, stored)| stored.to_vec())
                     .ok_or_else(|| {
                         ApiError::invalid_request(
-                            "status must be one of idle, running, needs_you, done",
+                            "status must be one of idle, running, needs_you, done, failed, cancelled",
                         )
                     })?;
                 query.statuses = statuses;
@@ -188,6 +193,10 @@ mod tests {
         .expect("parse");
         assert_eq!(query.machine_id.as_deref(), Some("mch_1"));
         assert_eq!(query.statuses, vec!["waiting"]);
+        let status = |raw| parse_list_query(Some(raw)).expect("parse").statuses;
+        assert_eq!(status("status=done"), vec!["done"]);
+        assert_eq!(status("status=failed"), vec!["failed"]);
+        assert_eq!(status("status=cancelled"), vec!["cancelled"]);
         assert_eq!(query.agent.as_deref(), Some("claude"));
         assert_eq!(query.workspace_path.as_deref(), Some("/src/app"));
         assert_eq!(query.q.as_deref(), Some("fix login"));
@@ -223,6 +232,9 @@ mod tests {
     fn api_status_maps_every_stored_status() {
         assert_eq!(api_status("open"), "idle");
         assert_eq!(api_status("waiting"), "needs_you");
-        assert_eq!(api_status("cancelled"), "done");
+        assert_eq!(api_status("done"), "done");
+        assert_eq!(api_status("failed"), "failed");
+        assert_eq!(api_status("cancelled"), "cancelled");
+        assert_eq!(api_status("unknown"), "done");
     }
 }

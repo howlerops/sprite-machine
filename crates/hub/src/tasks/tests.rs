@@ -530,6 +530,33 @@ fn a_done_status_is_listed_as_done_and_found_by_the_status_filter() {
 }
 
 #[test]
+fn failed_and_cancelled_rows_are_reported_as_themselves_and_filtered_apart_from_done() {
+    let db = Fake::new();
+    let at = "2026-10-28T10:00:00.000Z";
+    let mut done = row("th_done", "ok", at);
+    done.status = STATUS_DONE;
+    let mut failed = row("th_failed", "bad", at);
+    failed.status = "failed";
+    let mut cancelled = row("th_cancelled", "stopped", at);
+    cancelled.status = "cancelled";
+    for each in [&done, &failed, &cancelled] {
+        block_on(upsert(&db, "org_a", each)).expect("upsert");
+    }
+    let by = |raw: &str| list(&db, "org_a", &parse_list_query(Some(raw)).expect("query"));
+    assert_eq!(by("status=done"), ["th_done"]);
+    assert_eq!(by("status=failed"), ["th_failed"]);
+    assert_eq!(by("status=cancelled"), ["th_cancelled"]);
+    let rows = block_on(list_threads(&db, "org_a", &ListQuery::default(), 10)).expect("list");
+    let status_of = |id: &str| {
+        let row = rows.iter().find(|row| row.thread_id == id).expect("row");
+        row.to_json()["status"].clone()
+    };
+    assert_eq!(status_of("th_failed"), "failed");
+    assert_eq!(status_of("th_cancelled"), "cancelled");
+    assert_eq!(status_of("th_done"), "done");
+}
+
+#[test]
 fn rows_carry_workspace_archived_and_the_pending_approvals_of_needs_you_rows() {
     use protocol::turn_event::{InterruptOption, PermissionOptionKind};
     let db = Fake::new();
