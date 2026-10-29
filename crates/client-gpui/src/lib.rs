@@ -10,6 +10,7 @@ pub mod loadout;
 pub mod local;
 pub mod machines;
 pub mod notify;
+pub mod onboarding;
 pub mod palette;
 pub mod settings;
 pub mod shell;

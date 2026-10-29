@@ -46,7 +46,13 @@ pub enum InboxEvent {
         thread_id: String,
         workspace: Option<String>,
     },
+    /// The empty list's primary action: start a task.
+    NewTask,
 }
+
+/// Element ids of the empty state's two actions: one shows at a time.
+pub const EMPTY_NEW_TASK_ID: &str = "inbox-empty-action-new";
+pub const EMPTY_CLEAR_FILTERS_ID: &str = "inbox-empty-action-clear";
 
 impl EventEmitter<InboxEvent> for InboxView {}
 
@@ -331,6 +337,25 @@ impl InboxView {
 
     // ---- user intents ---------------------------------------------------------------------
 
+    /// The empty state's action for a list that is empty because of filters or a search: drop
+    /// them all and fetch again.
+    pub fn clear_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.model.set_status_filter(None);
+        self.model.set_agent_filter(None);
+        self.model.set_workspace_filter("");
+        for input in [self.workspace.clone(), self.search.clone()] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        self.model.set_search("");
+        self.refresh(window, cx);
+        cx.notify();
+    }
+
+    /// The empty state's action for a list that is empty because there are no tasks.
+    pub fn request_new_task(&mut self, cx: &mut Context<Self>) {
+        cx.emit(InboxEvent::NewTask);
+    }
+
     pub fn set_status_filter(
         &mut self,
         status: Option<Status>,
@@ -460,6 +485,22 @@ impl InboxView {
     }
 
     // ---- rendering ------------------------------------------------------------------------
+
+    /// Whether the list is empty with nothing else to say (no error, loaded, signed in), and if
+    /// so whether filters or a search are the reason.
+    fn empty_state(&self) -> Option<bool> {
+        let settled = self.model.error().is_none()
+            && self.target.is_some()
+            && !self.loading
+            && self.model.rows().is_empty();
+        settled.then(|| {
+            let f = self.model.filters();
+            f.status.is_some()
+                || f.agent.is_some()
+                || !f.workspace.is_empty()
+                || !self.model.search_text().is_empty()
+        })
+    }
 
     fn status_text(&self) -> String {
         if let Some(detail) = self.model.error() {
@@ -819,6 +860,7 @@ impl Render for InboxView {
             self.rebuild();
         }
         let status = self.status_text();
+        let empty = self.empty_state();
         let items = Rc::new(self.model.items());
         v_flex()
             .id("inbox")
@@ -846,6 +888,36 @@ impl Render for InboxView {
                     .text_color(cx.theme().muted_foreground)
                     .child(status),
             )
+            .when_some(empty, |el, filtered| {
+                let (id, label, a11y) = if filtered {
+                    (
+                        EMPTY_CLEAR_FILTERS_ID,
+                        tr("inbox-empty-clear-filters"),
+                        tr("inbox-empty-clear-filters-a11y"),
+                    )
+                } else {
+                    (
+                        EMPTY_NEW_TASK_ID,
+                        tr("inbox-empty-new-task"),
+                        tr("inbox-empty-new-task-a11y"),
+                    )
+                };
+                el.child(
+                    div().child(
+                        Button::new(id)
+                            .primary()
+                            .label(label)
+                            .accessibility_label(a11y)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if filtered {
+                                    this.clear_filters(window, cx);
+                                } else {
+                                    this.request_new_task(cx);
+                                }
+                            })),
+                    ),
+                )
+            })
             .child(
                 div()
                     .id(LIST_ID)

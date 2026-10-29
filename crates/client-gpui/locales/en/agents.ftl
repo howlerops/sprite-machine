@@ -41,3 +41,5 @@ agents-error-model-required = Enter a model.
 agents-error-egress-invalid = Not a valid host name: { $value }
 agents-launch-ok = Launched agent { $id }.
 agents-launch-failed = Could not launch the agent: { $reason }
+agents-empty-setup = Connect a machine
+agents-empty-setup-a11y = Show how to connect a machine

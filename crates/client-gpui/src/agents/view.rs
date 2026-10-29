@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use gpui_kit::TestSupportExt as _;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -14,6 +14,18 @@ use super::model::{
     agents_from_machines, byo_disabled_reason, submit,
 };
 use super::{tr, tr_args};
+
+/// What the agents page tells the shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentsEvent {
+    /// The empty table's primary action: show how to connect a machine.
+    SetupMachine,
+}
+
+/// Element id of the empty table's action.
+pub const EMPTY_SETUP_ID: &str = "no-agents-action";
+
+impl EventEmitter<AgentsEvent> for AgentsView {}
 
 pub struct AgentsView {
     rows: Vec<AgentRow>,
@@ -235,6 +247,17 @@ impl Render for AgentsView {
                     .children(rows)
                     .when(self.rows.is_empty(), |el| {
                         el.child(Self::note("agents-empty", tr("agents-empty")))
+                            .child(
+                                div().child(
+                                    Button::new(EMPTY_SETUP_ID)
+                                        .primary()
+                                        .label(tr("agents-empty-setup"))
+                                        .accessibility_label(tr("agents-empty-setup-a11y"))
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            cx.emit(AgentsEvent::SetupMachine);
+                                        })),
+                                ),
+                            )
                     }),
             )
             .child(

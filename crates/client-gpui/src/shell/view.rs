@@ -35,6 +35,7 @@ use crate::inbox::{Filters, InboxEvent};
 use crate::notify::{
     EventQueue, Notifier, NotifyConfig, NotifyEvent, NotifySettingsView, ToastSink, hub_link_thread,
 };
+use crate::onboarding::{self, OnboardingEvent, OnboardingView};
 use crate::palette::{
     self, CommandId, NextThread, OpenPalette, PaletteEvent, PaletteView, PreviousThread, ShortcutId,
 };
@@ -122,6 +123,17 @@ pub struct AppShell {
     _composer_events: Subscription,
     /// The agents page, fed by the shell's machines feed.
     agents: Entity<crate::agents::AgentsView>,
+    /// First-run page; shown in place of the inbox while there is no machine (see
+    /// [`AppShell::onboarding_visible`]).
+    onboarding: Entity<OnboardingView>,
+    _onboarding_events: [Subscription; 3],
+    onboarding_skipped: bool,
+    /// The empty agents table or composer asked for the steps.
+    onboarding_requested: bool,
+    /// A machine has been seen for this session: onboarding is done.
+    onboarding_completed: bool,
+    /// Put the cursor in the thread composer on the next render (the empty transcript's action).
+    focus_composer: bool,
     /// The one `GET /v1/machines` feed: agents page, new-task composer and runner cap.
     machines: MachinesFeed,
     machines_pump: Option<Task<()>>,
@@ -199,13 +211,17 @@ impl AppShell {
         let compose = cx.new(|cx| crate::compose::ComposeView::new(draft_dir, window, cx));
         let inbox = cx.new(|cx| crate::inbox::InboxView::new(window, cx));
         // A row click in the inbox opens that thread on the Inbox page.
-        let inbox_events = cx.subscribe(&inbox, |this, _, event: &InboxEvent, cx| {
-            let InboxEvent::OpenThread {
-                thread_id,
-                workspace,
-            } = event;
-            this.open_thread(thread_id, workspace.as_deref(), cx);
-        });
+        let inbox_events = cx.subscribe_in(
+            &inbox,
+            window,
+            |this, _, event: &InboxEvent, window, cx| match event {
+                InboxEvent::OpenThread {
+                    thread_id,
+                    workspace,
+                } => this.open_thread(thread_id, workspace.as_deref(), cx),
+                InboxEvent::NewTask => this.new_task(window, cx),
+            },
+        );
         let inbox_lists = cx.observe_in(&inbox, window, |this, _, window, cx| {
             this.on_inbox_changed(window, cx);
         });
@@ -242,6 +258,21 @@ impl AppShell {
                 cx,
             )
         });
+        let onboarding = cx.new(|_| OnboardingView::new(model.hub()));
+        let onboarding_events = [
+            cx.subscribe(&onboarding, |this, _, event: &OnboardingEvent, cx| {
+                let OnboardingEvent::Skip = event;
+                this.onboarding_skipped = true;
+                this.onboarding_requested = false;
+                cx.notify();
+            }),
+            cx.subscribe(&agents, |this, _, _: &crate::agents::AgentsEvent, cx| {
+                this.show_setup(cx);
+            }),
+            cx.subscribe(&compose, |this, _, _: &crate::compose::ComposeEvent, cx| {
+                this.show_setup(cx);
+            }),
+        ];
         let mut shell = Self {
             model,
             driver,
@@ -265,6 +296,12 @@ impl AppShell {
             composer,
             _composer_events: composer_events,
             agents,
+            onboarding,
+            _onboarding_events: onboarding_events,
+            onboarding_skipped: false,
+            onboarding_requested: false,
+            onboarding_completed: false,
+            focus_composer: false,
             machines: MachinesFeed::default(),
             machines_pump: None,
             _machines_timer: None,
@@ -426,6 +463,11 @@ impl AppShell {
             Ok(snapshot) => {
                 self.machines.error = None;
                 self.machines.snapshot = snapshot;
+                if !self.machines.snapshot.options.is_empty() {
+                    // The first machine ends onboarding; the Inbox page shows from now on.
+                    self.onboarding_completed = true;
+                    self.onboarding_requested = false;
+                }
                 let info = self.machines.snapshot.info.clone();
                 let options = self.machines.snapshot.options.clone();
                 self.agents
@@ -471,6 +513,9 @@ impl AppShell {
             return;
         }
         self.machines_pump = None;
+        self.onboarding_skipped = false;
+        self.onboarding_requested = false;
+        self.onboarding_completed = false;
         self.machines.reset(target.clone());
         let (info, options) = (Vec::new(), Vec::new());
         self.agents
@@ -483,6 +528,46 @@ impl AppShell {
         if target.is_some() {
             self.refresh_machines(cx);
         }
+    }
+
+    /// Whether the first-run page is showing in place of the inbox: signed in, the machines feed
+    /// answered with none and the inbox has nothing to show, until the user skips or a machine
+    /// appears. The empty agents table and composer bring it back with [`AppShell::show_setup`].
+    pub fn onboarding_visible(&self, cx: &App) -> bool {
+        if self.model.screen() != Screen::Main {
+            return false;
+        }
+        let inbox = self.inbox.read(cx);
+        onboarding::needed(onboarding::FeedState {
+            loaded: self.machines.loaded,
+            failed: self.machines.error.is_some(),
+            machines: self.machines.snapshot.options.len(),
+            inbox_empty: inbox.lists_applied() > 0 && inbox.model().rows().is_empty(),
+            completed: self.onboarding_completed,
+            skipped: self.onboarding_skipped,
+            requested: self.onboarding_requested,
+        })
+    }
+
+    /// Show the steps to connect a machine (the action of the empty agents table and composer).
+    pub fn show_setup(&mut self, cx: &mut Context<Self>) {
+        if self.model.screen() != Screen::Main || self.onboarding_completed {
+            return;
+        }
+        self.onboarding_requested = true;
+        self.close_thread(cx);
+        self.model.nav.select(Section::Inbox);
+        cx.notify();
+    }
+
+    /// The composer under the open thread's transcript.
+    pub fn composer(&self) -> &Entity<ThreadComposer> {
+        &self.composer
+    }
+
+    /// The first-run page.
+    pub fn onboarding(&self) -> &Entity<OnboardingView> {
+        &self.onboarding
     }
 
     /// The new-task composer.
@@ -784,6 +869,10 @@ impl AppShell {
         cx.subscribe(pane, |this, _, event: &TranscriptEvent, cx| match event {
             TranscriptEvent::OpenFile { path, line } => {
                 this.last_open_file = Some((path.clone(), *line));
+                cx.notify();
+            }
+            TranscriptEvent::WriteMessage => {
+                this.focus_composer = true;
                 cx.notify();
             }
         })
@@ -1266,6 +1355,11 @@ impl AppShell {
             self.render_agents(cx).into_any_element()
         } else if current == Section::Inbox && self.open_thread.is_some() {
             self.render_thread(slots, cx).into_any_element()
+        } else if current == Section::Inbox && self.onboarding_visible(cx) {
+            let hub = self.model.hub().to_owned();
+            self.onboarding
+                .update(cx, |onboarding, cx| onboarding.set_hub(&hub, cx));
+            self.onboarding.clone().into_any_element()
         } else if current == Section::Inbox {
             self.inbox.clone().into_any_element()
         } else {
@@ -1508,6 +1602,10 @@ impl Render for AppShell {
             self.composer_thread = self.open_thread.clone();
             self.composer
                 .update(cx, |composer, cx| composer.clear_prompt(window, cx));
+        }
+        if std::mem::take(&mut self.focus_composer) {
+            let prompt = self.composer.read(cx).prompt_input().focus_handle(cx);
+            window.focus(&prompt, cx);
         }
         let target = self.model.session().map(|session| crate::compose::Target {
             api: format!("{}/v1", session.hub.trim_end_matches('/')),

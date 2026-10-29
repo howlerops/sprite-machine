@@ -3,6 +3,7 @@
 //! [`PaletteEvent::Run`] and the shell does it.
 
 use gpui_kit::TestSupportExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, *};
 use gpui_kit::prelude::*;
@@ -16,6 +17,8 @@ pub const OVERLAY_ID: &str = "palette";
 pub const INPUT_ID: &str = "palette-input";
 pub const LIST_ID: &str = "palette-list";
 pub const EMPTY_ID: &str = "palette-empty";
+/// The no-match state's action: empty the search field and show every command again.
+pub const EMPTY_CLEAR_ID: &str = "palette-empty-action";
 /// Id of row `ix`: `palette-item-<ix>`, best match first.
 pub fn item_id(ix: usize) -> String {
     format!("palette-item-{ix}")
@@ -82,6 +85,18 @@ impl PaletteView {
         let field = self.input.focus_handle(cx);
         window.focus(&field, cx);
         self.scroll.scroll_to_item(0);
+        cx.notify();
+    }
+
+    /// Empty the search field (the no-match state's action) and put the cursor back in it.
+    pub fn clear_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        // Setting the value does not announce a change, so the model is told here.
+        self.model.set_query("");
+        self.scroll.scroll_to_item(0);
+        let field = self.input.focus_handle(cx);
+        window.focus(&field, cx);
         cx.notify();
     }
 
@@ -291,6 +306,17 @@ impl Render for PaletteView {
                                 .py_1()
                                 .text_color(theme.muted_foreground)
                                 .child(tr("palette-empty")),
+                        )
+                        .child(
+                            div().px_3().py_1().child(
+                                Button::new(EMPTY_CLEAR_ID)
+                                    .primary()
+                                    .label(tr("palette-empty-clear"))
+                                    .accessibility_label(tr("palette-empty-clear-a11y"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.clear_query(window, cx);
+                                    })),
+                            ),
                         )
                     }),
             )
