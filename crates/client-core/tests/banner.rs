@@ -12,7 +12,7 @@ use client_core::outbox::{
 };
 use client_core::{
     Applied, Connection, Connectivity, Intent, Outbox, Subscription, SubscriptionError, ThreadSync,
-    Transport,
+    Transport, banner_state,
 };
 use futures_util::SinkExt;
 use tokio::sync::watch;
@@ -403,4 +403,27 @@ async fn an_idle_outbox_follows_the_subscription_and_a_failed_send_still_shows_o
         .expect("flushes");
     assert_eq!(owner.connectivity(), Connectivity::Offline);
     hub.abort();
+}
+
+/// The shared rule other clients (the desktop session link) use directly: an idle outbox has no
+/// opinion, with or without a followed thread; a queued intent counts as `Connecting`.
+#[test]
+fn banner_state_ignores_an_idle_outbox_with_or_without_a_subscription() {
+    let cache = Cache::open_in_memory().expect("cache");
+    let mut outbox = Outbox::load(&cache, RetryPolicy::default()).expect("loads");
+    assert_eq!(outbox.connectivity(), Connectivity::Connecting);
+    assert_eq!(banner_state(None, &outbox), Connectivity::Online);
+    for sub in ALL {
+        assert_eq!(
+            banner_state(Some(sub), &outbox),
+            sub,
+            "idle outbox, subscription {sub:?}"
+        );
+    }
+    outbox.enqueue(&cache, cancel("tk_1"), 0).expect("enqueues");
+    assert_eq!(banner_state(None, &outbox), Connectivity::Connecting);
+    assert_eq!(
+        banner_state(Some(Connectivity::Online), &outbox),
+        Connectivity::Connecting
+    );
 }

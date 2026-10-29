@@ -380,14 +380,13 @@ impl Core {
         self.publish_connectivity();
     }
 
-    /// The banner state: the subscription's and the outbox's, combined; the outbox's alone while
-    /// no thread is followed. Repeats are not published.
+    /// The banner state of the followed thread's subscription and the outbox
+    /// ([`client_core::banner_state`]). Repeats are not published.
     fn publish_connectivity(&self) {
-        let outbox = self.outbox.connectivity();
-        let state = match &self.sub {
-            Some(sub) => sub.connectivity().combine(outbox),
-            None => outbox,
-        };
+        let state = client_core::banner_state(
+            self.sub.as_ref().map(|sub| sub.connectivity()),
+            &self.outbox,
+        );
         self.connectivity.send_if_modified(|current| {
             let changed = *current != state;
             *current = state;

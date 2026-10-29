@@ -97,19 +97,9 @@ impl Connection {
         result
     }
 
-    /// The combined banner state of the two links.
-    ///
-    /// Rule: an outbox that is still `Connecting` (no HTTP answer or failure since it was
-    /// loaded) and has nothing queued has no opinion, because it has nothing to be unsure
-    /// about; the state then follows the subscription alone. Once something is queued and
-    /// unanswered it counts as `Connecting` again, and any answer or failure (the outbox's own
-    /// `Online` / `Offline`) always counts.
+    /// The combined banner state of the two links: [`banner_state`].
     fn state_of(subscription: &Subscription, outbox: &Outbox) -> Connectivity {
-        let subscription = subscription.connectivity();
-        match outbox.connectivity() {
-            Connectivity::Connecting if outbox.entries().next().is_none() => subscription,
-            link => subscription.combine(link),
-        }
+        banner_state(Some(subscription.connectivity()), outbox)
     }
 
     /// Queues an intent. Queuing leaves both links as they are, but an unanswered intent
@@ -149,6 +139,26 @@ impl Connection {
             *current = state;
             changed
         });
+    }
+}
+
+/// The one banner state for a subscription's link (`None` while no thread is followed) and an
+/// outbox. Every client that shows a banner uses this, so the rule lives in one place.
+///
+/// Rule: an outbox that is still `Connecting` (no HTTP answer or failure since it was loaded)
+/// and has nothing queued has no opinion, because it has nothing to be unsure about; the state
+/// then follows the subscription alone, or is `Online` when no thread is followed (nothing is
+/// pending and nothing has failed). Once something is queued and unanswered the outbox counts
+/// as `Connecting` again, and any answer or failure (the outbox's own `Online` / `Offline`)
+/// always counts.
+pub fn banner_state(subscription: Option<Connectivity>, outbox: &Outbox) -> Connectivity {
+    let link = outbox.connectivity();
+    let idle = link == Connectivity::Connecting && outbox.entries().next().is_none();
+    match (subscription, idle) {
+        (Some(sub), true) => sub,
+        (None, true) => Connectivity::Online,
+        (Some(sub), false) => sub.combine(link),
+        (None, false) => link,
     }
 }
 

@@ -24,7 +24,7 @@ pub mod tracer;
 pub mod view;
 
 pub use cache::{Cache, CacheError};
-pub use connectivity::{Connection, Connectivity};
+pub use connectivity::{Connection, Connectivity, banner_state};
 pub use outbox::{
     Clock, FlushReport, HttpTransport, Intent, IntentState, ManualClock, Outbox, OutboxError,
     PostRequest, PostResponse, QueuedIntent, Random, RetryPolicy, SystemClock, SystemRandom,
