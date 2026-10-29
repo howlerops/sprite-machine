@@ -3915,6 +3915,9 @@ items:
     title: 'client: new-task composer'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     size: M
     deps: [M3-002]
@@ -6363,6 +6366,9 @@ items:
     title: 'hub: a task the runner started before /rc counts as busy, so the first shared prompt queues behind it instead of being refused by the bridge'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
