@@ -3987,7 +3987,8 @@ items:
     title: 'client: onboarding + empty states'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 331 passed 0 failed; shell 80 + onboarding 15 passed 3/3; clippy clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4012,6 +4013,34 @@ items:
       - 'Every list has an empty state with one primary action'
     verify:
       - 'cargo test -p client-gpui --test onboarding'
+  - id: M3-003a
+    title: 'desktop onboarding: poll machines every ~3 s while onboarding is visible; show the steps when the inbox fetch fails but machines are empty'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-003]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/onboarding/**'
+      - 'crates/client-gpui/tests/onboarding.rs'
+    acceptance:
+      - 'A machine appearing is detected within the short interval while onboarding shows (advance_clock test); a failing inbox fetch with no machines still shows onboarding (test)'
+  - id: M3-003b
+    title: 'desktop onboarding: enable paths (a) model key and (b) BYO A2A URL when their hub APIs land'
+    milestone: M3
+    phase: P5
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-003, M2-002, M2-004]
+    paths:
+      - 'crates/client-gpui/src/onboarding/**'
+    acceptance:
+      - 'Both paths work end to end against the hub'
 
   - id: M3-004
     title: 'client: new-task composer'

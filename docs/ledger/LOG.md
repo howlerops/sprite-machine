@@ -333,3 +333,4 @@
 - 2026-10-29 leader: merged M3-006 (attachments; client 364 passed). Leader fixed 3 shell-test races (allow_parking in open_shell_with; pairing poll >=1; send_waits starts from cleared composer): 40/40. Filed M3-006a-d.
 - 2026-10-29 leader: merged M3-006a (UserView.parts; user images inline).
 - 2026-10-29 leader: merged M3-006b; verified M3-006a + M3-006b (client 369 passed, runner tui 55, shell/transcript 5/5).
+- 2026-10-29 leader: merged M3-003 (onboarding path c, disabled a/b, six empty states). Filed M3-003a/b.
