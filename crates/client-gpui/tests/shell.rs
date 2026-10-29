@@ -25,7 +25,7 @@ use client_gpui::shell::auth::{LoginFailure, SessionGrant, api_url};
 use client_gpui::shell::browser::{Browser, RecordingBrowser};
 use client_gpui::shell::i18n::{self, Catalog};
 use client_gpui::shell::login::{LoginEvent, LoginMethod, LoginModel, LoginStage};
-use client_gpui::shell::model::{Screen, ShellModel, parse_hub};
+use client_gpui::shell::model::{HubOutcome, Screen, ShellModel, parse_hub};
 use client_gpui::shell::nav::{NavModel, Section};
 use client_gpui::shell::pairing::{self, DeviceCode, PollOutcome, PollSchedule, QrMatrix};
 use client_gpui::shell::pkce::{self, Callback, GithubSignIn, LoopbackListener, Pkce};
@@ -55,6 +55,12 @@ struct HubState {
     code_requests: AtomicUsize,
     /// Flipped by a test to play the phone approving a "gate" step.
     approved: AtomicBool,
+    /// The session subscription: refused (503) until a test sets this.
+    socket_up: AtomicBool,
+    /// The `Authorization` header of each subscribe request.
+    bearers: Mutex<Vec<String>>,
+    /// POSTs to the thread's cancel endpoint, answered 200.
+    cancels: AtomicUsize,
 }
 
 fn grant_body() -> Value {
@@ -139,6 +145,33 @@ async fn github_token(
     }
 }
 
+async fn session_subscribe(
+    State(hub): State<Arc<HubState>>,
+    headers: axum::http::HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let bearer = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    hub.bearers.lock().expect("lock").push(bearer);
+    if !hub.socket_up.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    upgrade.on_upgrade(|mut socket| async move {
+        let _ = socket
+            .send(WsMessage::Text(r#"{"type":"live"}"#.into()))
+            .await;
+        while let Some(Ok(_)) = socket.recv().await {}
+    })
+}
+
+async fn session_cancel(State(hub): State<Arc<HubState>>) -> Json<Value> {
+    hub.cancels.fetch_add(1, Ordering::SeqCst);
+    Json(json!({}))
+}
+
 fn spawn_hub(state: Arc<HubState>) -> String {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -152,6 +185,8 @@ fn spawn_hub(state: Arc<HubState>) -> String {
                 .route("/v1/auth/device/code", post(device_code))
                 .route("/v1/auth/device/token", post(device_token))
                 .route("/v1/auth/github/token", post(github_token))
+                .route("/v1/threads/{thread_id}/subscribe", get(session_subscribe))
+                .route("/v1/threads/{thread_id}/cancel", post(session_cancel))
                 .with_state(state);
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
                 .await
@@ -330,6 +365,7 @@ fn catalog_formats_arguments_and_reports_missing_ids_visibly() {
                 ("choice", "X"),
                 ("uri", "X"),
                 ("minutes", "5"),
+                ("hub", "X"),
             ],
         );
         assert!(!text.trim().is_empty(), "{id} is empty");
@@ -921,6 +957,7 @@ fn focus_order_is_stable_labelled_and_unique_on_every_screen() {
         "theme-light",
         "theme-dark",
         "hub-address",
+        "hub-save",
         "sign-out",
     ]);
     check(&shell, &with_settings);
@@ -970,6 +1007,7 @@ fn open_shell_at(
                             prefs: Preferences::default(),
                             prefs_path,
                             poll_speedup: 200,
+                            link_thread: "th_1".to_string(),
                         },
                         window,
                         cx,
@@ -1489,4 +1527,267 @@ fn a_hub_address_is_saved_and_used_at_the_next_launch() {
 fn api_urls_have_exactly_one_slash() {
     assert_eq!(api_url("https://h/", "/auth/x"), "https://h/v1/auth/x");
     assert_eq!(api_url("https://h", "auth/x"), "https://h/v1/auth/x");
+}
+
+// ---- M3-002c: the session owns its connection; hub field feedback ----------------------------------
+
+const OFFLINE: &str = "You are offline. Changes will be sent when the connection returns.";
+
+/// The banner's text as the window shows it now.
+fn banner_now(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+) -> Option<String> {
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |shell, cx| shell.pump_login(cx));
+        window.render_frame(cx);
+        window
+            .try_find("connectivity-banner")
+            .and_then(|found| found.label().map(str::to_owned))
+    })
+    .expect("window")
+}
+
+/// Wait (real time; the link runs on its own thread) until the banner reads `expected`.
+fn wait_for_banner(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+    expected: Option<&str>,
+) {
+    let mut last = None;
+    for _ in 0..400 {
+        last = banner_now(cx, window, view);
+        if last.as_deref() == expected {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("banner never read {expected:?}; last {last:?}");
+}
+
+fn stored_session_on(hub: &str) -> Arc<MemoryStore> {
+    let store = Arc::new(MemoryStore::default());
+    store
+        .save(&Session {
+            hub: hub.to_owned(),
+            grant: grant(),
+        })
+        .expect("save");
+    store
+}
+
+#[gpui_kit::test]
+fn after_sign_in_the_banner_follows_the_sessions_own_connection(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    // The session link runs on its own thread, so the test scheduler must tolerate real I/O.
+    cx.executor().allow_parking();
+    let (window, view) = open_shell(
+        cx,
+        &hub,
+        Arc::new(MemoryStore::default()),
+        Arc::new(RecordingBrowser::new()),
+    );
+    cx.update(|cx| assert!(view.read(cx).link().is_none(), "no session, no link"));
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.start_login(LoginMethod::Pairing, cx));
+    })
+    .expect("window");
+    wait_until(cx, window, &view, |shell| {
+        shell.model().screen() == Screen::Main
+    });
+
+    // The hub refuses the socket: the real connection is offline, and the banner says so.
+    wait_for_banner(cx, window, &view, Some(OFFLINE));
+    cx.update(|cx| {
+        let shell = view.read(cx);
+        assert_eq!(shell.link().expect("a link").hub(), hub);
+    });
+    // It subscribed with the session's own token.
+    let bearers = state.bearers.lock().expect("lock").clone();
+    assert!(!bearers.is_empty());
+    assert!(
+        bearers
+            .iter()
+            .all(|bearer| bearer == "Bearer sm_session_token")
+    );
+
+    // The hub accepts the socket: the connection retries and goes live, but the outbox has not
+    // been answered yet, so it is still not online.
+    state.socket_up.store(true, Ordering::SeqCst);
+    wait_for_banner(cx, window, &view, Some("Reconnecting..."));
+
+    // The outbox gets an answer: the whole connection is online and the banner goes away.
+    cx.update(|cx| {
+        view.read(cx)
+            .link()
+            .expect("a link")
+            .enqueue(Intent::Cancel {
+                thread_id: "th_1".to_owned(),
+                task_id: "tk_1".to_owned(),
+            });
+    });
+    wait_for_banner(cx, window, &view, None);
+    assert_eq!(state.cancels.load(Ordering::SeqCst), 1);
+}
+
+#[gpui_kit::test]
+fn a_stored_session_opens_the_link_at_launch_and_signing_out_closes_it(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    // The session link runs on its own thread, so the test scheduler must tolerate real I/O.
+    cx.executor().allow_parking();
+    state.socket_up.store(true, Ordering::SeqCst);
+    let (window, view) = open_shell(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+    );
+    wait_for_banner(cx, window, &view, Some("Reconnecting..."));
+    cx.update(|cx| assert!(view.read(cx).link().is_some()));
+
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.sign_out(cx));
+    })
+    .expect("window");
+    cx.update(|cx| {
+        assert!(
+            view.read(cx).link().is_none(),
+            "the grant is gone, so is the link"
+        )
+    });
+}
+
+#[gpui_kit::test]
+fn the_hub_field_answers_a_save_with_a_message_and_a_different_hub_signs_out(
+    cx: &mut TestAppContext,
+) {
+    let dir = unique_dir("hub-feedback");
+    let prefs = dir.join("preferences.json");
+    let store = stored_session_on("https://hub.test");
+    let (window, view) = open_shell_at(
+        cx,
+        "https://hub.test",
+        store.clone(),
+        Arc::new(RecordingBrowser::new()),
+        Some(prefs.clone()),
+    );
+    let feedback = |cx: &mut TestAppContext| -> Option<String> {
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            window
+                .try_find("hub-feedback")
+                .and_then(|found| found.label().map(str::to_owned))
+        })
+        .expect("window")
+    };
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("hub-save").label(),
+            Some("Save the hub address")
+        );
+        assert!(window.try_find("hub-feedback").is_none());
+        // A refused address, saved with the Save control (not Enter).
+        let field = view.read(cx).hub_input().clone();
+        field.update(cx, |input, cx| input.set_value("not a hub", window, cx));
+        window.click("hub-save", cx);
+    })
+    .expect("window");
+    assert_eq!(
+        feedback(cx).as_deref(),
+        Some("Not saved: enter a full http or https address, for example https://hub.example.com.")
+    );
+    cx.update(|cx| {
+        let field = view.read(cx).hub_input().clone();
+        assert_eq!(field.read(cx).value().as_ref(), "https://hub.test");
+    });
+    assert!(!prefs.exists());
+
+    // The session's own hub again: saved, still signed in.
+    cx.update_window(window, |_, window, cx| {
+        let field = view.read(cx).hub_input().clone();
+        field.update(cx, |input, cx| {
+            input.set_value("https://hub.test/", window, cx)
+        });
+        window.click("hub-save", cx);
+    })
+    .expect("window");
+    assert_eq!(feedback(cx).as_deref(), Some("Hub address saved."));
+    assert!(store.load().is_some());
+    cx.update(|cx| assert_eq!(view.read(cx).model().screen(), Screen::Main));
+
+    // Another hub: saved, signed out, and the login screen says why.
+    cx.update_window(window, |_, window, cx| {
+        let field = view.read(cx).hub_input().clone();
+        field.update(cx, |input, cx| {
+            input.set_value("http://127.0.0.1:9", window, cx)
+        });
+        window.click("hub-save", cx);
+    })
+    .expect("window");
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(view.read(cx).model().screen(), Screen::Login);
+        assert_eq!(
+            window.find("login-notice").label(),
+            Some(
+                "You were signed out because the hub address changed to http://127.0.0.1:9. \
+                 Sign in again to use it."
+            )
+        );
+        assert!(view.read(cx).link().is_none());
+    })
+    .expect("window");
+    assert!(store.load().is_none(), "the old hub's session is forgotten");
+    assert_eq!(Preferences::load(&prefs).hub_url, "http://127.0.0.1:9");
+
+    // Starting a new sign-in clears the notice.
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |shell, cx| shell.start_login(LoginMethod::Pairing, cx));
+        window.render_frame(cx);
+        assert!(window.try_find("login-notice").is_none());
+    })
+    .expect("window");
+}
+
+#[test]
+fn saving_the_hub_while_signed_in_signs_out_only_for_another_hub() {
+    let dir = unique_dir("hub-model");
+    let prefs = dir.join("preferences.json");
+    let store = stored_session_on("https://hub.test");
+    let mut shell = ShellModel::new(
+        store.clone(),
+        Preferences::default(),
+        Some(prefs),
+        "https://hub.test",
+    );
+    assert_eq!(shell.change_hub("nope"), HubOutcome::Refused);
+    assert_eq!(shell.screen(), Screen::Main);
+    assert_eq!(shell.change_hub(" https://hub.test/ "), HubOutcome::Saved);
+    assert_eq!(shell.screen(), Screen::Main);
+    assert_eq!(
+        shell.change_hub("https://other.test"),
+        HubOutcome::SavedSignedOut
+    );
+    assert_eq!(shell.screen(), Screen::Login);
+    assert!(store.load().is_none());
+    assert_eq!(shell.hub(), "https://other.test");
+    // Signed out, a different hub is just saved.
+    assert_eq!(shell.change_hub("https://third.test"), HubOutcome::Saved);
+
+    // A preferences file that cannot be written is reported, not hidden.
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, "a file, not a directory").expect("blocker");
+    let mut broken = ShellModel::new(
+        Arc::new(MemoryStore::default()),
+        Preferences::default(),
+        Some(blocker.join("preferences.json")),
+        "https://hub.test",
+    );
+    assert_eq!(broken.change_hub("https://a.test"), HubOutcome::NotStored);
 }

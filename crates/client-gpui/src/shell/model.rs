@@ -35,6 +35,20 @@ impl FocusSlot {
     }
 }
 
+/// What saving the hub field did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HubOutcome {
+    /// The address is saved and in use for the next sign-in.
+    Saved,
+    /// The address is saved, and the session that belonged to another hub was ended.
+    SavedSignedOut,
+    /// The text is not an absolute http or https address; nothing changed.
+    Refused,
+    /// The address is in use for this run, but it could not be written to preferences (or the
+    /// old session could not be forgotten).
+    NotStored,
+}
+
 pub struct ShellModel {
     pub login: LoginModel,
     pub nav: NavModel,
@@ -138,6 +152,30 @@ impl ShellModel {
         self.save_prefs()
     }
 
+    /// The hub field's Save. A session belongs to the hub that granted it, so saving a different
+    /// hub while signed in ends that session (the next sign-in is on the new hub).
+    pub fn change_hub(&mut self, text: &str) -> HubOutcome {
+        let Some(hub) = parse_hub(text) else {
+            return HubOutcome::Refused;
+        };
+        let stored = self.set_hub(&hub).is_ok();
+        let foreign = self
+            .session
+            .as_ref()
+            .is_some_and(|session| !same_hub(&session.hub, &hub));
+        if foreign {
+            return match self.sign_out() {
+                Ok(()) if stored => HubOutcome::SavedSignedOut,
+                _ => HubOutcome::NotStored,
+            };
+        }
+        if stored {
+            HubOutcome::Saved
+        } else {
+            HubOutcome::NotStored
+        }
+    }
+
     fn save_prefs(&self) -> Result<(), String> {
         match &self.prefs_path {
             Some(path) => self.prefs.save(path),
@@ -203,12 +241,21 @@ impl ShellModel {
             }
             slots.push(FocusSlot::new("hub-address", i18n::tr("settings-hub")));
             slots.push(FocusSlot::new(
+                "hub-save",
+                i18n::tr("settings-hub-save-a11y"),
+            ));
+            slots.push(FocusSlot::new(
                 "sign-out",
                 i18n::tr("settings-sign-out-a11y"),
             ));
         }
         slots
     }
+}
+
+/// Two hub addresses name the same hub when they differ at most by trailing slashes.
+fn same_hub(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
 }
 
 /// A hub address as the settings field takes it: an absolute http or https URL with a host,

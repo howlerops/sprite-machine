@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod browser;
 pub mod i18n;
+pub mod link;
 pub mod login;
 pub mod model;
 pub mod nav;
@@ -47,6 +48,7 @@ pub fn default_config() -> AppConfig {
         prefs: prefs::Preferences::load(&prefs_path),
         prefs_path: Some(prefs_path),
         poll_speedup: 1,
+        link_thread: "th_session".to_string(),
     }
 }
 
