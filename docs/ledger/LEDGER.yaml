@@ -4199,7 +4199,9 @@ items:
     title: 'client-gpui shell: wire ApprovalController into the app connection (ThreadView, Outbox, Cache, 1 s tick, flush after answer)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: medium
