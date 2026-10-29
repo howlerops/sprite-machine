@@ -4642,7 +4642,8 @@ items:
     title: 'client: agent registry + launch managed agent form'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: agents 7 + 8 model tests; client-gpui all; clippy clean. Leader verify with M3-013a."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4660,6 +4661,48 @@ items:
       - 'Agents list with card/skills/health/presence; add-BYO-by-URL disabled with a reason until the A2A edge exists (M2-004, P5); managed launch form disabled with a reason when no model key is configured, calling the M4 API when present'
     verify:
       - 'cargo test -p client-gpui --test agents'
+  - id: M3-012a
+    title: 'desktop shell: mount AgentsView on the Agents page, fed by GET /v1/machines (shared with runner caps, M3-005d) and refreshed'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-012, M3-013a]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/agents/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Agents page lists harness rows from the fake hub machines; refresh updates presence (window test)'
+  - id: M3-012b
+    title: 'agents: real ManagedAgentClient over the M4-007 route, model-key flag from settings; BYO add dialog once the A2A edge exists'
+    milestone: M4
+    phase: P5
+    status: "todo"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-012, M4-007, M2-004]
+    paths:
+      - 'crates/client-gpui/src/agents/**'
+    acceptance:
+      - 'HTTP client replaces the fake; BYO URL form (https only, SSRF errors shown) when the edge exists'
+  - id: M3-012c
+    title: 'agents: gpui-component Table with sortable columns'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-012]
+    paths:
+      - 'crates/client-gpui/src/agents/**'
+      - 'crates/client-gpui/tests/agents.rs'
+    acceptance:
+      - 'Sortable table; row a11y labels kept (headless test)'
 
   - id: M3-013
     title: 'client: desktop notifications, deep links, notification settings'
