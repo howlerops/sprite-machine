@@ -4136,7 +4136,9 @@ items:
     title: 'desktop shell: its own machines feed for runner caps (not the new-task composer list)'
     milestone: M3
     phase: P4
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet (with M3-012a)"
     lane: client
     size: S
     risk: low
@@ -4665,15 +4667,19 @@ items:
     title: 'desktop shell: mount AgentsView on the Agents page, fed by GET /v1/machines (shared with runner caps, M3-005d) and refreshed'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: low
     deps: [M3-012, M3-013a]
     paths:
-      - 'crates/client-gpui/src/shell/**'
-      - 'crates/client-gpui/src/agents/**'
-      - 'crates/client-gpui/tests/shell.rs'
+      - "crates/client-gpui/src/shell/**"
+      - "crates/client-gpui/src/agents/**"
+      - "crates/client-gpui/src/compose/**"
+      - "crates/client-gpui/tests/shell.rs"
+      - "crates/client-gpui/tests/agents.rs"
     acceptance:
       - 'Agents page lists harness rows from the fake hub machines; refresh updates presence (window test)'
   - id: M3-012b
