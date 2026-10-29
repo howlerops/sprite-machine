@@ -48,7 +48,8 @@ pub fn default_config() -> AppConfig {
         prefs: prefs::Preferences::load(&prefs_path),
         prefs_path: Some(prefs_path),
         poll_speedup: 1,
-        link_thread: "th_session".to_string(),
+        link_thread: String::new(),
+        clock: Arc::new(client_core::outbox::SystemClock),
     }
 }
 

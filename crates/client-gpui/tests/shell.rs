@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, WebSocketUpgrade};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -61,6 +61,20 @@ struct HubState {
     bearers: Mutex<Vec<String>>,
     /// POSTs to the thread's cancel endpoint, answered 200.
     cancels: AtomicUsize,
+    /// Event frames the subscribe endpoint replays for a thread (after `hello`, before `live`).
+    frames: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// The threads subscribed to, in order.
+    subscribed: Mutex<Vec<String>>,
+    /// POSTs to an interrupt endpoint: thread, interrupt, Idempotency-Key, body.
+    answers: Mutex<Vec<Answer>>,
+}
+
+#[derive(Debug, Clone)]
+struct Answer {
+    thread: String,
+    interrupt: String,
+    key: Option<String>,
+    body: Value,
 }
 
 fn grant_body() -> Value {
@@ -147,6 +161,7 @@ async fn github_token(
 
 async fn session_subscribe(
     State(hub): State<Arc<HubState>>,
+    Path(thread_id): Path<String>,
     headers: axum::http::HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
@@ -156,10 +171,25 @@ async fn session_subscribe(
         .unwrap_or_default()
         .to_owned();
     hub.bearers.lock().expect("lock").push(bearer);
+    hub.subscribed.lock().expect("lock").push(thread_id.clone());
     if !hub.socket_up.load(Ordering::SeqCst) {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
+    let frames = hub
+        .frames
+        .lock()
+        .expect("lock")
+        .get(&thread_id)
+        .cloned()
+        .unwrap_or_default();
     upgrade.on_upgrade(|mut socket| async move {
+        if !frames.is_empty() {
+            let hello = json!({ "type": "hello", "head_seq": frames.len(), "replay_from": 1 });
+            let _ = socket.send(WsMessage::Text(hello.to_string().into())).await;
+            for frame in frames {
+                let _ = socket.send(WsMessage::Text(frame.into())).await;
+            }
+        }
         let _ = socket
             .send(WsMessage::Text(r#"{"type":"live"}"#.into()))
             .await;
@@ -169,6 +199,24 @@ async fn session_subscribe(
 
 async fn session_cancel(State(hub): State<Arc<HubState>>) -> Json<Value> {
     hub.cancels.fetch_add(1, Ordering::SeqCst);
+    Json(json!({}))
+}
+
+async fn session_answer(
+    State(hub): State<Arc<HubState>>,
+    Path((thread, interrupt)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    hub.answers.lock().expect("lock").push(Answer {
+        thread,
+        interrupt,
+        key: headers
+            .get("idempotency-key")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        body,
+    });
     Json(json!({}))
 }
 
@@ -187,6 +235,10 @@ fn spawn_hub(state: Arc<HubState>) -> String {
                 .route("/v1/auth/github/token", post(github_token))
                 .route("/v1/threads/{thread_id}/subscribe", get(session_subscribe))
                 .route("/v1/threads/{thread_id}/cancel", post(session_cancel))
+                .route(
+                    "/v1/threads/{thread_id}/interrupts/{interrupt_id}",
+                    post(session_answer),
+                )
                 .with_state(state);
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
                 .await
@@ -981,6 +1033,27 @@ fn open_shell_at(
     browser: Arc<dyn Browser>,
     prefs_path: Option<std::path::PathBuf>,
 ) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
+    open_shell_with(
+        cx,
+        hub,
+        store,
+        browser,
+        prefs_path,
+        "th_1",
+        Arc::new(client_core::outbox::SystemClock),
+    )
+}
+
+fn open_shell_with(
+    cx: &mut TestAppContext,
+    hub: &str,
+    store: Arc<dyn SessionStore>,
+    browser: Arc<dyn Browser>,
+    prefs_path: Option<std::path::PathBuf>,
+    link_thread: &str,
+    clock: Arc<dyn client_core::outbox::Clock>,
+) -> (gpui_kit::AnyWindowHandle, Entity<AppShell>) {
+    let link_thread = link_thread.to_owned();
     cx.update(|cx| {
         gpui_kit::init(cx);
         client_gpui::shell::init(cx);
@@ -1007,7 +1080,8 @@ fn open_shell_at(
                             prefs: Preferences::default(),
                             prefs_path,
                             poll_speedup: 200,
-                            link_thread: "th_1".to_string(),
+                            link_thread,
+                            clock,
                         },
                         window,
                         cx,
@@ -1790,4 +1864,218 @@ fn saving_the_hub_while_signed_in_signs_out_only_for_another_hub() {
         "https://hub.test",
     );
     assert_eq!(broken.change_hub("https://a.test"), HubOutcome::NotStored);
+}
+
+// ---- approval cards in the app connection (M3-011c) -----------------------------------------
+
+/// 2026-10-27T22:00:16Z, when the example interrupt is raised (its `expires_at` is ten minutes on).
+const RAISED_MS: u64 = 1_793_138_416_000;
+
+fn event_frame(seq: u64, thread: &str, event: Value) -> String {
+    json!({
+        "type": "event",
+        "envelope": {
+            "v": 1, "seq": seq, "thread_id": thread, "task_id": "tk_1", "run_id": "run_1",
+            "ts": "2026-10-27T22:00:16.000Z", "event": event,
+        }
+    })
+    .to_string()
+}
+
+/// The hub replays one pending approval for `th_a`.
+fn hub_with_pending_approval() -> (Arc<HubState>, String) {
+    let (state, hub) = hub_with(vec!["grant"], 600);
+    state.socket_up.store(true, Ordering::SeqCst);
+    state.frames.lock().expect("lock").insert(
+        "th_a".to_owned(),
+        vec![event_frame(
+            1,
+            "th_a",
+            json!({
+                "type": "Interrupt", "interrupt_id": "int_1", "kind": "approval",
+                "title": "Allow edit to src/main.rs?", "message": "The agent wants to change a file",
+                "expires_at": "2026-10-27T22:10:00.000Z", "tool_call_id": "tc_1",
+                "options": [
+                    { "option_id": "yes_once", "name": "Allow", "kind": "allow_once" },
+                    { "option_id": "nope", "name": "Deny", "kind": "reject_once" },
+                ],
+            }),
+        )],
+    );
+    (state, hub)
+}
+
+/// Renders and returns the label of the element `id`, if the window shows one.
+fn label_of(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    id: &'static str,
+) -> Option<String> {
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window
+            .try_find(id)
+            .and_then(|found| found.label().map(str::to_owned))
+    })
+    .expect("window")
+}
+
+/// Waits (real time; the link runs on its own thread) until `id` has a label satisfying `ok`.
+fn wait_for_label(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    id: &'static str,
+    ok: impl Fn(&str) -> bool,
+) -> String {
+    let mut last = None;
+    for _ in 0..400 {
+        last = label_of(cx, window, id);
+        if let Some(label) = last.as_deref().filter(|label| ok(label)) {
+            return label.to_owned();
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("{id} never matched; last {last:?}");
+}
+
+fn open_thread_a(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    view: &Entity<AppShell>,
+) {
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| {
+            shell.open_thread("th_a", Some("/work/repo"), cx)
+        });
+    })
+    .expect("window");
+}
+
+fn wait_until_true(what: &str, done: impl Fn() -> bool) {
+    for _ in 0..400 {
+        if done() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for {what}");
+}
+
+#[gpui_kit::test]
+fn the_link_follows_the_thread_the_screens_open(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_pending_approval();
+    cx.executor().allow_parking();
+    // No thread yet: the placeholder `th_session` is gone, nothing is subscribed.
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    let _ = banner_now(cx, window, &view);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(state.subscribed.lock().expect("lock").is_empty());
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), None));
+
+    open_thread_a(cx, window, &view);
+    wait_until_true("a subscription to th_a", || {
+        *state.subscribed.lock().expect("lock") == ["th_a"]
+    });
+    cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), Some("th_a")));
+
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.open_thread("th_b", None, cx));
+    })
+    .expect("window");
+    wait_until_true("a subscription to th_b", || {
+        state
+            .subscribed
+            .lock()
+            .expect("lock")
+            .iter()
+            .any(|thread| thread == "th_b")
+    });
+    // Opening the thread already followed is not a new subscription.
+    let count = state.subscribed.lock().expect("lock").len();
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.open_thread("th_b", None, cx));
+    })
+    .expect("window");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(state.subscribed.lock().expect("lock").len(), count);
+}
+
+#[gpui_kit::test]
+fn an_open_thread_shows_its_pending_card_and_a_click_posts_the_options_own_id(
+    cx: &mut TestAppContext,
+) {
+    let (state, hub) = hub_with_pending_approval();
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    open_thread_a(cx, window, &view);
+    let title = wait_for_label(cx, window, "approval-title", |label| !label.is_empty());
+    assert_eq!(title, "Allow edit to src/main.rs?");
+    assert!(label_of(cx, window, "approval-option-yes_once").is_some());
+    assert!(label_of(cx, window, "approval-option-nope").is_some());
+
+    cx.update_window(window, |_, window, cx| {
+        window.click("approval-option-yes_once", cx)
+    })
+    .expect("window");
+    wait_until_true("the answer to reach the hub", || {
+        !state.answers.lock().expect("lock").is_empty()
+    });
+    let answers = state.answers.lock().expect("lock").clone();
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    let answer = &answers[0];
+    assert_eq!(answer.thread, "th_a");
+    assert_eq!(answer.interrupt, "int_1");
+    assert_eq!(
+        answer.body["outcome"],
+        json!({ "type": "selected", "option_id": "yes_once" }),
+        "the option's own id, not a verdict"
+    );
+    let key = answer.key.as_deref().expect("an Idempotency-Key");
+    assert!(key.starts_with("idk_"), "{key}");
+}
+
+#[gpui_kit::test]
+fn time_left_repaints_every_second(cx: &mut TestAppContext) {
+    let (_state, hub) = hub_with_pending_approval();
+    cx.executor().allow_parking();
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        clock.clone(),
+    );
+    open_thread_a(cx, window, &view);
+    let first = wait_for_label(cx, window, "approval-time-left", |label| !label.is_empty());
+
+    // One second passes on the app clock and on the repaint timer.
+    clock.advance(1_000);
+    cx.executor().advance_clock(Duration::from_secs(1));
+    let second = wait_for_label(cx, window, "approval-time-left", |label| label != first);
+    assert_ne!(first, second);
+
+    clock.advance(1_000);
+    cx.executor().advance_clock(Duration::from_secs(1));
+    let third = wait_for_label(cx, window, "approval-time-left", |label| label != second);
+    assert_ne!(second, third);
 }
