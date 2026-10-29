@@ -30,7 +30,29 @@ the D1 `database_id` printed by `d1 create` into `wrangler.toml` under `[env.pro
 | Queue | `sm-hub-notify` | push notifications (`NOTIFY` producer + consumer) |
 
 The `[env.production]` section of `crates/hub/wrangler.toml` that binds these (bindings are not
-inherited by Wrangler environments) is part of the deploy item, M2-015.
+inherited by Wrangler environments) is in place (M2-015).
+
+## Deploy (M2-015)
+
+`[env.production]` in `crates/hub/wrangler.toml` binds the resources above (Worker name
+`sm-hub-production`). [`.github/workflows/deploy-hub.yml`](../../.github/workflows/deploy-hub.yml) runs on a
+push to `v2` that touches `crates/hub/`, `crates/protocol/`, `web/` or the workflow, and on manual
+dispatch: build cli and the hub (`wasm-release`), `wrangler d1 migrations apply DB --remote --env production`,
+`wrangler deploy --env production`, then `GET /healthz` must be 200.
+
+Set in the repo (Settings, Secrets and variables, Actions); names only here:
+
+- Secrets: `CLOUDFLARE_API_TOKEN` (Workers Scripts, D1, Queues edit on the account),
+  `CLOUDFLARE_ACCOUNT_ID`. Without them the job prints a notice and ends green, deploying nothing.
+- `HUB_URL` (variable or secret): the hub's https origin, for the health check. Unset: the check is skipped.
+
+Before the first hub deploy, deploy the Workspace DO Worker by hand: the hub's `WORKSPACE` binding
+points at the script `sm-workspace` (`workers/workspace`), and a deploy that references a missing
+script fails. `workers/workspace/wrangler.jsonc` has no `env.production` and needs its container
+image built (M0-008c), so the workflow does not deploy it: `cd workers/workspace && npm ci && npx wrangler deploy`.
+Redeploy it when its code changes.
+
+Then set the secrets below. Recovery: [dr.md](dr.md). Alerts: [alerts.md](alerts.md).
 
 ## Secrets (after the first deploy, M2-014a)
 

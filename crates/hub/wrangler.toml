@@ -1,5 +1,8 @@
-# Hub Worker. Local only for now: run by `cargo run -p cli -- e2e tracer`, `scripts/hub-test.sh`
-# and `wrangler dev --local`. Never deployed from here. Placeholder ids below are for local runs.
+# Hub Worker. The top-level config is for local runs (`cargo run -p cli -- e2e tracer`,
+# `scripts/hub-test.sh`, `wrangler dev --local`): its ids and names are placeholders. Production is
+# `[env.production]` at the end of this file, deployed by .github/workflows/deploy-hub.yml
+# (`wrangler deploy --env production`, docs/ops/hub.md). Wrangler does not inherit bindings, vars,
+# triggers or migrations into an environment, so the section repeats them: keep both in step.
 name = "sm-hub"
 main = "build/index.js"
 compatibility_date = "2026-10-01"
@@ -118,3 +121,82 @@ DEV_FIXTURES = "1"
 # ATTACHMENT_SIGNING_KEY is never in config: production sets it as a Worker secret, and
 # scripts/hub-test.sh passes a random per-run value with --var. With `wrangler dev --env dev`, pass
 # `--var ATTACHMENT_SIGNING_KEY:$(openssl rand -hex 32)` yourself.
+
+# ---- Production (M2-015) -----------------------------------------------------------------------
+# Deployed by .github/workflows/deploy-hub.yml: `wrangler d1 migrations apply DB --remote --env
+# production`, then `wrangler deploy --env production`. The Worker is named sm-hub-production.
+# The resources are the ones in docs/ops/hub.md. Secrets (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN,
+# VAPID_PRIVATE_KEY, ATTACHMENT_SIGNING_KEY) are set with `wrangler secret put --env production`,
+# never here. Needs the Workspace DO Worker `sm-workspace` (workers/workspace) deployed first.
+
+[env.production]
+# Same as the top-level [build] (a build command is not inherited into an environment).
+build = { command = "env ${HUB_WASM_TARGET_DIR:+CARGO_TARGET_DIR=$HUB_WASM_TARGET_DIR} worker-build --profile wasm-release && ${HUB_STRIP_BIN:-${CARGO_TARGET_DIR:-../../target}/debug/cli} wasm strip-names build/index_bg.wasm" }
+triggers = { crons = ["17 * * * *"] }
+
+[env.production.vars]
+APPLE_TEAM_ID = ""
+APPLE_BUNDLE_ID = ""
+ANDROID_PACKAGE_NAME = ""
+ANDROID_SHA256_CERT_FINGERPRINTS = ""
+# Replace with the public half of the production VAPID key (the hub derives it from the secret
+# VAPID_PRIVATE_KEY when that is set, so this is only the fallback answer).
+VAPID_PUBLIC_KEY = "BDev-placeholder-not-a-real-key-replace-with-the-public-key-of-VAPID_PRIVATE_KEY"
+VAPID_SUBJECT = "mailto:push@sprite-machine.invalid"
+# BOOTSTRAP_OWNER_GITHUB_LOGIN (optional, docs/ops/hub.md): add here to name the first owner.
+
+[[env.production.durable_objects.bindings]]
+name = "WORKSPACE"
+class_name = "WorkspaceDO"
+script_name = "sm-workspace"
+
+[[env.production.durable_objects.bindings]]
+name = "THREAD"
+class_name = "Thread"
+
+[[env.production.durable_objects.bindings]]
+name = "MACHINE"
+class_name = "Machine"
+
+[[env.production.durable_objects.bindings]]
+name = "FLOW"
+class_name = "Flow"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["TracerHub"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["Thread", "Machine", "Flow"]
+
+[[env.production.migrations]]
+tag = "v3"
+deleted_classes = ["TracerHub"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "sm-hub"
+database_id = "6b65194f-4317-471b-a718-f89d8fdcfbeb"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "BLOBS"
+bucket_name = "sm-hub-blobs"
+
+[[env.production.queues.producers]]
+binding = "NOTIFY"
+queue = "sm-hub-notify"
+
+[[env.production.queues.consumers]]
+queue = "sm-hub-notify"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+retry_delay = 5
+
+[env.production.assets]
+directory = "../../web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/*", "!/", "!/index.html", "!/styles.css", "!/src/*", "!/pair", "!/pair/*", "!/sw.js", "!/manifest.webmanifest", "!/icons/*"]
