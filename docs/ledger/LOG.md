@@ -303,3 +303,4 @@
 - 2026-10-29 leader: verify on merged v2 (M2B-019e, M3-007, M3-011, M2B-006a): clippy clean, runner+client-gpui 360 passed 0 failed. Assigned M2-010h (sonnet).
 - 2026-10-29 leader: merged M2-015 (deploy-hub.yml skips green without secrets; env.production bindings; dr.md, alerts.md). Filed M2-015a/b/c and M2-015d (human: secrets + first deploy).
 - 2026-10-29 leader: merged M2B-019h (tunnel nack integration test, 52 passed on v2). Note: the worker made one read-only list_triggers call against the local-tools rule; nothing changed. Assigned M3-011a (haiku).
+- 2026-10-29 leader: merged M3-011a (resolved_at), M3-002c (desktop session Connection), M2-010h (list rows; migration 0015; hub verify running). Filed M3-002d (idle outbox keeps Connecting), M3-002e, M3-011e, M2-010i; M3-011c now also picks the link thread. M3-011a worker attempted one create_session call (denied, nothing created).

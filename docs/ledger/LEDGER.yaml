@@ -4161,7 +4161,8 @@ items:
     title: 'client-core: InterruptView carries resolved_at (envelope ts) so approval cards show the real resolution time'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-core 48 passed 0 failed; client-gpui approval 26 passed; runner check ok; worker fail-first (2 approval tests fail without change)"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4202,7 +4203,7 @@ items:
     lane: client
     size: S
     risk: medium
-    deps: [M3-011, M3-007]
+    deps: [M3-011, M3-007, M3-002c]
     paths:
       - 'crates/client-gpui/src/shell/**'
       - 'crates/client-gpui/src/approval/**'
@@ -4210,6 +4211,7 @@ items:
     acceptance:
       - 'Opening a thread with a pending approval shows its card; clicking an option sends through the app Outbox and flushes (test with a recording transport)'
       - 'Time left repaints each second'
+      - 'The session link follows the thread the screens show (replaces the th_session placeholder AppConfig::link_thread, M3-002c report) and exposes ThreadView/Outbox/Cache from the link thread'
   - id: M3-011d
     title: 'task view: approval cards in place in the transcript (variable-height rows)'
     milestone: M3
@@ -4223,6 +4225,20 @@ items:
       - 'crates/client-gpui/src/task/**'
     acceptance:
       - 'Cards render at their transcript position, not pinned above; virtualization still bounded'
+  - id: M3-011e
+    title: 'runner TUI: show the resolution time (InterruptView.resolved_at) on answered approvals'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: S
+    risk: low
+    deps: [M3-011a]
+    paths:
+      - 'crates/runner/src/tui/**'
+      - 'crates/runner/tests/tui.rs'
+    acceptance:
+      - 'Answered approval line shows who and when (envelope time); test'
 
   - id: M3-012
     title: 'client: agent registry + launch managed agent form'
@@ -5717,7 +5733,7 @@ items:
     title: 'hub: GET /v1/threads rows carry pending_interrupts, workspace and archived'
     milestone: M2
     phase: P3
-    status: "assigned"
+    status: "review"
     attempt: 1
     assignee: "sonnet"
     lane: rust
@@ -5731,6 +5747,22 @@ items:
       - 'Each needs_you row carries pending_interrupts: [{interrupt_id, title, options:[{option_id,name,kind}]}] (client-api.md updated)'
       - 'Rows carry workspace and archived; archived=true lists archived threads'
       - 'Hub live test covers the fields; the desktop inbox quick Allow/Deny works against the real hub'
+  - id: M2-010i
+    title: 'hub: list form/auth interrupts on needs_you rows (pending_interrupts kind) so the inbox can show them'
+    milestone: M2
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2-010h]
+    paths:
+      - 'crates/hub/src/tasks/**'
+      - 'crates/hub/src/threads/**'
+      - 'crates/hub/tests/tasks.rs'
+      - 'docs/specs/client-api.md'
+    acceptance:
+      - 'form/auth interrupts appear with a kind and no options; spec updated; live test'
 
   - id: M3-001h
     title: 'client-core: one owner holds the Subscription and the Outbox and publishes the combined connectivity (Connectivity::combine) for the app banner'
@@ -6382,7 +6414,8 @@ items:
     title: 'client (desktop): the signed-in session creates its client_core::Connection and calls AppShell::follow_connectivity; hub field feedback (saved/refused strings, Save control); changing the hub signs out with a clear notice'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: clippy client-core+client-gpui clean; client-gpui 115 passed 0 failed; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -6399,6 +6432,36 @@ items:
       - 'After sign-in the banner follows a real Connection (headless test with a fake hub); the hub field shows saved/refused messages from Fluent strings; saving a different hub while signed in signs out and says why'
     verify:
       - 'cargo test -p client-gpui --test shell'
+  - id: M3-002d
+    title: 'client-core: an idle outbox must not hold the combined Connection at Connecting once the subscription is live'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-002c]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'With nothing queued and a live subscription the combined state is online (banner hidden); a failed send still shows offline (tests)'
+  - id: M3-002e
+    title: 'client (desktop): the hub-changed notice names the old hub too'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-002c]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/locales/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Notice reads both hubs; string test'
 
   - id: M2-008l
     title: 'hub: strip a ticket whose key is percent-encoded (%74icket=) before the Thread DO; decode keys before matching'
