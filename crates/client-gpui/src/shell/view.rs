@@ -472,6 +472,11 @@ impl AppShell {
         }
         self.machines_pump = None;
         self.machines.reset(target.clone());
+        // The thread composer uploads attachments to the same hub as the same account; signing
+        // out (None) makes an attach fail with "Sign in to attach files.".
+        self.composer.update(cx, |composer, cx| {
+            composer.set_upload_target(target.clone(), cx);
+        });
         let (info, options) = (Vec::new(), Vec::new());
         self.agents
             .update(cx, |agents, cx| agents.set_machines(&info, cx));
