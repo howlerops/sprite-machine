@@ -307,3 +307,4 @@
 - 2026-10-29 leader: M2-010h verified on v2 (hub 336 passed, tasks + thread_do live, e2e rc). Assigned M3-002d (sonnet).
 - 2026-10-29 leader: merged M3-011c (approvals wired; link owns Subscription/Outbox/Cache) and M3-002d (idle outbox rule). Leader fix: one client_core::banner_state used by Connection and SessionLink. Filed M3-011f (inbox row opens thread), M3-011g (show refused answer), M3-011h (Connection accessors). Shared-target stale-lib races seen by 3 workers; mitigation stays 'touch sources before build'.
 - 2026-10-29 leader: merged M3-010 (diff viewer) and M3-011f (inbox row opens thread); client-gpui 141 passed, shell 5/5 runs. Filed M3-010a/b/c, M3-011i, M3-011j (banner test flaked once for the worker).
+- 2026-10-29 leader: merged M3-010a (diff viewer in task view; 146 passed). Filed M3-010d (shell hookup + string arg names), M3-010e.

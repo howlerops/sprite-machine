@@ -4305,7 +4305,8 @@ items:
     title: 'client: wire DiffView into the task view (diff activities and ACP tool_call diff content; OpenFile forwarded with the workspace root)'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 146 passed 0 failed, clippy clean. Overlay panel (fixed-height virtual rows). Shell hookup is M3-010d."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4345,6 +4346,37 @@ items:
       - 'crates/client-gpui/tests/diff.rs'
     acceptance:
       - 'each feature has a test'
+  - id: M3-010d
+    title: 'shell: pass the open thread workspace root to the transcript pane and forward TranscriptEvent::OpenFile; diff summary string uses its own arg names'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-010a, M3-011g]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/locales/en/shell.ftl'
+      - 'crates/client-gpui/tests/shell.rs'
+      - 'crates/client-gpui/tests/transcript.rs'
+    acceptance:
+      - 'Opening a thread with a workspace sets the pane root; OpenFile from the diff reaches the shell (window test); transcript-diff-summary uses path/added/removed args (catalog test arg set extended)'
+  - id: M3-010e
+    title: 'transcript: Escape closes the diff panel; cache diff summary counts per activity'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-010a]
+    paths:
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/tests/transcript.rs'
+    acceptance:
+      - 'Escape closes the panel (test); counts computed once per activity content (test)'
   - id: M3-011i
     title: 'desktop inbox: keyboard selection; Enter opens the focused row; open target has a role and an aria label'
     milestone: M3
