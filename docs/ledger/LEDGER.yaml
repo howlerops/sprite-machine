@@ -4151,7 +4151,8 @@ items:
     title: 'client-core: prune Done/Rejected outbox entries (prompts, cancels) after they are no longer needed; refusal lines map common hub codes to Fluent text with a dismiss control'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; leader: client 298 passed, clippy incl. runner clean; e2e app/rc + runner tests running"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4664,8 +4665,8 @@ items:
     title: 'client: desktop notifications, deep links, notification settings'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: notify 17 passed, client-gpui all, clippy clean. Leader verify with M3-005e."
+    status: "done"
+    evidence: "merged; leader verify on v2 (with M3-005e): client-core+client-gpui 298 passed 0 failed incl. notify 17; clippy clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
