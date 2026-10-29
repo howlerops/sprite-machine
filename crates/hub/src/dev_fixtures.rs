@@ -40,6 +40,8 @@ pub fn stored_status(name: &str) -> Option<&'static str> {
         "running" => Some("running"),
         "needs_you" => Some("waiting"),
         "done" => Some("done"),
+        "failed" => Some("failed"),
+        "cancelled" => Some("cancelled"),
         _ => None,
     }
 }
@@ -67,6 +69,8 @@ mod tests {
         assert_eq!(presence_state("away"), None);
         assert_eq!(stored_status("needs_you"), Some("waiting"));
         assert_eq!(stored_status("idle"), Some("open"));
+        assert_eq!(stored_status("failed"), Some("failed"));
+        assert_eq!(stored_status("cancelled"), Some("cancelled"));
         assert_eq!(stored_status("weird"), None);
     }
 }

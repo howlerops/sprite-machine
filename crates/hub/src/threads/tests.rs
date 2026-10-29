@@ -1997,7 +1997,7 @@ fn a_thread_is_done_after_its_last_task_succeeds_until_the_next_prompt() {
     append(&mut core, started("tk_2", "run_2"));
     append(&mut core, success("tk_2", "run_2"));
     assert_eq!(core.index_row(NOW).expect("row").status, "done");
-    // The next prompt makes it running again, and a failed run leaves it idle, not done.
+    // The next prompt makes it running again, and a failed run is `failed`, not done.
     start_task(&mut core, "tk_3", "run_3");
     assert_eq!(core.index_row(NOW).expect("row").status, "running");
     append(
@@ -2012,7 +2012,56 @@ fn a_thread_is_done_after_its_last_task_succeeds_until_the_next_prompt() {
             },
         ),
     );
-    assert_eq!(core.index_row(NOW).expect("row").status, "open");
+    assert_eq!(core.index_row(NOW).expect("row").status, "failed");
+}
+
+fn run_error(task: &str, run: &str, reason: RunErrorReason) -> Envelope {
+    run_event(
+        task,
+        run,
+        RunError {
+            reason,
+            code: None,
+            message: "ended".to_owned(),
+        },
+    )
+}
+
+#[test]
+fn failed_and_cancelled_last_until_the_next_prompt_and_waiting_wins() {
+    let mut core = core();
+    created(&mut core, create_body(false));
+    start_task(&mut core, "tk_1", "run_1");
+    append(
+        &mut core,
+        run_error("tk_1", "run_1", RunErrorReason::Cancelled),
+    );
+    assert_eq!(core.index_row(NOW).expect("row").status, "cancelled");
+    // The next prompt clears it: running again, then failed.
+    start_task(&mut core, "tk_2", "run_2");
+    assert_eq!(core.index_row(NOW).expect("row").status, "running");
+    append(&mut core, run_error("tk_2", "run_2", RunErrorReason::Error));
+    assert_eq!(core.index_row(NOW).expect("row").status, "failed");
+    // A success after that is done, not failed.
+    start_task(&mut core, "tk_3", "run_3");
+    append(&mut core, success("tk_3", "run_3"));
+    assert_eq!(core.index_row(NOW).expect("row").status, "done");
+    // A failure, then a new task with an open interrupt: waiting (needs_you) wins.
+    start_task(&mut core, "tk_4", "run_4");
+    append(&mut core, run_error("tk_4", "run_4", RunErrorReason::Error));
+    assert_eq!(core.index_row(NOW).expect("row").status, "failed");
+    start_task(&mut core, "tk_5", "run_5");
+    append(
+        &mut core,
+        open_interrupt(
+            "tk_5",
+            "run_5",
+            "int_1",
+            InterruptKind::Approval,
+            NOW + 60_000,
+        ),
+    );
+    assert_eq!(core.index_row(NOW).expect("row").status, "waiting");
 }
 
 #[test]

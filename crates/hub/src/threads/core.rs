@@ -39,7 +39,8 @@ use super::store::{
 };
 use super::timestamp::parse_timestamp;
 use crate::tasks::index::{
-    IndexRow, PendingInterrupt, STATUS_DONE, STATUS_OPEN, STATUS_RUNNING, STATUS_WAITING,
+    IndexRow, PendingInterrupt, STATUS_CANCELLED, STATUS_DONE, STATUS_FAILED, STATUS_OPEN,
+    STATUS_RUNNING, STATUS_WAITING,
 };
 use crate::tasks::title::derive_title;
 
@@ -435,6 +436,7 @@ impl<S: ThreadStore> ThreadCore<S> {
                 self.store.put_task(&task)?;
                 // A new prompt starts the thread again: it is no longer `done`.
                 self.store.put_meta("finished_ok", &json!(false))?;
+                self.store.put_meta("last_failure", &Value::Null)?;
                 // The auto-title comes from the first prompt (tasks::title); it is kept once.
                 let first_text = message.parts.iter().find_map(|part| match part {
                     ContentPart::Text { text } => Some(text.as_str()),
@@ -473,6 +475,16 @@ impl<S: ThreadStore> ThreadCore<S> {
                 let succeeded =
                     matches!(envelope.event, Event::RunFinished(_)) && ends_task(&envelope.event);
                 self.store.put_meta("finished_ok", &json!(succeeded))?;
+                // The last terminal outcome other than success (`failed` / `cancelled`); the
+                // next `UserMessage` clears it.
+                let failure = match &envelope.event {
+                    Event::RunError(error) => Some(match error.reason {
+                        RunErrorReason::Cancelled => STATUS_CANCELLED,
+                        RunErrorReason::Error => STATUS_FAILED,
+                    }),
+                    _ => None,
+                };
+                self.store.put_meta("last_failure", &json!(failure))?;
             }
             Event::Interrupt(interrupt) => {
                 self.store.put_interrupt(&InterruptRecord {
@@ -933,6 +945,25 @@ impl<S: ThreadStore> ThreadCore<S> {
                 .is_empty()
         {
             status = STATUS_DONE;
+        }
+        // `failed` / `cancelled`: the last task ended in an error or a cancel. Same lifetime as
+        // `done`, and like it only when nothing is running (so `waiting` and `running` win).
+        if status == STATUS_OPEN
+            && self
+                .store
+                .tasks_with_status(TaskStatus::Pending)?
+                .is_empty()
+        {
+            status = match self
+                .store
+                .get_meta("last_failure")?
+                .as_ref()
+                .and_then(Value::as_str)
+            {
+                Some(STATUS_FAILED) => STATUS_FAILED,
+                Some(STATUS_CANCELLED) => STATUS_CANCELLED,
+                _ => status,
+            };
         }
         Ok(IndexRow {
             thread_id: self.thread_id.clone(),

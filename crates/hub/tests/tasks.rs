@@ -540,6 +540,38 @@ fn a_thread_whose_last_task_succeeded_is_done_until_the_next_prompt() {
 }
 
 #[test]
+fn an_errored_run_lists_as_failed_a_cancelled_one_as_cancelled_until_the_next_prompt() {
+    let dev = "dev";
+    let mch = machine(dev);
+    let query = format!("machine_id={mch}");
+    let status = |thread: &str, wanted: &str| {
+        listed(dev, &format!("{query}&status={wanted}")).contains(&thread.to_owned())
+    };
+    for (reason, expected) in [("error", "failed"), ("cancelled", "cancelled")] {
+        let thread = create_thread(dev, &mch, Some("Ends badly"), None);
+        let task = unique("tk");
+        assert_eq!(prompt(&thread, &task).status, 202);
+        runner_event(
+            &thread,
+            &task,
+            "run_a",
+            json!({ "type": "RunStarted", "reason": "prompt" }),
+        );
+        runner_event(
+            &thread,
+            &task,
+            "run_a",
+            json!({ "type": "RunError", "reason": reason, "message": "ended" }),
+        );
+        assert!(status(&thread, expected), "{reason} lists as {expected}");
+        assert!(!status(&thread, "idle") && !status(&thread, "done"));
+        // The next prompt moves the row back to running.
+        assert_eq!(prompt(&thread, &unique("tk")).status, 202);
+        assert!(status(&thread, "running") && !status(&thread, expected));
+    }
+}
+
+#[test]
 fn a_deleted_thread_is_404_on_every_thread_route_like_an_unknown_one() {
     let dev = "dev";
     let admin = issue("admin");
