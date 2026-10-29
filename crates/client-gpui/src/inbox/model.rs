@@ -110,11 +110,38 @@ pub struct InterruptOption {
     pub kind: String,
 }
 
-/// An open approval on a thread, as the list reports it (`pending_interrupts`, when present).
+/// What an open interrupt asks for (client-api.md §5.2, `pending_interrupts[].kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptKind {
+    /// An ACP permission request, answered with one of its own options.
+    Approval,
+    /// A form the user fills in on the thread. It has no options.
+    Form,
+    /// An auth request the user completes on the thread. It has no options.
+    Auth,
+    /// A kind this client does not know. It is never quick-answered.
+    Other,
+}
+
+impl InterruptKind {
+    /// The wire `kind`. A missing kind is an approval: rows stored before forms and auth were listed
+    /// held only approvals.
+    pub fn parse(kind: Option<&str>) -> Self {
+        match kind {
+            None | Some("approval") => Self::Approval,
+            Some("form") => Self::Form,
+            Some("auth") => Self::Auth,
+            Some(_) => Self::Other,
+        }
+    }
+}
+
+/// An open interrupt on a thread, as the list reports it (`pending_interrupts`, when present).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingInterrupt {
     pub interrupt_id: String,
     pub title: String,
+    pub kind: InterruptKind,
     pub options: Vec<InterruptOption>,
 }
 
@@ -152,7 +179,25 @@ pub struct ThreadRow {
     /// Present when the hub reports it; absent rows show no workspace.
     pub workspace: Option<String>,
     pub archived: bool,
+    /// Every open interrupt of the thread, oldest first.
     pub pending: Vec<PendingInterrupt>,
+}
+
+impl ThreadRow {
+    /// The first open approval. Quick Allow / Deny answer this one, whatever else is listed
+    /// before it.
+    pub fn first_approval(&self) -> Option<&PendingInterrupt> {
+        self.pending
+            .iter()
+            .find(|interrupt| interrupt.kind == InterruptKind::Approval)
+    }
+
+    /// The row's detail line: the title of the first open interrupt of any kind.
+    pub fn detail(&self) -> Option<&str> {
+        self.pending
+            .first()
+            .map(|interrupt| interrupt.title.as_str())
+    }
 }
 
 fn text_of(value: &Value, key: &str) -> String {
@@ -175,6 +220,7 @@ fn parse_interrupt(item: &Value) -> Option<PendingInterrupt> {
     Some(PendingInterrupt {
         interrupt_id: item.get("interrupt_id")?.as_str()?.to_owned(),
         title: text_of(item, "title"),
+        kind: InterruptKind::parse(item.get("kind").and_then(Value::as_str)),
         options: item
             .get("options")
             .and_then(Value::as_array)
@@ -581,10 +627,11 @@ impl InboxModel {
     }
 
     /// Answer the thread's first open approval with the interrupt's own allow / reject option.
-    /// `None` when the thread has no such approval, or it offers no such option. An approval that
-    /// is already being answered is hidden from the row, so it cannot be answered twice.
+    /// Forms and auth in the list are skipped. `None` when the thread has no approval, or its first
+    /// approval offers no such option. An approval that is already being answered is hidden from
+    /// the row, so it cannot be answered twice.
     pub fn begin_answer(&mut self, thread_id: &str, verdict: Verdict) -> Option<AnswerRequest> {
-        let interrupt = self.row(thread_id)?.pending.first()?.clone();
+        let interrupt = self.row(thread_id)?.first_approval()?.clone();
         let option_id = interrupt.option_for(verdict)?.option_id.clone();
         let op = self.start(OpKind::Answer {
             thread_id: thread_id.to_owned(),

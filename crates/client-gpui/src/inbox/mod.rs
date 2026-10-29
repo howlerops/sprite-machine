@@ -15,9 +15,9 @@ use crate::shell::i18n::Catalog;
 
 pub use api::{answer_interrupt, fetch_threads, patch_thread};
 pub use model::{
-    AnswerRequest, Clock, Failure, Filters, InboxModel, InterruptOption, Item, ListRequest,
-    PatchRequest, PendingInterrupt, SEARCH_DEBOUNCE, Section, Status, SystemClock, ThreadRow,
-    Verdict, parse_threads,
+    AnswerRequest, Clock, Failure, Filters, InboxModel, InterruptKind, InterruptOption, Item,
+    ListRequest, PatchRequest, PendingInterrupt, SEARCH_DEBOUNCE, Section, Status, SystemClock,
+    ThreadRow, Verdict, parse_threads,
 };
 pub use view::{InboxEvent, InboxView, Target};
 
