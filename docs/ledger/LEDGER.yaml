@@ -6437,3 +6437,42 @@ items:
     verify:
       - 'cargo test -p client-core'
       - 'cargo test -p client-gpui --test compose'
+
+  - id: M2B-019g
+    title: 'runner: TunnelSink::thread_open takes the running task; tui/host.rs stops building the frame itself; cli e2e rc passes the session task'
+    milestone: M2b
+    phase: P4
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-019f]
+    paths:
+      - 'crates/runner/src/tunnel/io.rs'
+      - 'crates/runner/src/tui/host.rs'
+      - 'crates/cli/src/e2e/rc.rs'
+    context:
+      - 'docs/ledger/reports/M2B-019f.md (Notes, Discovered work)'
+    acceptance:
+      - 'One code path builds thread_open; existing tests and e2e rc pass'
+    verify:
+      - 'cargo test -p runner'
+      - 'cargo run -p cli -- e2e rc'
+
+  - id: M3-004c
+    title: 'runner: a thread keeps its effective (capped) permission mode across an idle-close reopen, instead of falling back to the looser local mode'
+    milestone: M3
+    phase: P3
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M3-004a]
+    paths:
+      - 'crates/runner/src/server/**'
+      - 'crates/runner/tests/server_mode.rs'
+      - 'docs/specs/tunnel.md'
+    context:
+      - 'docs/ledger/reports/M3-004a.md (Discovered work)'
+    acceptance:
+      - 'A thread started in plan on a default machine is reopened in plan after an idle close; test; tunnel.md reopen sentence updated'
+    verify:
+      - 'cargo test -p runner --test server_mode'
