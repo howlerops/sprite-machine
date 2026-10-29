@@ -4205,7 +4205,8 @@ items:
     title: "client-core UserView keeps content parts; the transcript draws a user's own image parts inline (task::media::push_image_rows)"
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; worker: client-core, client-gpui, runner tui 55 green; clippy clean. Leader verify with M3-006b."
     attempt: 1
     assignee: "sonnet"
     lane: client
