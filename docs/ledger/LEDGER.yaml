@@ -3978,6 +3978,9 @@ items:
     title: 'client: inbox (sections, search, filters, archive, rename, quick approve)'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     deps: [M3-002, M2-010]
     paths:

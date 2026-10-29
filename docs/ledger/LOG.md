@@ -291,3 +291,4 @@
 2026-10-29T02:07Z M2B-019f verify green → done. M3-004a merged; verify running
 2026-10-29T02:07Z assign M3-004c (haiku)
 2026-10-29T02:23Z M3-004a verify green → done
+2026-10-29T02:23Z assign M3-007 (sonnet, client lane)
