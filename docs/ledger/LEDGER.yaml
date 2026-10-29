@@ -4085,8 +4085,8 @@ items:
     title: 'client inbox: read pending_interrupts[].kind; quick Allow/Deny uses the first approval, row detail shows the first pending title'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: inbox 28 passed, fail-check 2 tests fail on old logic; leader verify with M3-005c"
+    status: "done"
+    evidence: "merged; leader verify on v2 with M3-005c: client 278 passed, inbox 28 passed 5/5 runs"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4117,7 +4117,8 @@ items:
     title: "desktop composer: surface Rejected SetSession/RemovePending outbox entries; disable Send until the thread's first snapshot; prune started-removal conflicts for finished tasks"
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2 (with M2-010k): client-core+client-gpui 278 passed 0 failed; shell 61 + inbox 28 passed 5/5 runs; clippy clean; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4146,6 +4147,27 @@ items:
       - 'crates/client-gpui/tests/shell.rs'
     acceptance:
       - 'Runner cap known even when the new-task composer never fetched machines (test)'
+  - id: M3-005e
+    title: 'client-core: prune Done/Rejected outbox entries (prompts, cancels) after they are no longer needed; refusal lines map common hub codes to Fluent text with a dismiss control'
+    milestone: M3
+    phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M3-005c]
+    paths:
+      - 'crates/client-core/src/outbox.rs'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/src/shell/link.rs'
+      - 'crates/client-gpui/src/compose/thread.rs'
+      - 'crates/client-gpui/locales/en/compose.ftl'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Done entries older than a bound (count or age) are removed; Rejected kept until dismissed or superseded; a long session keeps the outbox table bounded (test)'
+      - 'forbidden / invalid_request read as plain sentences; each refusal line can be dismissed (tests); window test that refusals clear on thread switch'
 
   - id: M3-006
     title: 'client: attachments (picker, paste, drag-drop) + inline images'

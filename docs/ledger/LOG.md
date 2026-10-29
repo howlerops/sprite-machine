@@ -319,3 +319,4 @@
 - 2026-10-29 leader: merged M3-005b (SetSession/RemovePending intents; 263 passed). Fixed stale admin comment in hub threads/routes.rs. Assigned M3-005a (sonnet).
 - 2026-10-29 leader: merged M3-005a (composer wired) and M2-010i (form/auth on list rows; hub 337 passed, live tasks+thread_do). Leader fix: banner test allow_parking (40/40). Filed M2-010k (inbox must pick the approval, regression risk from M2-010i), M3-005c, M3-005d. Assigned M2-010k (haiku), M3-005c (sonnet).
 - 2026-10-29 leader: merged M2-010k. Its haiku worker called mcp list_triggers once (4th haiku breach; read-only). Filed M2-010l.
+- 2026-10-29 leader: merged M3-005c; verified with M2-010k (client 278 passed, shell+inbox 5/5). Filed + assigned M3-005e (outbox pruning; refusal text) to sonnet.
