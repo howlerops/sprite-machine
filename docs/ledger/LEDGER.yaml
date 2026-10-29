@@ -4177,7 +4177,8 @@ items:
     title: 'client: attachments (picker, paste, drag-drop) + inline images'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-core+client-gpui 364 passed 0 failed; attachments 22 + shell 79 passed 5/5; clippy clean; fmt ok. Inline images for user-sent parts need client-core data: M3-006a; thread-composer upload target: M3-006b."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4200,6 +4201,67 @@ items:
       - 'Up to 4 images with thumbnails; inline render with zoom'
     verify:
       - 'cargo test -p client-gpui --test attachments'
+  - id: M3-006a
+    title: "client-core UserView keeps content parts; the transcript draws a user's own image parts inline (task::media::push_image_rows)"
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-006]
+    paths:
+      - 'crates/client-core/src/view/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/tests/transcript.rs'
+      - 'crates/client-gpui/tests/attachments.rs'
+    acceptance:
+      - 'A user message with an image file part shows a thumbnail row (test); runner TUI still builds (cargo check -p runner)'
+  - id: M3-006b
+    title: 'desktop shell: ThreadComposer::set_upload_target on sign-in/link changes so thread-composer uploads work; CONVENTIONS.md notes DropZone for file drops'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-006]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/shell.rs'
+      - 'crates/client-gpui/CONVENTIONS.md'
+    acceptance:
+      - 'Attaching in an open thread uploads against the fake hub and the prompt carries the file part (window test)'
+  - id: M3-006c
+    title: 'client-core: shared upload helper (Uploader/HttpUploader + checks) for desktop, CLI and web parity'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-006]
+    paths:
+      - 'crates/client-core/src/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/src/compose/attach.rs'
+    acceptance:
+      - 'client-gpui uses the client-core helper; tests moved'
+  - id: M3-006d
+    title: 'composer: new task from attachments alone; image thumbnail in the chip; byte-level upload progress; re-sign attachment URLs older than 24 h before send'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: M
+    risk: low
+    deps: [M3-006]
+    paths:
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/tests/attachments.rs'
+    acceptance:
+      - 'Each behaviour has a test'
 
   - id: M3-007
     title: 'client: inbox (sections, search, filters, archive, rename, quick approve)'
@@ -4836,8 +4898,8 @@ items:
     title: 'clients show failed and cancelled: desktop Status parses cancelled; web sessions.js labels failed/cancelled'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: inbox 33 passed, client-gpui all, web unit 4/4 (3 fail on old). Leader added web chip colours + test:unit script (node --test 4/4). Desktop verify with M3-006."
+    status: "done"
+    evidence: "merged; leader verify on v2 (with M3-006): client 364 passed 0 failed; shell 79 passed 40/40 after leader flake fixes (open_shell_with allow_parking, pairing poll count, send_waits cleared composer)"
     attempt: 1
     assignee: "haiku"
     lane: client
@@ -4856,8 +4918,8 @@ items:
     title: "desktop inbox: refresh on a timer (and on tab focus) so notifications fire without user action; feed the open thread's snapshot status once the hub reports failed"
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; worker: shell 79 x3, client-gpui all, clippy clean; mutation check. Leader verify with M3-006."
+    status: "done"
+    evidence: "merged; leader verify on v2 (with M3-006): client 364 passed 0 failed; shell 79 passed 40/40 after leader flake fixes (open_shell_with allow_parking, pairing poll count, send_waits cleared composer)"
     attempt: 1
     assignee: "sonnet"
     lane: client

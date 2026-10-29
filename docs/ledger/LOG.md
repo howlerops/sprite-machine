@@ -330,3 +330,4 @@
 - 2026-10-29 leader: merged M2-010n; M2-010m + M2-010n verified (hub 339 passed, tasks/thread_do live, e2e rc). Assigned M2-010o (haiku).
 - 2026-10-29 leader: merged M2-010o; leader added web .status-failed/.status-cancelled and test:unit script. Assigned M3-013d (sonnet).
 - 2026-10-29 leader: merged M3-013d (inbox refresh 20 s + on activate; snapshot status to notifier, deduped). Filed M3-013e.
+- 2026-10-29 leader: merged M3-006 (attachments; client 364 passed). Leader fixed 3 shell-test races (allow_parking in open_shell_with; pairing poll >=1; send_waits starts from cleared composer): 40/40. Filed M3-006a-d.
