@@ -6,7 +6,7 @@ plan: docs/PLAN-v2-ade.md
 branch: v2
 models: { default: haiku, high_risk_or_retry: sonnet, never: opus } # user cost policy 2026-10-28
 max_parallel: 3 # Rust workers; the docs and client lanes add their own slots (see lanes)
-lanes: { rust: 3, docs: 1, client: 1, ts: 1 } # per-lane in-flight caps; client (GPUI) is serialized
+lanes: { rust: 3, docs: 1, client: 2, ts: 1 } # client raised 1 -> 2 on 2026-10-29 (line-tables-only builds keep disk ~8 GB free)
 budget: # sized for P0–P2; the leader re-raises max_total_attempts at each phase review
   max_total_attempts: 200 # raised 2026-10-28 under the user's go-ahead to drive the plan through (P2 still open)
   max_worker_minutes: 45
@@ -4060,6 +4060,9 @@ items:
     title: 'client: approval cards'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "sonnet"
+    attempt: 1
     lane: client
     deps: [M3-008]
     paths:
@@ -6351,6 +6354,9 @@ items:
     title: 'runner tui: a runner-typed line the hub nacks is shown as a notice and kept (re-queued or editable), never lost'
     milestone: M2b
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: low
