@@ -31,6 +31,18 @@ pub(crate) struct Shared {
     pub local_threads: Mutex<HashMap<String, bool>>,
     /// Interrupt answers waiting for the hub's verdict, by `answer_id` (tunnel.md §3.6a).
     pub answers: Mutex<HashMap<String, oneshot::Sender<Result<AnswerReply, String>>>>,
+    /// Prompts typed here that the hub nacked (tunnel.md §3.6b), for the host to show.
+    pub refusals_tx: mpsc::UnboundedSender<PromptRefusal>,
+    /// The receiving end of `refusals_tx`; taken once by [`TunnelSink::prompt_refusals`].
+    pub refusals_rx: Mutex<Option<mpsc::UnboundedReceiver<PromptRefusal>>>,
+}
+
+/// A `prompt_submit` the hub rejected (tunnel.md §3.6b): the line was not queued and did not
+/// run. `task_id` is the one the line was sent with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptRefusal {
+    pub task_id: String,
+    pub message: String,
 }
 
 /// The hub's verdict on one `interrupt_answer` (tunnel.md §3.6a).
@@ -50,6 +62,7 @@ impl Shared {
     }
 
     pub fn new(store: Arc<Store>) -> Self {
+        let (refusals_tx, refusals_rx) = mpsc::unbounded_channel();
         Self {
             store,
             wake: Notify::new(),
@@ -57,6 +70,8 @@ impl Shared {
             closed: AtomicBool::new(false),
             local_threads: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
+            refusals_tx,
+            refusals_rx: Mutex::new(Some(refusals_rx)),
         }
     }
 
@@ -154,6 +169,16 @@ impl TunnelSink {
             .outbox_state()
             .map(|state| state.unacked.len())
             .unwrap_or(0)
+    }
+
+    /// The prompts typed here that the hub rejected, for the host to show. Taken once: later
+    /// calls get `None`.
+    pub fn prompt_refusals(&self) -> Option<mpsc::UnboundedReceiver<PromptRefusal>> {
+        self.shared
+            .refusals_rx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     /// Declares `thread_id` as started on this runner (a local session). Until
@@ -410,5 +435,27 @@ mod tests {
             .await;
         assert!(result.is_err(), "{result:?}");
         assert!(sink.shared.lock_answers().is_empty());
+    }
+
+    /// A nacked prompt reaches the host with the task it was sent with, once it is taken.
+    #[tokio::test]
+    async fn a_refused_prompt_submit_is_handed_to_the_host() {
+        let (sink, _dir) = sink();
+        let mut refusals = sink.prompt_refusals().expect("the refusals");
+        assert!(sink.prompt_refusals().is_none(), "taken once");
+        sink.shared
+            .refusals_tx
+            .send(PromptRefusal {
+                task_id: "tk_9".to_owned(),
+                message: "not hosted here".to_owned(),
+            })
+            .expect("the host listens");
+        assert_eq!(
+            refusals.recv().await,
+            Some(PromptRefusal {
+                task_id: "tk_9".to_owned(),
+                message: "not hosted here".to_owned(),
+            })
+        );
     }
 }

@@ -885,6 +885,37 @@ fn a_refused_prompt_is_queued_again_and_sent_after_the_running_task() {
     assert_eq!(text, "typed");
 }
 
+/// A line the hub nacks in a shared session (tunnel.md §3.6b) is not lost: it is not queued
+/// again (the hub would refuse it again), it goes back into the input with a notice.
+#[test]
+fn a_line_the_hub_nacks_is_kept_in_the_input_with_a_notice() {
+    let mut app = new_app(false);
+    app.registered(Ok(URL.to_owned()));
+    let actions = send_line(&mut app, "typed");
+    let [Action::Prompt { task_id, .. }] = actions.as_slice() else {
+        panic!("a shared line is sent up at once");
+    };
+    app.refused(
+        task_id,
+        "the hub did not accept the line (Forbidden): not hosted here",
+    );
+    assert_eq!(app.input(), "typed");
+    assert_eq!(app.queued().count(), 0, "not queued again");
+    assert!(
+        app.notice()
+            .is_some_and(|notice| notice.contains("not hosted here")),
+        "{:?}",
+        app.notice()
+    );
+    // Nothing is sent again on its own; the user sends it when they choose.
+    assert!(app.key(Key::Char('!')).is_empty());
+    let actions = app.key(Key::Enter);
+    let [Action::Prompt { text, .. }] = actions.as_slice() else {
+        panic!("the edited line is sent when the user sends it");
+    };
+    assert_eq!(text, "typed!");
+}
+
 #[test]
 fn an_empty_line_sends_nothing_and_unknown_commands_say_so() {
     let mut app = new_app(false);
@@ -1910,6 +1941,50 @@ mod session {
             other => panic!("expected a refusal, got {other:?}"),
         }
         assert_eq!(handle.tracked_prompts().await, 0);
+    }
+
+    /// A line typed in a shared session that the hub nacks reaches the screen as a refusal, and
+    /// the line is kept in the input: it is not given to the bridge and not sent again.
+    #[tokio::test]
+    async fn a_line_the_hub_nacks_reaches_the_screen_and_is_kept() {
+        let mut rig = rig(vec![plain_turn("Unused.")], true).await;
+        rig.start().await;
+        rig.until("the session to be shared", |app| {
+            matches!(app.remote(), runner::tui::Remote::On { .. })
+        })
+        .await;
+
+        rig.say("run the tests").await;
+        let (task, _, text) = rig.hub.submitted(0);
+        assert_eq!(text, "run the tests");
+
+        // The hub rejects the frame: the host reports it for the task the line was sent with.
+        rig.handle
+            .prompt_refused(
+                &task,
+                "the hub did not accept the line (Forbidden): not hosted here",
+            )
+            .await;
+        rig.until("the refusal", |app| {
+            app.notice()
+                .is_some_and(|notice| notice.contains("not hosted here"))
+        })
+        .await;
+
+        assert_eq!(rig.app.input(), "run the tests", "the line is kept");
+        assert!(
+            rig.app
+                .notice()
+                .is_some_and(|notice| notice.contains("not hosted here")),
+            "{:?}",
+            rig.app.notice()
+        );
+        assert_eq!(
+            rig.handle.tracked_prompts().await,
+            0,
+            "the bridge never had it"
+        );
+        assert_eq!(rig.hub.prompts.lock().expect("lock").len(), 1, "sent once");
     }
 
     /// A line typed while the approval of a running turn is open waits behind that turn, and runs

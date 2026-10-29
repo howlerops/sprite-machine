@@ -295,6 +295,16 @@ impl Handle {
             .take()
     }
 
+    /// The hub rejected a line typed here that was sent up for `task_id` (tunnel.md §3.6b). The
+    /// screen gets it back as [`Feed::Refused`]: the line is kept, not queued for the bridge.
+    pub async fn prompt_refused(&self, task_id: &str, message: &str) {
+        let inner = self.inner.lock().await;
+        let _ = inner.feed.send(Feed::Refused {
+            task_id: task_id.to_owned(),
+            message: message.to_owned(),
+        });
+    }
+
     /// A command from the hub (a phone's prompt, a phone's answer, a cancel). The log gets what
     /// the hub already has but this runner does not, then the bridge gets the command.
     pub async fn hub_command(&self, command: IncomingCommand) {
