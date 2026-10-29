@@ -3,14 +3,16 @@
 //!
 //! Shortcut: Cmd+Enter on macOS, Ctrl+Enter elsewhere sends (context `Compose`).
 
+pub mod attach;
+pub mod attach_bar;
 mod commands;
 mod new;
 mod queue;
 mod thread;
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use gpui_kit::TestSupportExt as _;
@@ -19,9 +21,14 @@ use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, Textar
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, *};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use protocol::tunnel::ContentPart;
 
 use crate::shell::i18n::Catalog;
 
+pub use attach::{
+    AttachmentSet, Gate, HttpUploader, NoUploader, Reject, UploadError, Uploader, format_size,
+};
+pub use attach_bar::{AttachBar, AttachEvent, DropZone, FileChooser, SystemChooser};
 pub use commands::{
     ChoiceOption, ComposerEvent, ConfigSelect, ModeOption, SessionOptions, SlashAccept,
     SlashCommand, accept_command, cap_from_features, filter_commands, slash_query,
@@ -129,6 +136,8 @@ pub struct ComposeView {
     machines_rx: Option<Receiver<Result<Vec<MachineOption>, String>>>,
     send_rx: Option<Receiver<SendAnswer>>,
     prompt: Entity<TextareaState>,
+    attach: Entity<AttachBar>,
+    drop_zone: DropZone,
     workspace: Entity<InputState>,
     title: Entity<InputState>,
     focus: FocusHandle,
@@ -157,7 +166,14 @@ impl ComposeView {
                 .default_value(draft.workspace_path.clone())
         });
         let title = cx.new(|cx| InputState::new(window, cx).default_value(draft.title.clone()));
+        let attach = cx.new(|_| AttachBar::new());
         let subscriptions = vec![
+            cx.subscribe_in(&attach, window, |this, _, event, window, cx| {
+                let AttachEvent::ReadyToSend = event;
+                // The uploads a send was waiting for are done: send again, now with the parts.
+                this.status = Status::Idle;
+                this.send(window, cx);
+            }),
             cx.subscribe_in(&prompt, window, |this, state, event, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     let text = state.read(cx).value();
@@ -188,6 +204,8 @@ impl ComposeView {
             machines_rx: None,
             send_rx: None,
             prompt,
+            attach,
+            drop_zone: DropZone::new(),
             workspace,
             title,
             focus: cx.focus_handle(),
@@ -208,6 +226,21 @@ impl ComposeView {
         &self.prompt
     }
 
+    /// The attachments strip (tests add files through it and read its state).
+    pub fn attachments(&self) -> &Entity<AttachBar> {
+        &self.attach
+    }
+
+    /// Uploads go to the hub the composer sends to.
+    fn sync_uploader(&self, cx: &mut Context<Self>) {
+        let uploader: Arc<dyn Uploader> = match &self.target {
+            Some(target) => Arc::new(HttpUploader::new(target.api.clone(), target.token.clone())),
+            None => Arc::new(NoUploader),
+        };
+        self.attach
+            .update(cx, |attach, _| attach.set_uploader(uploader));
+    }
+
     /// The workspace folder field (tests focus it to type).
     pub fn workspace_input(&self) -> &Entity<InputState> {
         &self.workspace
@@ -225,6 +258,7 @@ impl ComposeView {
             return;
         }
         self.target = target;
+        self.sync_uploader(cx);
         if self.target.is_some() {
             self.load_machines(window, cx);
         }
@@ -236,6 +270,7 @@ impl ComposeView {
     pub fn set_send_target(&mut self, target: Option<Target>, cx: &mut Context<Self>) {
         if self.target != target {
             self.target = target;
+            self.sync_uploader(cx);
             cx.notify();
         }
     }
@@ -327,6 +362,7 @@ impl ComposeView {
                             .update(cx, |state, cx| state.set_value("", window, cx));
                         self.title
                             .update(cx, |state, cx| state.set_value("", window, cx));
+                        self.attach.update(cx, |attach, cx| attach.clear(cx));
                         self.status = Status::Sent {
                             thread_id: created.thread_id,
                         };
@@ -360,6 +396,38 @@ impl ComposeView {
                 return;
             }
         };
+        // Attachments upload first; the send goes when they are all up (a failed upload
+        // blocks it until the chip is retried or removed).
+        match self.attach.update(cx, |attach, cx| attach.request_send(cx)) {
+            Gate::Blocked => {
+                self.status = Status::Idle;
+                cx.notify();
+            }
+            Gate::Waiting => {
+                self.status = Status::Sending;
+                cx.notify();
+            }
+            Gate::Empty => self.create(target, prepared, Vec::new(), window, cx),
+            Gate::Ready(parts) => self.create(target, prepared, parts, window, cx),
+        }
+    }
+
+    /// POST the thread with the uploaded attachments as parts after the text.
+    fn create(
+        &mut self,
+        target: Target,
+        mut prepared: PreparedSend,
+        parts: Vec<ContentPart>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !parts.is_empty() {
+            // Another set of attachments is another body, so it needs another key.
+            prepared.idempotency_key = attach::keyed_by_parts(&prepared.idempotency_key, &parts);
+            if let Some(prompt) = prepared.request.prompt.as_mut() {
+                prompt.parts.extend(parts);
+            }
+        }
         self.status = Status::Sending;
         cx.notify();
         self.send_rx = Some(run_off_thread(async move {
@@ -605,8 +673,10 @@ impl Render for ComposeView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let status = self.status_text();
         let shortcut = send_shortcut_label();
+        let paste_into = self.attach.clone();
         v_flex()
             .id("compose")
+            .relative()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .role(Role::Form)
@@ -615,6 +685,26 @@ impl Render for ComposeView {
             .size_full()
             .gap_3()
             .on_action(cx.listener(|this, _: &SendTask, window, cx| this.send(window, cx)))
+            .on_drag_move::<ExternalPaths>(cx.listener(
+                |this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
+                    if this.drop_zone.moved(event, cx) {
+                        cx.notify();
+                    }
+                },
+            ))
+            .child(self.drop_zone.release_marker({
+                let this = cx.entity();
+                move |paths, _, cx| {
+                    this.update(cx, |this, cx| {
+                        this.attach
+                            .update(cx, |attach, cx| attach.add_paths(paths, cx));
+                        cx.notify();
+                    });
+                }
+            }))
+            .when(self.drop_zone.is_over(), |el| {
+                el.border_1().border_color(cx.theme().primary)
+            })
             .child(div().text_xl().child(tr("compose-title")))
             .child(self.render_machines(cx))
             .child(self.render_agents(cx))
@@ -641,9 +731,12 @@ impl Render for ComposeView {
                             .id("compose-prompt")
                             .test_support()
                             .aria_label(tr("compose-prompt"))
-                            .child(Textarea::new(&self.prompt)),
+                            .child(Textarea::new(&self.prompt).on_paste(move |item, _, cx| {
+                                paste_into.update(cx, |attach, cx| attach.paste(item, cx))
+                            })),
                     ),
             )
+            .child(self.attach.clone())
             .child(
                 h_flex()
                     .gap_3()
