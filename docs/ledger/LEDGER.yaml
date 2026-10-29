@@ -4641,10 +4641,15 @@ items:
     title: 'client: agent registry + launch managed agent form'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-002]
     paths:
-      - 'crates/client-gpui/src/agents/**'
+      - "crates/client-gpui/src/agents/**"
+      - "crates/client-gpui/locales/en/agents.ftl"
+      - "crates/client-gpui/tests/agents.rs"
     context:
       - 'docs/PLAN-v2-ade.md §3 (surface 5)'
       - 'crates/client-core (agents view model)'
