@@ -60,6 +60,7 @@ pub struct AppShell {
     focus: FocusHandle,
     hub_input: Entity<InputState>,
     compose: Entity<crate::compose::ComposeView>,
+    inbox: Entity<crate::inbox::InboxView>,
     _appearance: Subscription,
     _hub_input_events: Subscription,
     connectivity_task: Option<Task<()>>,
@@ -83,12 +84,14 @@ impl AppShell {
         let hub_input = cx.new(|cx| InputState::new(window, cx).default_value(hub));
         let hub_input_events = cx.subscribe_in(&hub_input, window, Self::on_hub_event);
         let compose = cx.new(|cx| crate::compose::ComposeView::new(draft_dir, window, cx));
+        let inbox = cx.new(|cx| crate::inbox::InboxView::new(window, cx));
         let shell = Self {
             model,
             driver,
             focus,
             hub_input,
             compose,
+            inbox,
             _appearance: appearance,
             _hub_input_events: hub_input_events,
             connectivity_task: None,
@@ -351,6 +354,8 @@ impl AppShell {
             self.render_settings(slots, cx).into_any_element()
         } else if current == Section::NewTask {
             self.compose.clone().into_any_element()
+        } else if current == Section::Inbox {
+            self.inbox.clone().into_any_element()
         } else {
             let text = tr_args("content-placeholder", &[("section", &current.title())]);
             div().child(text).into_any_element()
@@ -519,6 +524,12 @@ impl Render for AppShell {
         });
         self.compose
             .update(cx, |compose, cx| compose.set_target(target, window, cx));
+        let inbox_target = self.model.session().map(|session| crate::inbox::Target {
+            api: format!("{}/v1", session.hub.trim_end_matches('/')),
+            token: Some(session.grant.token.clone()),
+        });
+        self.inbox
+            .update(cx, |inbox, cx| inbox.set_target(inbox_target, window, cx));
         let slots = self.model.focus_order();
         let body = match self.model.screen() {
             Screen::Login => self.render_login(&slots, cx).into_any_element(),
