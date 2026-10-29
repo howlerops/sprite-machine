@@ -4044,7 +4044,9 @@ items:
     title: 'desktop: wire ThreadComposer into the task view (Send/Cancel via the link outbox, ThreadRequest via authenticated hub call, set_thread per snapshot, set_runner_mode from machine capabilities)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: M
     risk: medium
@@ -4063,7 +4065,8 @@ items:
     title: 'client-core: Intent variants for session set (mode/config) and pending remove, so they go through the outbox with idempotency keys'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-core+client-gpui 263 passed 0 failed, clippy client-core/gpui/runner clean, fmt ok. Role note was a stale comment in threads/routes.rs (policy is member); fixed."
     attempt: 1
     assignee: "sonnet"
     lane: client
