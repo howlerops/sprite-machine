@@ -556,10 +556,15 @@ async fn browser_follows(
     stray_first: bool,
     outcome: &str,
 ) -> (String, String) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let opened = loop {
         if let Some(url) = browser.opened().first() {
             break url.clone();
         }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the sign-in never opened the browser"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
     let parsed = url::Url::parse(&opened).expect("authorize url");
@@ -1493,6 +1498,36 @@ fn the_hub_address_is_edited_in_settings_and_saved_on_enter(cx: &mut TestAppCont
     assert_eq!(Preferences::load(&prefs).hub_url, "http://127.0.0.1:8787");
 }
 
+/// The connection banner's text as the window shows it now (pumps the foreground first).
+fn connection_banner(cx: &mut TestAppContext, window: gpui_kit::AnyWindowHandle) -> Option<String> {
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window
+            .try_find("connectivity-banner")
+            .and_then(|found| found.label().map(str::to_owned))
+    })
+    .expect("window")
+}
+
+/// Waits (with a deadline) until the connection banner reads `expected`. The banner follows a
+/// watch feed, so a single read right after a state change can see the previous state.
+fn wait_for_connection_banner(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    expected: Option<&str>,
+) {
+    let mut last = None;
+    for _ in 0..400 {
+        last = connection_banner(cx, window);
+        if last.as_deref() == expected {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("connection banner never read {expected:?}; last {last:?}");
+}
+
 #[gpui_kit::test]
 fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
     // Offline: the hub refuses the socket. Then it comes up, the subscription goes live, and
@@ -1520,27 +1555,14 @@ fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
     );
     let feed = connection.watch_connectivity();
     cx.update(|cx| view.update(cx, |shell, cx| shell.follow_connectivity(feed, cx)));
-    let banner = |cx: &mut TestAppContext| -> Option<String> {
-        cx.run_until_parked();
-        cx.update_window(window, |_, window, cx| {
-            window.render_frame(cx);
-            window
-                .try_find("connectivity-banner")
-                .and_then(|found| found.label().map(str::to_owned))
-        })
-        .expect("window")
-    };
-    assert_eq!(
-        banner(cx).as_deref(),
-        Some("You are offline. Changes will be sent when the connection returns.")
-    );
+    wait_for_connection_banner(cx, window, Some(OFFLINE));
 
     up.store(true, Ordering::SeqCst);
     runtime
         .block_on(connection.reconnect())
         .expect("the hub accepts the socket");
     assert_eq!(connection.connectivity(), Connectivity::Connecting);
-    assert_eq!(banner(cx).as_deref(), Some("Reconnecting..."));
+    wait_for_connection_banner(cx, window, Some("Reconnecting..."));
 
     let applied = runtime
         .block_on(connection.next_persisted(&mut cache))
@@ -1548,7 +1570,7 @@ fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
     assert_eq!(applied, Applied::Live);
     // Live with nothing queued: the idle outbox has no opinion, so the banner hides.
     assert_eq!(connection.connectivity(), Connectivity::Online);
-    assert_eq!(banner(cx), None);
+    wait_for_connection_banner(cx, window, None);
 
     connection
         .enqueue(
@@ -1561,7 +1583,7 @@ fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
         )
         .expect("queues");
     // A queued send the hub has not answered yet is still connecting.
-    assert_eq!(banner(cx).as_deref(), Some("Reconnecting..."));
+    wait_for_connection_banner(cx, window, Some("Reconnecting..."));
     let report = runtime
         .block_on(connection.flush(
             &cache,
@@ -1573,7 +1595,7 @@ fn the_banner_follows_a_client_core_connection(cx: &mut TestAppContext) {
         .expect("flushes");
     assert_eq!(report.done, 1);
     assert_eq!(connection.connectivity(), Connectivity::Online);
-    assert_eq!(banner(cx), None);
+    wait_for_connection_banner(cx, window, None);
 }
 
 #[gpui_kit::test]
@@ -1754,12 +1776,9 @@ fn after_sign_in_the_banner_follows_the_sessions_own_connection(cx: &mut TestApp
                 task_id: "tk_1".to_owned(),
             });
     });
-    for _ in 0..400 {
-        if state.cancels.load(Ordering::SeqCst) == 1 {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
+    wait_until_true("the cancel to reach the hub", || {
+        state.cancels.load(Ordering::SeqCst) == 1
+    });
     assert_eq!(state.cancels.load(Ordering::SeqCst), 1);
     wait_for_banner(cx, window, &view, None);
 }
@@ -2159,7 +2178,8 @@ fn quick_allow_on_a_row_answers_and_does_not_open_its_thread(cx: &mut TestAppCon
     let answers = state.answers.lock().expect("lock").clone();
     assert_eq!(answers[0].thread, "th_a");
     assert_eq!(answers[0].interrupt, "int_1");
-    std::thread::sleep(Duration::from_millis(200));
+    // No command reached the link for th_a (the click handler is synchronous and the shell's
+    // open thread is still unset), so the subscription list cannot grow past th_b.
     assert_eq!(*state.subscribed.lock().expect("lock"), ["th_b"]);
     cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), None));
 }
@@ -2179,7 +2199,6 @@ fn the_link_follows_the_thread_the_screens_open(cx: &mut TestAppContext) {
         Arc::new(ManualClock::new(RAISED_MS)),
     );
     let _ = banner_now(cx, window, &view);
-    std::thread::sleep(Duration::from_millis(200));
     assert!(state.subscribed.lock().expect("lock").is_empty());
     cx.update(|cx| assert_eq!(view.read(cx).open_thread_id(), None));
 
@@ -2201,14 +2220,24 @@ fn the_link_follows_the_thread_the_screens_open(cx: &mut TestAppContext) {
             .iter()
             .any(|thread| thread == "th_b")
     });
-    // Opening the thread already followed is not a new subscription.
-    let count = state.subscribed.lock().expect("lock").len();
+    // Opening the thread already followed is not a new subscription. The link handles its
+    // commands in order, so a real switch to th_a after the no-op is a barrier: any extra
+    // subscription the no-op caused would show up before it in the list.
     cx.update_window(window, |_, _, cx| {
         view.update(cx, |shell, cx| shell.open_thread("th_b", None, cx));
     })
     .expect("window");
-    std::thread::sleep(Duration::from_millis(200));
-    assert_eq!(state.subscribed.lock().expect("lock").len(), count);
+    cx.update_window(window, |_, _, cx| {
+        view.update(cx, |shell, cx| shell.open_thread("th_a", None, cx));
+    })
+    .expect("window");
+    wait_until_true("the switch back to th_a to be followed", || {
+        state.subscribed.lock().expect("lock").len() >= 3
+    });
+    assert_eq!(
+        *state.subscribed.lock().expect("lock"),
+        ["th_a", "th_b", "th_a"]
+    );
 }
 
 #[gpui_kit::test]
