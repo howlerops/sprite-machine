@@ -49,18 +49,21 @@ pub enum Status {
     Running,
     NeedsYou,
     Done,
-    /// The last run failed. Not one of the four names client-api.md §5.2 lists today (the hub
-    /// folds a failed run into `done`), so it appears only when a hub reports `failed`.
+    /// The last run failed (client-api.md §5.2).
     Failed,
+    /// The last run was cancelled (client-api.md §5.2).
+    Cancelled,
 }
 
 impl Status {
+    /// Unknown strings are `Idle`, which sits with Done like the other finished states.
     pub fn parse(text: &str) -> Self {
         match text {
             "running" => Self::Running,
             "needs_you" => Self::NeedsYou,
             "done" => Self::Done,
             "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
             _ => Self::Idle,
         }
     }
@@ -73,12 +76,13 @@ impl Status {
             Self::NeedsYou => "needs_you",
             Self::Done => "done",
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
         }
     }
 }
 
-/// The three inbox sections. `idle` threads (nothing started, or the last run failed or was
-/// cancelled) sit with Done: nothing is waiting on the user and nothing is running.
+/// The three inbox sections. `idle` threads (nothing started), failed and cancelled runs sit with
+/// Done: nothing is waiting on the user and nothing is running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     NeedsYou,
@@ -101,7 +105,7 @@ impl Section {
         match status {
             Status::NeedsYou => Self::NeedsYou,
             Status::Running => Self::Running,
-            Status::Done | Status::Failed | Status::Idle => Self::Done,
+            Status::Done | Status::Failed | Status::Cancelled | Status::Idle => Self::Done,
         }
     }
 }
