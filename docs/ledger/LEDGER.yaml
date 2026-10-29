@@ -4104,7 +4104,8 @@ items:
     title: 'client: plan view + cost/context meters'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged 8bda741; worker: plan_usage 10 passed, client-gpui all suites, clippy clean. Tokens derived from context_used growth (spec has no token counters -> M3-009b). Leader verify after M3-010d."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -4124,6 +4125,54 @@ items:
       - 'Plan activity updates live; per-turn + cumulative cost/tokens + context %'
     verify:
       - 'cargo test -p client-gpui --test plan_usage'
+  - id: M3-009a
+    title: 'desktop task view: show the plan and usage widgets for the open thread (PlanModel::from_thread, UsageTracker::observe after each apply)'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-009, M3-010d]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Opening a thread with plan and usage events shows both widgets and they update on new events (window test with the fake hub)'
+  - id: M3-009b
+    title: 'spec + ACP mapping: usage carries turn_tokens/total_tokens (input/output) and the mapping emits turn_cost'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M3-009]
+    paths:
+      - 'docs/specs/turn-event.md'
+      - 'crates/protocol/src/**'
+      - 'crates/runner/src/**'
+      - 'crates/client-gpui/src/task/usage.rs'
+      - 'crates/client-gpui/tests/plan_usage.rs'
+    acceptance:
+      - 'turn-event.md §4.6 documents token fields; mapping fills them from ACP usage when present; the usage widget prefers them over context growth (tests)'
+  - id: M3-009c
+    title: 'client-core: record usage at each task start so per-turn figures survive a batch replay (move UsageTracker logic)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-009]
+    paths:
+      - 'crates/client-core/src/view/**'
+      - 'crates/client-core/tests/**'
+      - 'crates/client-gpui/src/task/usage.rs'
+      - 'crates/client-gpui/tests/plan_usage.rs'
+    acceptance:
+      - 'Replaying a thread in one batch gives the same per-turn figures as live (test)'
 
   - id: M3-010
     title: 'client: diff viewer'
