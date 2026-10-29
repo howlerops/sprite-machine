@@ -296,3 +296,4 @@
 2026-10-29T02:27Z M3-004c (with -c fix) merged, runner 249/0 → done
 2026-10-29T02:27Z client lane cap 1 → 2 (disk steady ~8 GB with line-tables-only). Assign M3-011 (sonnet, client), M2B-019e (haiku)
 2026-10-29T02:50Z user added .claude/settings.json allow rules → leader created D1 sm-hub, R2 sm-hub-blobs, R2 sm-workspace-backups, queue sm-hub-notify → M2-014 done (docs/ops/hub.md). M2-015 (deploy workflow) unblocked
+- 2026-10-29 leader: merged M2B-019e (nacked runner line kept with a notice) and M3-007 (desktop inbox, 21 tests); verify on merged v2 running. Filed M2B-019h (tunnel nack integration test) and M2-010h (hub list rows carry pending_interrupts/workspace/archived, from M3-007). Assigned M2-015 (sonnet).

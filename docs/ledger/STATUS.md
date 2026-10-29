@@ -2,7 +2,7 @@
 
 _Rewritten by the leader on every ledger commit._
 
-done 142/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 12 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 135/200
+done 142/300 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 13 (human: M0-014, M0-020, M1B-001, M1B-010, M2B-020, M3-016, M6-002, M6-006, M2-003d, M1B-008f) · attempts 136/200
 
 ## Per phase
 
@@ -10,8 +10,8 @@ done 142/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 12 (huma
 | ----- | ----- | ---- | --------- |
 | P0 | 12 | 12 | 0 |
 | P1 | 37 | 37 | 0 |
-| P2 | 69 | 64 | 0 |
-| P3 | 39 | 23 | 3 |
+| P2 | 70 | 64 | 0 |
+| P3 | 41 | 23 | 3 |
 | P4 | 61 | 2 | 0 |
 | P5 | 30 | 0 | 0 |
 | P6 | 28 | 0 | 0 |
@@ -48,6 +48,7 @@ done 142/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 12 (huma
 | M2B-005a | worker | rust | done | hub (security): enforce require_trusted_devices at the tunnel; rate-limit device code start and approve attempts; purge expired pairings; runner shows the approving org/user and asks to confirm before storing the credential |
 | M2B-005b | worker | rust | done | runner: sm logout / sm status; run mode builds TunnelClient from KeychainCredentials + stored hub URL; Linux persistent keychain decision |
 | M2B-006a | worker | rust | blocked | Confirm each harness ACP invocation (claude-agent-acp, codex-acp, opencode acp, pi adapter, gemini --experimental-acp, goose acp) against the real CLI; correct harness::HARNESSES |
+| M2B-006b | worker | rust | blocked | Confirm goose ACP invocation (goose acp) against a real goose binary; a real session/new per harness with logins |
 | M2B-006c | worker | rust | done | Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion |
 | M2B-004f | worker | rust | done | runner: macOS sleep watcher builds and works (IOKit FFI checked against the SDK, a real sleep/wake on a Mac); logind inhibitor tested against a mock login1 on a private bus |
 | M2B-007a | worker | rust | done | sm rc follow-ups: permission mode applied before the first prompt; agent mcp_capabilities exposed by the bridge so http/sse MCP servers pass; stale worktree sweep at start; session end (close command / idle timeout) |
@@ -67,7 +68,7 @@ done 142/297 (4 dropped) · in-flight M3-007,M3-011,M2B-019e · blocked 12 (huma
 | CI-001 | human | rust | done | GitHub Actions jobs stopped starting on v2 (all jobs fail in ~3 s with no logs since run 51, 2026-10-28T04:47Z) |
 | M2-014 | leader | rust | done | Provision Cloudflare resources (D1 db, R2 bucket, queues, DO migrations) with wrangler |
 | M2-014a | human | rust | todo | Set hub Worker secrets after the first deploy (MASTER_KEY, BOOTSTRAP_OWNER_TOKEN, VAPID_PRIVATE_KEY) + VAPID public key var |
-| M2-015 | worker | rust | todo | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
+| M2-015 | worker | rust | in_progress | hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc |
 | M2B-005 | worker | rust | done | runner: `sm login` device-code pairing + trusted device + keychain |
 | M2B-006 | worker | rust | done | runner: local harness discovery + local logins/MCP passthrough |
 | M2B-007 | worker | rust | done | runner: `sm rc` server mode (spawn, capacity, permission mode, names, --continue) |

@@ -2552,6 +2552,21 @@ items:
     verify:
       - 'cargo test -p runner --test discovery'
       - 'test -s docs/spikes/harness-invocations.md'
+  - id: M2B-006b
+    title: 'Confirm goose ACP invocation (goose acp) against a real goose binary; a real session/new per harness with logins'
+    milestone: M2b
+    phase: P2
+    status: "blocked"
+    blocked_on: "human"
+    howto: "On a machine with goose installed (github.com/block/goose releases), run `goose --version` and start `goose acp`, send one ACP initialize line ({\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{}}}) and paste the first reply line. The leader could not run a downloaded goose binary here (permission check). The other five harnesses answered initialize in M2B-006a; session/new with a real login is covered by the real-device check M2B-020."
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-006a]
+    paths:
+      - 'crates/runner/src/harness/**'
+    acceptance:
+      - 'goose acp answers initialize with protocolVersion 1, or the goose row in harness::HARNESSES is corrected'
 
   - id: M2B-006c
     title: 'Local MCP config: resolve bare stdio commands to absolute paths, sse entries when the agent supports them, ${VAR} expansion'
@@ -3170,11 +3185,16 @@ items:
     title: 'hub: deploy workflow (wrangler), DR doc (D1 Time Travel, R2), alerts doc'
     milestone: M2
     phase: P2
+    status: "in_progress"
+    attempt: 1
+    assignee: "worker-sonnet"
     deps: [M2-014, M2-008]
     paths:
-      - '.github/workflows/deploy-hub.yml'
-      - 'docs/ops/dr.md'
-      - 'docs/ops/alerts.md'
+      - ".github/workflows/deploy-hub.yml"
+      - "crates/hub/wrangler.toml"
+      - "docs/ops/dr.md"
+      - "docs/ops/alerts.md"
+      - "docs/ops/hub.md"
     context:
       - 'docs/PLAN-v2-ade.md §4.2 (Deploy)'
       - 'https://developers.cloudflare.com/d1/reference/time-travel/'
@@ -5566,6 +5586,22 @@ items:
       - 'Successive passes visit every hosted thread (native test with 450 threads and 200 per pass: all visited within 3 passes)'
     verify:
       - 'cargo test -p hub'
+  - id: M2-010h
+    title: 'hub: GET /v1/threads rows carry pending_interrupts, workspace and archived'
+    milestone: M2
+    phase: P3
+    status: "todo"
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2-010]
+    paths:
+      - 'crates/hub/src/tasks/**'
+      - 'docs/specs/client-api.md'
+    acceptance:
+      - 'Each needs_you row carries pending_interrupts: [{interrupt_id, title, options:[{option_id,name,kind}]}] (client-api.md updated)'
+      - 'Rows carry workspace and archived; archived=true lists archived threads'
+      - 'Hub live test covers the fields; the desktop inbox quick Allow/Deny works against the real hub'
 
   - id: M3-001h
     title: 'client-core: one owner holds the Subscription and the Outbox and publishes the combined connectivity (Connectivity::combine) for the app banner'
@@ -6372,6 +6408,19 @@ items:
       - 'A prompt_submit nack reaches the TUI as a notice and the line is kept; test'
     verify:
       - 'cargo test -p runner --test tui'
+  - id: M2B-019h
+    title: 'runner tunnel: integration test that a nacked prompt_submit reaches the host (tunnel_client.rs)'
+    milestone: M2b
+    phase: P3
+    status: "todo"
+    lane: rust
+    size: S
+    risk: low
+    deps: [M2B-019e]
+    paths:
+      - 'crates/runner/tests/tunnel_client.rs'
+    acceptance:
+      - 'A nack for a prompt_submit on the wire produces a PromptRefusal with the frame task_id, through the real client loop'
 
   - id: M2B-019f
     title: 'hub: a task the runner started before /rc counts as busy, so the first shared prompt queues behind it instead of being refused by the bridge'
