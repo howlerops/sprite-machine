@@ -38,6 +38,18 @@ pub struct Target {
     pub token: Option<String>,
 }
 
+/// What the inbox tells the shell. A click on a row's title opens that thread; the shell shows
+/// it and follows it. Quick Allow / Deny and the row's other buttons emit nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InboxEvent {
+    OpenThread {
+        thread_id: String,
+        workspace: Option<String>,
+    },
+}
+
+impl EventEmitter<InboxEvent> for InboxView {}
+
 fn run_off_thread<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,
 ) -> Receiver<T> {
@@ -372,6 +384,19 @@ impl InboxView {
         cx.notify();
     }
 
+    /// Open a thread from its row: emits [`InboxEvent::OpenThread`] with the row's thread and
+    /// workspace. Unknown threads emit nothing.
+    pub fn open_thread(&mut self, thread_id: &str, cx: &mut Context<Self>) {
+        let Some(row) = self.model.row(thread_id) else {
+            return;
+        };
+        let event = InboxEvent::OpenThread {
+            thread_id: row.thread_id.clone(),
+            workspace: row.workspace.clone(),
+        };
+        cx.emit(event);
+    }
+
     /// Quick Allow / Deny on the thread's first open approval.
     pub fn answer(
         &mut self,
@@ -622,6 +647,7 @@ impl InboxView {
         });
         let detail = pending.map(|p| p.title).unwrap_or_default();
         let (allow_id, deny_id) = (id.clone(), id.clone());
+        let open_id = id.clone();
         div()
             .id(("row", ix))
             .test_support()
@@ -643,10 +669,17 @@ impl InboxView {
                     .px_3()
                     .gap_2()
                     .items_center()
+                    // The title and detail area is the click target that opens the thread. It is
+                    // a sibling of the buttons, so their clicks never reach it.
                     .child(
                         v_flex()
+                            .id(SharedString::from(format!("inbox-open-{id}")))
+                            .test_support()
                             .flex_1()
                             .min_w_0()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_thread(&open_id, cx);
+                            }))
                             .child(div().truncate().child(title.clone()))
                             .child(
                                 div()

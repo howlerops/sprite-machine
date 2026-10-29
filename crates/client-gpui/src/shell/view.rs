@@ -28,6 +28,7 @@ use super::prefs::{Appearance, Preferences, ThemeChoice};
 use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
+use crate::inbox::InboxEvent;
 use crate::task::TranscriptPane;
 
 actions!(shell, [GoNewTask, NextSection, PreviousSection]);
@@ -77,6 +78,7 @@ pub struct AppShell {
     inbox: Entity<crate::inbox::InboxView>,
     _appearance: Subscription,
     _hub_input_events: Subscription,
+    _inbox_events: Subscription,
     connectivity_task: Option<Task<()>>,
     /// The signed-in session's hub link; present exactly while a session is.
     link: Option<SessionLink>,
@@ -127,6 +129,14 @@ impl AppShell {
         let hub_input_events = cx.subscribe_in(&hub_input, window, Self::on_hub_event);
         let compose = cx.new(|cx| crate::compose::ComposeView::new(draft_dir, window, cx));
         let inbox = cx.new(|cx| crate::inbox::InboxView::new(window, cx));
+        // A row click in the inbox opens that thread on the Inbox page.
+        let inbox_events = cx.subscribe(&inbox, |this, _, event: &InboxEvent, cx| {
+            let InboxEvent::OpenThread {
+                thread_id,
+                workspace,
+            } = event;
+            this.open_thread(thread_id, workspace.as_deref(), cx);
+        });
         let pane = cx.new(|_| TranscriptPane::new());
         let mut shell = Self {
             model,
@@ -137,6 +147,7 @@ impl AppShell {
             inbox,
             _appearance: appearance,
             _hub_input_events: hub_input_events,
+            _inbox_events: inbox_events,
             connectivity_task: None,
             link: None,
             link_thread: config.link_thread,
