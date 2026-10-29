@@ -29,7 +29,9 @@ use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
 use crate::inbox::InboxEvent;
-use crate::task::{TranscriptEvent, TranscriptPane};
+use crate::task::{
+    PlanModel, TranscriptEvent, TranscriptPane, UsageModel, render_plan, render_usage,
+};
 
 actions!(shell, [GoNewTask, NextSection, PreviousSection]);
 
@@ -90,6 +92,9 @@ pub struct AppShell {
     /// The thread shown in the Inbox page, if one was opened.
     open_thread: Option<String>,
     pane: Entity<TranscriptPane>,
+    /// The open thread's plan and usage widgets, as of its last snapshot.
+    plan: PlanModel,
+    usage: UsageModel,
     /// The last "open file" request from the open thread's diff: absolute path and 1-based line.
     last_open_file: Option<(PathBuf, u32)>,
     snapshot_task: Option<Task<()>>,
@@ -161,6 +166,8 @@ impl AppShell {
             presets_path,
             open_thread: None,
             pane,
+            plan: PlanModel::default(),
+            usage: UsageModel::default(),
             last_open_file: None,
             snapshot_task: None,
             tick_task: None,
@@ -285,6 +292,8 @@ impl AppShell {
                 pane
             });
             self._pane_events = Self::subscribe_pane(&self.pane, cx);
+            self.plan = PlanModel::default();
+            self.usage = UsageModel::default();
             // The link may already hold this thread (opened again after going back).
             let current = self
                 .link
@@ -346,6 +355,8 @@ impl AppShell {
         let handler: CardHandler = Rc::new(move |action, _, cx| {
             let _ = shell.update(cx, |shell, _| shell.on_card_action(action));
         });
+        self.plan = snapshot.plan;
+        self.usage = snapshot.usage;
         self.pane.update(cx, |pane, cx| {
             pane.set_thread(&snapshot.view, cx);
             pane.set_approvals(snapshot.cards, Some(handler), cx);
@@ -698,7 +709,9 @@ impl AppShell {
             )
     }
 
-    /// The open thread: a way back to the list, then the transcript with its approval cards.
+    /// The open thread: a way back to the list, then the transcript with its approval cards, and
+    /// beside it the plan and usage widgets. Both widgets show their empty states when the thread
+    /// has no plan or usage yet.
     fn render_thread(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id("thread")
@@ -709,7 +722,22 @@ impl AppShell {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.close_thread(cx))),
             )
-            .child(div().flex_1().min_h_0().child(self.pane.clone()))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .gap_3()
+                    .child(div().flex_1().min_w_0().h_full().child(self.pane.clone()))
+                    .child(
+                        v_flex()
+                            .id("thread-side")
+                            .w(px(260.))
+                            .flex_none()
+                            .gap_2()
+                            .child(render_plan(&self.plan))
+                            .child(render_usage(&self.usage)),
+                    ),
+            )
     }
 
     fn render_settings(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {

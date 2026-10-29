@@ -31,6 +31,7 @@ use tokio::runtime::Builder;
 use tokio::sync::{mpsc, watch};
 
 use crate::approval::{AnswerError, ApprovalCard, ApprovalController, LocalPresets};
+use crate::task::{PlanModel, UsageModel, UsageTracker};
 
 /// What a link needs to reach the hub as one signed-in session.
 #[derive(Clone)]
@@ -53,12 +54,17 @@ pub struct LinkConfig {
 }
 
 /// The thread the link follows, as the UI shows it: the view and its approval cards as of the
-/// last change (an event, an answer, or a [`SessionLink::refresh`]).
+/// last change (an event, an answer, or a [`SessionLink::refresh`]), with the plan and usage
+/// widgets' figures.
 #[derive(Debug, Clone)]
 pub struct ThreadSnapshot {
     pub thread_id: String,
     pub view: ThreadView,
     pub cards: Vec<ApprovalCard>,
+    /// The latest plan of the thread (see [`PlanModel::from_thread`]).
+    pub plan: PlanModel,
+    /// The usage figures, from the link's [`UsageTracker`], which has seen every applied state.
+    pub usage: UsageModel,
 }
 
 /// What a job run by [`SessionLink::with_thread`] can reach. Everything is borrowed from the
@@ -204,6 +210,9 @@ struct Core {
     outbox: Outbox,
     sub: Option<Subscription>,
     approvals: Option<ApprovalController>,
+    /// Per-turn figures of the followed thread. It lives here, not in the UI: it must see each
+    /// applied state, and the UI only gets the latest snapshot (a watch keeps one value).
+    usage: UsageTracker,
     transport: HttpTransport,
     random: SystemRandom,
     connectivity: watch::Sender<Connectivity>,
@@ -239,6 +248,7 @@ async fn run(
         outbox,
         sub: None,
         approvals: None,
+        usage: UsageTracker::new(),
         random: SystemRandom,
         connectivity,
         snapshots,
@@ -350,6 +360,7 @@ impl Core {
             .and_then(|events| ThreadSync::restore(thread_id, events).ok())
             .unwrap_or_else(|| ThreadSync::new(thread_id));
         self.sub = None;
+        self.usage = UsageTracker::new();
         self.snapshots.send_replace(None);
         match Subscription::connect_or_offline(&self.api, sync, Some(self.config.token.clone()))
             .await
@@ -400,7 +411,9 @@ impl Core {
     }
 
     /// Copies the outbox's fate of this device's answers into the view, then publishes the view
-    /// with its cards. Unless `force`, only when the cards differ from the last snapshot.
+    /// with its cards and widget figures. Every call first observes the view for the usage
+    /// tracker, so each applied event is seen (publishing is called after each one). Unless
+    /// `force`, only when something differs from the last snapshot.
     fn publish_snapshot(&mut self, force: bool) {
         let (Some(sub), Some(approvals)) = (self.sub.as_mut(), self.approvals.as_mut()) else {
             return;
@@ -410,12 +423,17 @@ impl Core {
         let snapshot = ThreadSnapshot {
             thread_id: view.thread_id().to_owned(),
             cards: approvals.cards(view),
+            plan: PlanModel::from_thread(view),
+            usage: self.usage.observe(view),
             view: view.clone(),
         };
         self.snapshots.send_if_modified(|current| {
             let same = !force
                 && current.as_ref().is_some_and(|last| {
-                    last.thread_id == snapshot.thread_id && last.cards == snapshot.cards
+                    last.thread_id == snapshot.thread_id
+                        && last.cards == snapshot.cards
+                        && last.plan == snapshot.plan
+                        && last.usage == snapshot.usage
                 });
             if !same {
                 *current = Some(snapshot);
