@@ -4177,11 +4177,20 @@ items:
     title: 'client: attachments (picker, paste, drag-drop) + inline images'
     milestone: M3
     phase: P3
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     deps: [M3-004, M2-009]
     paths:
-      - 'crates/client-gpui/src/compose/attach*'
-      - 'crates/client-gpui/src/task/media*'
+      - "crates/client-gpui/src/compose/attach*"
+      - "crates/client-gpui/src/compose/thread.rs"
+      - "crates/client-gpui/src/compose/mod.rs"
+      - "crates/client-gpui/src/task/media*"
+      - "crates/client-gpui/src/task/transcript.rs"
+      - "crates/client-gpui/src/task/mod.rs"
+      - "crates/client-gpui/locales/en/compose.ftl"
+      - "crates/client-gpui/tests/attachments.rs"
     context:
       - 'apps/mobile/app/run/[id].tsx (v1 attachments)'
       - 'docs/PLAN-v2-ade.md §3 (surface 1: attachments)'
