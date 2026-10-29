@@ -4688,16 +4688,21 @@ items:
     title: 'Wire Notifier, ToastSink and deep links into AppShell (seed on first inbox fetch, observe on refresh and open-thread snapshots, focus tracking, Open -> open_thread, settings view mounted)'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: M
     risk: medium
     deps: [M3-013, M3-005e]
     paths:
-      - 'crates/client-gpui/src/shell/**'
-      - 'crates/client-gpui/src/notify/**'
-      - 'crates/client-gpui/src/inbox/**'
-      - 'crates/client-gpui/tests/shell.rs'
+      - "crates/client-gpui/src/shell/**"
+      - "crates/client-gpui/src/notify/**"
+      - "crates/client-gpui/src/inbox/**"
+      - "crates/client-gpui/locales/en/*.ftl"
+      - "crates/client-gpui/tests/shell.rs"
+      - "crates/client-gpui/tests/inbox.rs"
+      - "crates/client-gpui/tests/notify.rs"
     acceptance:
       - 'Window test with the fake hub: a thread moving to needs_you shows one toast; the open thread does not notify; clicking/Open opens it; a hub link opens the thread'
       - 'inbox Status carries failed (client-api.md §5.2 string) so failed runs notify'
