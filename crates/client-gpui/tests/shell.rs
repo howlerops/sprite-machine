@@ -81,6 +81,8 @@ struct HubState {
     writes: Mutex<Vec<Write>>,
     /// The status `DELETE /v1/threads/{t}/pending/{task}` answers (0 means 200).
     delete_status: AtomicUsize,
+    /// The status `POST /v1/threads/{t}/session` answers (0 means 200).
+    session_status: AtomicUsize,
     /// The `machines` array `GET /v1/machines` answers with.
     machines: Mutex<Vec<Value>>,
 }
@@ -283,10 +285,21 @@ async fn record_write(
             .map(str::to_owned),
         body: serde_json::from_slice(&body).unwrap_or(Value::Null),
     });
-    let status = hub.delete_status.load(Ordering::SeqCst);
-    if method == axum::http::Method::DELETE && status != 0 {
+    let status = if method == axum::http::Method::DELETE {
+        hub.delete_status.load(Ordering::SeqCst)
+    } else if uri.path().ends_with("/session") {
+        hub.session_status.load(Ordering::SeqCst)
+    } else {
+        0
+    };
+    if status != 0 {
         let code = StatusCode::from_u16(status as u16).expect("status");
-        return (code, Json(json!({ "error": "task_started" }))).into_response();
+        let error = match status {
+            409 => "task_started",
+            403 => "forbidden",
+            _ => "invalid_request",
+        };
+        return (code, Json(json!({ "error": error }))).into_response();
     }
     Json(json!({})).into_response()
 }
@@ -2972,4 +2985,161 @@ fn without_machine_features_every_mode_is_offered(cx: &mut TestAppContext) {
     let (_state, hub) = hub_with_a_session(true);
     let (window, _view) = open_composer_shell(cx, &hub);
     wait_for_shown(cx, window, "thread-mode-bypassPermissions");
+}
+
+fn task_event_frame(seq: u64, task: &str, event: Value) -> String {
+    let mut frame: Value = serde_json::from_str(&event_frame(seq, "th_a", event)).expect("frame");
+    frame["envelope"]["task_id"] = json!(task);
+    frame.to_string()
+}
+
+/// Pumps the window until `id` is no longer laid out.
+fn wait_for_gone(cx: &mut TestAppContext, window: gpui_kit::AnyWindowHandle, id: &'static str) {
+    for _ in 0..400 {
+        cx.run_until_parked();
+        let gone = cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find(id).is_none()
+            })
+            .expect("window");
+        if gone {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("{id} never went away");
+}
+
+#[gpui_kit::test]
+fn refused_mode_change_and_chip_removal_are_named_on_the_composer(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.delete_status.store(403, Ordering::SeqCst);
+    state.session_status.store(400, Ordering::SeqCst);
+    let (window, _view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "thread-mode-plan");
+    cx.update_window(window, |_, window, cx| window.click("thread-mode-plan", cx))
+        .expect("window");
+    wait_for_shown(cx, window, "thread-refused-0");
+    let text = label_of(cx, window, "thread-refused-0").expect("label");
+    assert!(text.contains("mode"), "{text}");
+    assert!(text.contains("invalid_request"), "{text}");
+
+    cx.update_window(window, |_, window, cx| {
+        window.click("queued-remove-tk_q", cx)
+    })
+    .expect("window");
+    wait_for_shown(cx, window, "thread-refused-1");
+    let text = label_of(cx, window, "thread-refused-1").expect("label");
+    assert!(text.contains("remove"), "{text}");
+    assert!(text.contains("forbidden"), "{text}");
+
+    // The next successful request clears both.
+    state.session_status.store(0, Ordering::SeqCst);
+    cx.update_window(window, |_, window, cx| {
+        window.click("thread-mode-default", cx)
+    })
+    .expect("window");
+    wait_for_gone(cx, window, "thread-refused-0");
+    wait_for_gone(cx, window, "thread-refused-1");
+}
+
+#[gpui_kit::test]
+fn send_waits_for_the_threads_first_snapshot_and_keeps_the_text(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    cx.executor().allow_parking();
+    let (window, view) = open_shell_with(
+        cx,
+        &hub,
+        stored_session_on(&hub),
+        Arc::new(RecordingBrowser::new()),
+        None,
+        "",
+        Arc::new(ManualClock::new(RAISED_MS)),
+    );
+    open_thread_a(cx, window, &view);
+    // Nothing has run since the thread was opened: no snapshot has reached the composer.
+    cx.update_window(window, |_, window, cx| {
+        let composer = view.read(cx).thread_composer().clone();
+        assert!(!composer.read(cx).is_ready());
+        let input = composer.read(cx).prompt_input().clone();
+        input.update(cx, |state, cx| state.set_value("early words", window, cx));
+        composer.update(cx, |composer, cx| composer.send(window, cx));
+        assert_eq!(input.read(cx).value().as_ref(), "early words");
+    })
+    .expect("window");
+    assert!(writes_to(&state, "POST", "/prompts").is_empty());
+    // Once the snapshot is in, the text is still there and Send delivers it.
+    wait_for_shown(cx, window, "thread-mode-plan");
+    cx.update_window(window, |_, window, cx| {
+        let composer = view.read(cx).thread_composer().clone();
+        assert!(composer.read(cx).is_ready());
+        let input = composer.read(cx).prompt_input().clone();
+        assert_eq!(input.read(cx).value().as_ref(), "early words");
+        window.click("thread-send", cx);
+    })
+    .expect("window");
+    wait_until_true("the prompt to reach the hub", || {
+        !writes_to(&state, "POST", "/prompts").is_empty()
+    });
+    assert_eq!(
+        writes_to(&state, "POST", "/prompts")[0].body["parts"][0]["text"],
+        "early words"
+    );
+}
+
+#[gpui_kit::test]
+fn a_started_removal_is_dropped_from_the_outbox_once_its_task_finished(cx: &mut TestAppContext) {
+    let (state, hub) = hub_with_a_session(false);
+    state.delete_status.store(409, Ordering::SeqCst);
+    let (window, view) = open_composer_shell(cx, &hub);
+    wait_for_shown(cx, window, "queued-remove-tk_q");
+    cx.update_window(window, |_, window, cx| {
+        window.click("queued-remove-tk_q", cx)
+    })
+    .expect("window");
+    wait_for_shown(cx, window, "thread-started-notice");
+    let lingering = |cx: &mut TestAppContext| {
+        cx.update_window(window, |_, _, cx| {
+            view.read(cx)
+                .link()
+                .expect("link")
+                .with_thread(|access| access.outbox.started_removals().len())
+        })
+        .expect("window")
+        .recv()
+        .expect("outbox")
+    };
+    assert_eq!(lingering(cx), 1);
+    // The task starts and finishes; the view shows it finished.
+    push_live(
+        &state,
+        "th_a",
+        task_event_frame(
+            4,
+            "tk_q",
+            json!({ "type": "RunStarted", "reason": "prompt", "agent_id": "agt_claude",
+                    "machine_id": "mch_laptop" }),
+        ),
+    );
+    push_live(
+        &state,
+        "th_a",
+        task_event_frame(
+            5,
+            "tk_q",
+            json!({ "type": "RunFinished",
+                    "outcome": { "type": "success", "stop_reason": "end_turn" } }),
+        ),
+    );
+    wait_for_gone(cx, window, "thread-started-notice");
+    let mut left = lingering(cx);
+    for _ in 0..400 {
+        if left == 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+        left = lingering(cx);
+    }
+    assert_eq!(left, 0, "the conflict lingers in the outbox");
 }

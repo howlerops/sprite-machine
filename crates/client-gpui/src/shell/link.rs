@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use client_core::outbox::{Clock, SystemRandom};
+use client_core::outbox::{Clock, IntentState, SystemRandom};
 use client_core::{
     Applied, Cache, Connectivity, HttpTransport, Intent, Outbox, RetryPolicy, Subscription,
     SubscriptionError, ThreadSync, ThreadView,
@@ -68,6 +68,95 @@ pub struct ThreadSnapshot {
     /// Tasks of this thread whose queued message this device tried to remove but had already
     /// started (`409 task_started`, [`Outbox::started_removals`]): the composer offers Stop.
     pub started_removals: Vec<String>,
+    /// Mode / model changes and chip removals of this thread the hub refused for good (4xx other
+    /// than `409 task_started`); the composer says what failed.
+    pub refusals: Vec<Refusal>,
+}
+
+/// What the hub refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalKind {
+    Mode,
+    Model,
+    RemoveQueued,
+}
+
+/// A refused `SetSession` / `RemovePending` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub kind: RefusalKind,
+    pub status: u16,
+    pub error: String,
+}
+
+fn is_session_or_remove(intent: &Intent) -> bool {
+    matches!(
+        intent,
+        Intent::SetSession { .. } | Intent::RemovePending { .. }
+    )
+}
+
+/// Keeps the outbox free of what the composer no longer needs: removals that came too late for
+/// a task the view shows finished, and refusals older than a later accepted request. Returns the
+/// refusals of the thread that are still current.
+fn tidy_outbox(outbox: &mut Outbox, cache: &Cache, view: &ThreadView) -> Vec<Refusal> {
+    let thread_id = view.thread_id();
+    let last_done = outbox
+        .entries()
+        .filter(|entry| {
+            matches!(entry.state, IntentState::Done { .. }) && is_session_or_remove(&entry.intent)
+        })
+        .map(|entry| entry.local_id)
+        .max();
+    let mut dismiss = Vec::new();
+    let mut refusals = Vec::new();
+    for entry in outbox.entries() {
+        match (&entry.intent, &entry.state) {
+            (Intent::RemovePending { task_id, .. }, IntentState::Conflict { .. }) => {
+                let finished = view
+                    .tasks()
+                    .iter()
+                    .any(|task| &task.task_id == task_id && task.status().is_finished());
+                if finished {
+                    dismiss.push(entry.local_id);
+                }
+            }
+            (intent, IntentState::Rejected { status, error }) if is_session_or_remove(intent) => {
+                if last_done.is_some_and(|done| done > entry.local_id) {
+                    dismiss.push(entry.local_id);
+                    continue;
+                }
+                let (id, kind) = match intent {
+                    Intent::SetSession {
+                        thread_id: id,
+                        config,
+                        ..
+                    } => (
+                        id,
+                        if config.is_some() {
+                            RefusalKind::Model
+                        } else {
+                            RefusalKind::Mode
+                        },
+                    ),
+                    Intent::RemovePending { thread_id: id, .. } => (id, RefusalKind::RemoveQueued),
+                    _ => continue,
+                };
+                if id == thread_id {
+                    refusals.push(Refusal {
+                        kind,
+                        status: *status,
+                        error: error.clone(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    for local_id in dismiss {
+        let _ = outbox.dismiss(cache, local_id);
+    }
+    refusals
 }
 
 /// What a job run by [`SessionLink::with_thread`] can reach. Everything is borrowed from the
@@ -362,6 +451,18 @@ impl Core {
             .ok()
             .and_then(|events| ThreadSync::restore(thread_id, events).ok())
             .unwrap_or_else(|| ThreadSync::new(thread_id));
+        let stale: Vec<i64> = self
+            .outbox
+            .entries()
+            .filter(|entry| {
+                matches!(entry.state, IntentState::Rejected { .. })
+                    && is_session_or_remove(&entry.intent)
+            })
+            .map(|entry| entry.local_id)
+            .collect();
+        for local_id in stale {
+            let _ = self.outbox.dismiss(&self.cache, local_id);
+        }
         self.sub = None;
         self.usage = UsageTracker::new();
         self.snapshots.send_replace(None);
@@ -422,6 +523,7 @@ impl Core {
             return;
         };
         let view = sub.sync_mut().view_mut();
+        let refusals = tidy_outbox(&mut self.outbox, &self.cache, view);
         approvals.sync(&self.outbox, view);
         let snapshot = ThreadSnapshot {
             thread_id: view.thread_id().to_owned(),
@@ -435,6 +537,7 @@ impl Core {
                 .filter(|removal| removal.thread_id == view.thread_id())
                 .map(|removal| removal.task_id)
                 .collect(),
+            refusals,
             view: view.clone(),
         };
         self.snapshots.send_if_modified(|current| {
@@ -445,6 +548,7 @@ impl Core {
                         && last.plan == snapshot.plan
                         && last.usage == snapshot.usage
                         && last.started_removals == snapshot.started_removals
+                        && last.refusals == snapshot.refusals
                 });
             if !same {
                 *current = Some(snapshot);

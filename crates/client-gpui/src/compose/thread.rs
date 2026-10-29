@@ -19,6 +19,7 @@ use super::commands::{
 };
 use super::queue::{QueuedChip, queued_chips, remove_request, stoppable_intent};
 use super::{send_shortcut_label, tr, tr_args};
+use crate::shell::link::{Refusal, RefusalKind};
 
 actions!(
     thread_composer,
@@ -53,6 +54,8 @@ pub struct ThreadComposer {
     cap: Option<String>,
     /// Tasks whose queued message could not be removed because they had started.
     started: Vec<String>,
+    /// Requests of this thread the hub refused, shown until the next one succeeds.
+    refusals: Vec<Refusal>,
     prompt: Entity<TextareaState>,
     slash_selected: usize,
     focus: FocusHandle,
@@ -81,6 +84,7 @@ impl ThreadComposer {
             thread: None,
             cap: None,
             started: Vec::new(),
+            refusals: Vec::new(),
             prompt,
             slash_selected: 0,
             focus: cx.focus_handle(),
@@ -98,7 +102,27 @@ impl ThreadComposer {
     pub fn clear_thread(&mut self, cx: &mut Context<Self>) {
         self.thread = None;
         self.started.clear();
+        self.refusals.clear();
         cx.notify();
+    }
+
+    /// `true` once the thread's first snapshot has arrived; until then Send does nothing (the
+    /// typed text stays in the field).
+    pub fn is_ready(&self) -> bool {
+        self.thread.is_some()
+    }
+
+    /// The refused requests to name on the composer (see [`Refusal`]).
+    pub fn set_refusals(&mut self, refusals: Vec<Refusal>, cx: &mut Context<Self>) {
+        if self.refusals != refusals {
+            self.refusals = refusals;
+            cx.notify();
+        }
+    }
+
+    /// The refusals shown right now.
+    pub fn refusals(&self) -> &[Refusal] {
+        &self.refusals
     }
 
     /// Empty the prompt field (the owner switched to another thread).
@@ -402,6 +426,7 @@ impl Render for ThreadComposer {
         let options = self.options();
         let chips = self.queued();
         let running = self.is_running();
+        let ready = self.is_ready();
         let started_notice = running && !self.started.is_empty();
         let matches = self.slash_matches(cx);
         let slash_open = !matches.is_empty();
@@ -446,6 +471,26 @@ impl Render for ThreadComposer {
             )
             .on_action(cx.listener(|this, _: &SlashNext, _, cx| this.move_slash(1, cx)))
             .on_action(cx.listener(|this, _: &SlashPrevious, _, cx| this.move_slash(-1, cx)))
+            .children(self.refusals.iter().enumerate().map(|(index, refusal)| {
+                let key = match refusal.kind {
+                    RefusalKind::Mode => "compose-thread-refused-mode",
+                    RefusalKind::Model => "compose-thread-refused-model",
+                    RefusalKind::RemoveQueued => "compose-thread-refused-remove",
+                };
+                let detail = if refusal.error.is_empty() {
+                    refusal.status.to_string()
+                } else {
+                    refusal.error.clone()
+                };
+                let text = tr_args(key, &[("detail", &detail)]);
+                div()
+                    .id(SharedString::from(format!("thread-refused-{index}")))
+                    .role(Role::Status)
+                    .test_support()
+                    .aria_label(text.clone())
+                    .text_color(cx.theme().danger)
+                    .child(text)
+            }))
             .when(started_notice, |el| {
                 el.child(
                     div()
@@ -497,6 +542,7 @@ impl Render for ThreadComposer {
                                 "compose-send-a11y",
                                 &[("shortcut", &shortcut)],
                             ))
+                            .disabled(!ready)
                             .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
                     )
                     .when(running, |el| {
