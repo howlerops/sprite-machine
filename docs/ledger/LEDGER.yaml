@@ -6463,6 +6463,9 @@ items:
     title: 'runner: a thread keeps its effective (capped) permission mode across an idle-close reopen, instead of falling back to the looser local mode'
     milestone: M3
     phase: P3
+    status: "assigned"
+    assignee: "haiku"
+    attempt: 1
     lane: rust
     size: S
     risk: medium
