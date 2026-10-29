@@ -4161,7 +4161,9 @@ items:
     title: 'client-core: InterruptView carries resolved_at (envelope ts) so approval cards show the real resolution time'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "haiku"
     lane: client
     size: S
     risk: low
@@ -6543,7 +6545,8 @@ items:
     title: 'runner tunnel: integration test that a nacked prompt_submit reaches the host (tunnel_client.rs)'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: cargo test -p runner --test tunnel_client 52 passed 0 failed; worker mutation check (refuse_prompt line removed -> test fails)"
     attempt: 1
     assignee: "haiku"
     lane: rust
