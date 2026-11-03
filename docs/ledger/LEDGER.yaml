@@ -4105,7 +4105,8 @@ items:
     title: 'desktop onboarding: poll machines every ~3 s while onboarding is visible; show the steps when the inbox fetch fails but machines are empty'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 357 passed 0 failed; onboarding 19 + shell 80 passed 3/3; clippy clean; fmt ok; worker revert check: 3 tests fail without the change"
     attempt: 1
     assignee: "sonnet"
     lane: client
