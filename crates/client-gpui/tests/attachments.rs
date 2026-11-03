@@ -898,7 +898,10 @@ fn a_failed_upload_blocks_send_until_it_is_retried(cx: &mut TestAppContext) {
     cx.update_window(window, |_, window, cx| window.click("thread-send", cx))
         .expect("window");
     assert!(events.lock().expect("lock").is_empty());
-    assert_eq!(uploader.calls(), ["a.txt", "b.txt"]);
+    // The two uploads run concurrently, so their order is not fixed.
+    let mut first = uploader.calls();
+    first.sort();
+    assert_eq!(first, ["a.txt", "b.txt"]);
     // Retry uploads only the failed one; then send goes through.
     cx.update_window(window, |_, window, cx| {
         window.click(eid(format!("attach-retry-{failed_id}")), cx);
@@ -907,7 +910,10 @@ fn a_failed_upload_blocks_send_until_it_is_retried(cx: &mut TestAppContext) {
     settle(cx, window, &bar, |bar| {
         matches!(bar.set().gate(), Gate::Ready(_))
     });
-    assert_eq!(uploader.calls(), ["a.txt", "b.txt", "b.txt"]);
+    // Retry uploads only the failed file, once more.
+    let mut all = uploader.calls();
+    all.sort();
+    assert_eq!(all, ["a.txt", "b.txt", "b.txt"]);
     cx.update_window(window, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find_all("attach-blocked").is_empty());
