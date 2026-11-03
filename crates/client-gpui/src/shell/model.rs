@@ -143,6 +143,12 @@ impl ShellModel {
         self.save_prefs()
     }
 
+    /// Saves the "Connect to phone automatically" setting with the other preferences.
+    pub fn set_connect_to_phone_auto(&mut self, on: bool) -> Result<(), String> {
+        self.prefs.connect_to_phone_auto = on;
+        self.save_prefs()
+    }
+
     /// Changes the hub address that the next sign-in uses, and saves it. Text that is not an
     /// absolute http or https address is refused and changes nothing.
     pub fn set_hub(&mut self, hub: &str) -> Result<(), String> {

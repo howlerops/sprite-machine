@@ -185,7 +185,7 @@ pub async fn run(options: Options) -> Result<()> {
     result.context("the terminal failed")
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
@@ -193,7 +193,7 @@ fn now_ms() -> u64 {
 }
 
 /// The hub's HTTP base: the stored login may name the tunnel's `ws(s)` form.
-fn http_base(hub: &str) -> Result<String> {
+pub(crate) fn http_base(hub: &str) -> Result<String> {
     let hub = hub.trim();
     let hub = if let Some(rest) = hub.strip_prefix("wss://") {
         format!("https://{rest}")
@@ -321,7 +321,7 @@ impl Link {
 }
 
 /// The tunnel as the session's hub.
-struct TunnelUpstream(TunnelSink);
+pub(crate) struct TunnelUpstream(pub(crate) TunnelSink);
 
 impl Upstream for TunnelUpstream {
     fn open(
@@ -454,7 +454,7 @@ async fn forward(
     }
 }
 
-fn command_thread(command: &Command) -> &str {
+pub(crate) fn command_thread(command: &Command) -> &str {
     match command {
         Command::Prompt { thread_id, .. }
         | Command::Approval { thread_id, .. }

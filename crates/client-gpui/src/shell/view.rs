@@ -166,6 +166,9 @@ pub struct AppShell {
     /// Clicks on notifications, waiting for [`AppShell::pump_notifications`].
     notify_events: EventQueue,
     notify_settings: Entity<NotifySettingsView>,
+    /// The embedded runner's connect-to-phone switches (settings).
+    phone: Entity<crate::local::PhoneSettingsView>,
+    _phone_events: Subscription,
     /// Whether the window is the active one; a background window notifies for every thread.
     window_active: bool,
     /// Toasts shown so far.
@@ -246,6 +249,16 @@ impl AppShell {
             Box::new(toasts.clone()),
         );
         let notify_settings = cx.new(|_| NotifySettingsView::new(notifier.prefs().clone()));
+        let local = crate::local::LocalRunner::new(
+            crate::local::LocalConfig::from_env(),
+            model.prefs().connect_to_phone_auto,
+        );
+        let phone = cx.new(|cx| crate::local::PhoneSettingsView::new(local, cx));
+        let phone_events = cx.subscribe(&phone, |this, _, event: &crate::local::PhoneEvent, _| {
+            let crate::local::PhoneEvent::AutoChanged(on) = event;
+            // A save error leaves the switch on for this run; the next change tries again.
+            let _ = this.model.set_connect_to_phone_auto(*on);
+        });
         let palette = cx.new(|cx| PaletteView::new(window, cx));
         let palette_events = cx.subscribe_in(&palette, window, Self::on_palette_event);
         let pane = cx.new(|_| TranscriptPane::new());
@@ -332,6 +345,8 @@ impl AppShell {
             toasts,
             notify_events,
             notify_settings,
+            phone,
+            _phone_events: phone_events,
             window_active: true,
             toasts_shown: 0,
             inbox_seeded: false,
@@ -763,6 +778,11 @@ impl AppShell {
             self.notifier.seed([(thread_id, status)]);
         }
         self.snapshot_status = Some((thread_id.to_owned(), status));
+    }
+
+    /// The connect-to-phone section of the settings page.
+    pub fn phone_settings(&self) -> &Entity<crate::local::PhoneSettingsView> {
+        &self.phone
     }
 
     /// The notifier's prefs, shared with the notification settings.
@@ -1584,6 +1604,8 @@ impl AppShell {
                     },
                 )),
             )
+            // Below the account actions so they stay in view; the section grows with sessions.
+            .child(self.phone.clone())
     }
 }
 
