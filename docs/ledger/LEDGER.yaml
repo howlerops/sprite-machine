@@ -5220,7 +5220,8 @@ items:
     title: 'CI: build and upload an unsigned macOS client-gpui app (.app in a zip) on v2 pushes'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged; Linux checks: script layout + plistlib + yaml ok. Awaiting first desktop.yml run on macOS (build, plutil -lint, artifact)."
     attempt: 1
     assignee: "sonnet"
     lane: ci

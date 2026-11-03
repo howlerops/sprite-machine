@@ -339,3 +339,4 @@
 - 2026-11-03 leader: merged M2B-015 (runner::embed, LocalRunner, phone toggles + auto setting); client 410 passed, runner 253. Fixed racy attachments order assertion. Filed M2B-015a-d (P4).
 - 2026-11-03 leader: merged M3-003a (3 s machines poll while onboarding; inbox failure still shows steps). client-gpui 357 passed.
 - 2026-11-03 leader: M3 exit review done (report M3-review.md). Workspace 1369 passed, e2e app + tracer PASS. Fixed two macOS-only test keystrokes (paste, new task). Filed M3-018 (unsigned macOS app artifact) and M3-019 (a11y.md, text scaling, VoiceOver). alpha.2 not tagged yet.
+- 2026-11-03 leader: merged M3-018 (desktop.yml: release build, Sprite Machine.app, unsigned zip artifact 14 d). Awaiting first macOS run.
