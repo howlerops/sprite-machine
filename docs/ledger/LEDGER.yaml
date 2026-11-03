@@ -4105,7 +4105,9 @@ items:
     title: 'desktop onboarding: poll machines every ~3 s while onboarding is visible; show the steps when the inbox fetch fails but machines are empty'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: low
