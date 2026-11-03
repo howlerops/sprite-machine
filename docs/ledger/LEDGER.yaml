@@ -5207,6 +5207,8 @@ items:
     title: 'M3 exit review (incl. a11y audit)'
     milestone: M3
     phase: P3
+    status: "done"
+    evidence: "docs/ledger/reports/M3-review.md: cargo test --workspace 1369 passed 0 failed; e2e app PASS 135.2 s; e2e tracer PASS 34.4 s; every P3 plan item met except unsigned macOS CI builds (M3-018); a11y audit done against plan §3 item 11 (docs/ux/a11y.md missing, text scaling missing: M3-019). macOS CI fixed for two ctrl- keystrokes. alpha.2 tag waits on M3-018 + green macos job."
     owner: leader
     deps: [M3-003, M3-005, M3-006, M3-007, M3-009, M3-010, M3-011, M3-012, M3-013, M3-014, M3-017]
     acceptance:
@@ -5214,6 +5216,40 @@ items:
     verify:
       - 'cargo test --workspace'
       - 'cargo run -p cli -- e2e app'
+  - id: M3-018
+    title: 'CI: build and upload an unsigned macOS client-gpui app (.app in a zip) on v2 pushes'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: ci
+    size: S
+    risk: low
+    deps: [M3-review]
+    paths:
+      - '.github/workflows/**'
+      - 'crates/client-gpui/Cargo.toml'
+      - 'crates/client-gpui/bundle/**'
+      - 'docs/ops/**'
+    acceptance:
+      - 'The macos job (or a new one) builds client-gpui in release, bundles an unsigned .app (Info.plist with bundle id and version) and uploads it as a workflow artifact; docs say how to open an unsigned app on macOS'
+  - id: M3-019
+    title: 'docs/ux/a11y.md (desktop + mobile checklist) and desktop text scaling; manual VoiceOver pass on a Mac'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-review]
+    paths:
+      - 'docs/ux/a11y.md'
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/src/settings/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'a11y.md lists the checks (labels, focus order, status roles, text scale, reduced motion, contrast) with how each is tested'
+      - 'A text-size setting (and the OS scale) changes the UI text size; window test'
+      - 'Manual: VoiceOver reads the inbox, an approval card and the composer on a Mac (human, recorded in the doc)'
 
   # ════════════════════════ M4 — managed cloud workspaces (+ handoff) ════════════════════════
   - id: M4-001

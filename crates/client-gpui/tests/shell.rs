@@ -1593,7 +1593,7 @@ fn navigation_buttons_and_shortcuts_change_the_page(cx: &mut TestAppContext) {
         );
         assert_eq!(window.find("nav-inbox").label(), Some("Go to Inbox"));
 
-        window.press("ctrl-n", cx);
+        window.press("secondary-n", cx);
         window.render_frame(cx);
         assert_eq!(view.read(cx).model().nav.current(), Section::NewTask);
         window.press("ctrl-tab", cx);
