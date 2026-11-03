@@ -785,7 +785,7 @@ fn pasting_an_image_attaches_it_and_text_still_pastes_as_text(cx: &mut TestAppCo
     cx.update_window(window, |_, window, cx| {
         let focus = composer.read(cx).prompt_input().focus_handle(cx);
         window.focus(&focus, cx);
-        window.press("ctrl-v", cx);
+        window.press("secondary-v", cx);
         window.render_frame(cx);
     })
     .expect("window");
