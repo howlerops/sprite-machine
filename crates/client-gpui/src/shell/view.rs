@@ -23,10 +23,10 @@ use super::i18n::{tr, tr_args};
 use super::link::{LinkConfig, SessionLink, ThreadSnapshot};
 use super::login::{LoginDriver, LoginEvent, LoginMethod, LoginStage};
 use super::machines::{self, MachinesFeed};
-use super::model::{FocusSlot, HubOutcome, Screen, ShellModel, theme_a11y};
+use super::model::{FocusSlot, HubOutcome, Screen, ShellModel, text_size_a11y, theme_a11y};
 use super::nav::Section;
 use super::pairing::QrMatrix;
-use super::prefs::{Appearance, Preferences, ThemeChoice};
+use super::prefs::{Appearance, Preferences, TextSize, ThemeChoice};
 use super::session::SessionStore;
 
 use crate::approval::{CardAction, CardHandler};
@@ -1147,6 +1147,26 @@ impl AppShell {
             Appearance::Dark => ThemeMode::Dark,
         };
         Theme::change(mode, Some(window), cx);
+        self.apply_text_size(window, cx);
+    }
+
+    /// The theme's base font is the application zoom: the Root sets the window rem size from it.
+    fn apply_text_size(&self, window: &mut Window, cx: &mut App) {
+        let base = px(self.model.prefs().text_size.base_px());
+        Theme::update(cx, |theme| theme.font_size = base);
+        window.set_rem_size(base);
+        window.refresh();
+    }
+
+    pub fn choose_text_size(
+        &mut self,
+        size: TextSize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.model.set_text_size(size);
+        self.apply_text_size(window, cx);
+        cx.notify();
     }
 
     pub fn choose_theme(
@@ -1550,6 +1570,7 @@ impl AppShell {
 
     fn render_settings(&mut self, slots: &[FocusSlot], cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.model.prefs().theme;
+        let selected_size = self.model.prefs().text_size;
         let account = self
             .model
             .session()
@@ -1565,7 +1586,7 @@ impl AppShell {
             .unwrap_or_else(|| tr("settings-not-signed-in"));
         v_flex()
             .id("settings")
-            .gap_4()
+            .gap_3()
             .child(div().text_xl().child(tr("settings-title")))
             .child(div().child(tr("settings-appearance")))
             .child(h_flex().gap_2().children(ThemeChoice::ALL.map(|choice| {
@@ -1577,6 +1598,21 @@ impl AppShell {
                         this.choose_theme(choice, window, cx);
                     }))
             })))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().child(tr("settings-text-size")))
+                    .children(TextSize::ALL.map(|size| {
+                        let id = format!("text-size-{}", size.slug());
+                        Self::button(slots, &id, tr(size.message_id()))
+                            .selected(size == selected_size)
+                            .accessibility_label(text_size_a11y(size, size == selected_size))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.choose_text_size(size, window, cx);
+                            }))
+                    })),
+            )
             .child(div().child(format!(
                 "{}: {}",
                 tr("settings-language"),

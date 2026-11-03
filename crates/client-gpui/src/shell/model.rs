@@ -10,7 +10,7 @@ use super::auth::SessionGrant;
 use super::i18n;
 use super::login::{LoginEvent, LoginModel, LoginStage};
 use super::nav::{NavModel, Section};
-use super::prefs::{Appearance, Preferences, ThemeChoice};
+use super::prefs::{Appearance, Preferences, TextSize, ThemeChoice};
 use super::session::{Session, SessionStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +143,11 @@ impl ShellModel {
         self.save_prefs()
     }
 
+    pub fn set_text_size(&mut self, size: TextSize) -> Result<(), String> {
+        self.prefs.text_size = size;
+        self.save_prefs()
+    }
+
     /// Saves the "Connect to phone automatically" setting with the other preferences.
     pub fn set_connect_to_phone_auto(&mut self, on: bool) -> Result<(), String> {
         self.prefs.connect_to_phone_auto = on;
@@ -245,6 +250,12 @@ impl ShellModel {
                     theme_a11y(choice, choice == self.prefs.theme),
                 ));
             }
+            for size in TextSize::ALL {
+                slots.push(FocusSlot::new(
+                    format!("text-size-{}", size.slug()),
+                    text_size_a11y(size, size == self.prefs.text_size),
+                ));
+            }
             slots.push(FocusSlot::new("hub-address", i18n::tr("settings-hub")));
             slots.push(FocusSlot::new(
                 "hub-save",
@@ -280,6 +291,17 @@ pub fn theme_a11y(choice: ThemeChoice, selected: bool) -> String {
         "settings-theme-selected-a11y"
     } else {
         "settings-theme-a11y"
+    };
+    i18n::tr_args(id, &[("choice", &name)])
+}
+
+/// Screen-reader label of a text size button.
+pub fn text_size_a11y(size: TextSize, selected: bool) -> String {
+    let name = i18n::tr(size.message_id());
+    let id = if selected {
+        "settings-text-size-selected-a11y"
+    } else {
+        "settings-text-size-a11y"
     };
     i18n::tr_args(id, &[("choice", &name)])
 }
