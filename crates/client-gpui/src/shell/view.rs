@@ -520,15 +520,25 @@ impl AppShell {
         false
     }
 
-    /// Refresh the machines list every [`machines::REFRESH_EVERY`].
+    /// Refresh the machines list every [`machines::REFRESH_EVERY`], or every
+    /// [`machines::ONBOARDING_REFRESH_EVERY`] while the onboarding page is showing. The timer
+    /// ticks at the short interval and skips ticks outside onboarding; a fetch still running is
+    /// never doubled (see [`AppShell::refresh_machines`]).
     fn start_machines_timer(&mut self, cx: &mut Context<Self>) {
         self._machines_timer = Some(cx.spawn(async move |this, cx| {
+            let mut ticks = 0u32;
             loop {
                 cx.background_executor()
-                    .timer(machines::REFRESH_EVERY)
+                    .timer(machines::ONBOARDING_REFRESH_EVERY)
                     .await;
+                ticks += 1;
                 if this
-                    .update(cx, |this, cx| this.refresh_machines(cx))
+                    .update(cx, |this, cx| {
+                        if ticks >= machines::TICKS_PER_REFRESH || this.onboarding_visible(cx) {
+                            ticks = 0;
+                            this.refresh_machines(cx);
+                        }
+                    })
                     .is_err()
                 {
                     break;
@@ -585,7 +595,10 @@ impl AppShell {
             loaded: self.machines.loaded,
             failed: self.machines.error.is_some(),
             machines: self.machines.snapshot.options.len(),
-            inbox_empty: inbox.lists_applied() > 0 && inbox.model().rows().is_empty(),
+            // A failing inbox fetch with nothing to show counts as empty: the steps matter more
+            // than the inbox error while no machine exists.
+            inbox_empty: (inbox.lists_applied() > 0 || inbox.model().error().is_some())
+                && inbox.model().rows().is_empty(),
             completed: self.onboarding_completed,
             skipped: self.onboarding_skipped,
             requested: self.onboarding_requested,
