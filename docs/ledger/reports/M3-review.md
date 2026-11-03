@@ -27,7 +27,7 @@ Reviewer: leader. Date: 2026-11-03. Tree: `v2` after M2B-015 and M3-003a.
 | Notifications | met | M3-013, 13a, 13d; `tests/notify.rs`, `tests/shell.rs`: one notification per transition, focus rules, click-through, hub links, settings |
 | Dispatch to a chosen machine (M2b, shipped in P3) | met | M2B-013; live suite `dispatch` (5), `tests/machines.rs` (13) |
 | Onboarding and empty states | met | M3-003, 3a; `tests/onboarding.rs` (19) |
-| **Unsigned macOS builds from CI** | **not met** | The macos job runs `cargo test --workspace` only; it does not build or upload an app. Filed as M3-018. |
+| Unsigned macOS builds from CI | met (M3-018) | `desktop.yml` builds `Sprite Machine.app` and uploads `sprite-machine-macos-unsigned` (run 41683096676, 12.8 MB); the rust.yml macos job is green on the same commit |
 
 ## Accessibility audit (desktop)
 
@@ -57,3 +57,7 @@ P3 is functionally complete on Linux. Two items stand between this and `v2.0.0-a
 2. A Mac to dogfood (the plan's P3 human ask), which also covers the VoiceOver check.
 
 The tag is not cut yet; it waits on M3-018 and a green macos job.
+
+## Update 2026-11-03 17:35 UTC
+
+M3-018 and M3-019/19a are done and CI is green on every job (linux, tracer, macos, desktop). P3 is complete except the human items: a Mac to dogfood and the manual VoiceOver pass (M3-019d).

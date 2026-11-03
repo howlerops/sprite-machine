@@ -5220,8 +5220,8 @@ items:
     title: 'CI: build and upload an unsigned macOS client-gpui app (.app in a zip) on v2 pushes'
     milestone: M3
     phase: P3
-    status: "review"
-    evidence: "merged; Linux checks: script layout + plistlib + yaml ok. Awaiting first desktop.yml run on macOS (build, plutil -lint, artifact)."
+    status: "done"
+    evidence: "desktop.yml run 41683096676 (b2bf24a) success; artifact sprite-machine-macos-unsigned 12.8 MB, expires 2026-11-17. rust.yml macos job green on the same commit after the paste/new-task keystroke fixes and the Linux-only /proc test. The first two desktop runs were cancelled after 15 min with no log (cause not found); runs 3 and 4 succeeded."
     attempt: 1
     assignee: "sonnet"
     lane: ci

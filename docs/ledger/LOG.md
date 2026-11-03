@@ -342,3 +342,4 @@
 - 2026-11-03 leader: merged M3-018 (desktop.yml: release build, Sprite Machine.app, unsigned zip artifact 14 d). Awaiting first macOS run.
 - 2026-11-03 leader: merged M3-019 (a11y.md, text size). Filed M3-019a (keyboard approval), M3-019b, M3-019d (human: VoiceOver).
 - 2026-11-03 leader: merged M3-019a (keyboard approvals already worked; now guarded by tests). Filed M3-019e.
+- 2026-11-03 leader: CI all green on b2bf24a (linux, tracer, macos tests, desktop app build); macOS app artifact uploaded. M3-018 done. P3 complete apart from human items.
