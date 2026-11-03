@@ -3629,7 +3629,8 @@ items:
     title: 'Dispatch: start a task on a chosen machine (+ client Where picker, machines list)'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "review"
+    evidence: "merged d628304 (leader resolved shell/view.rs conflict with M3-003: both onboarding and machines fields kept); worker: hub 305, dispatch 5, machine_do 15, client-gpui all. Leader verify running."
     attempt: 1
     assignee: "sonnet"
     lane: client
