@@ -57,6 +57,8 @@ pub struct Preferences {
     pub theme: ThemeChoice,
     pub locale: String,
     pub hub_url: String,
+    /// "Connect to phone automatically": every session on this computer is shared with the hub.
+    pub connect_to_phone_auto: bool,
 }
 
 impl Default for Preferences {
@@ -65,6 +67,7 @@ impl Default for Preferences {
             theme: ThemeChoice::System,
             locale: "en".to_string(),
             hub_url: String::new(),
+            connect_to_phone_auto: false,
         }
     }
 }

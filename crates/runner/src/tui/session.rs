@@ -487,6 +487,13 @@ impl Session {
         self.handle.clone()
     }
 
+    /// Takes the feed the screen would follow, for a host that has no terminal (the desktop's
+    /// embedded runner): without a reader the feed would grow with every event. [`Backend::next`]
+    /// returns `None` afterwards.
+    pub fn take_feed(&mut self) -> mpsc::UnboundedReceiver<Feed> {
+        std::mem::replace(&mut self.feed, mpsc::unbounded_channel().1)
+    }
+
     async fn send_command(
         &self,
         track: Option<String>,

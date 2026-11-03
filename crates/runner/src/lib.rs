@@ -2,6 +2,7 @@
 //! The `sm` binary is `src/main.rs`.
 
 pub mod checkpoint;
+pub mod embed;
 pub mod harness;
 pub mod login;
 pub mod qr;
