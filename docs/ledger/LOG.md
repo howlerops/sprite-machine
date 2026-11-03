@@ -335,3 +335,4 @@
 - 2026-10-29 leader: merged M3-006b; verified M3-006a + M3-006b (client 369 passed, runner tui 55, shell/transcript 5/5).
 - 2026-10-29 leader: merged M3-003 (onboarding path c, disabled a/b, six empty states). Filed M3-003a/b.
 - 2026-11-03 leader: resumed M2B-013 and M2B-015 after the weekly usage limit reset. Merged M2B-013 (PATCH rename, spawn validation, Where picker, machines screen, inbox icon, waiting banner); resolved shell/view.rs conflict with M3-003.
+- 2026-11-03 leader: M2B-013 verified on v2 (client-gpui 344, hub 345, dispatch + machine_do live, e2e app). Disk hit 0 once more; pruned. Filed M2B-013a.

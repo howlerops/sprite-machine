@@ -3629,8 +3629,8 @@ items:
     title: 'Dispatch: start a task on a chosen machine (+ client Where picker, machines list)'
     milestone: M2b
     phase: P3
-    status: "review"
-    evidence: "merged d628304 (leader resolved shell/view.rs conflict with M3-003: both onboarding and machines fields kept); worker: hub 305, dispatch 5, machine_do 15, client-gpui all. Leader verify running."
+    status: "done"
+    evidence: "merged d628304; leader verify on v2 (with M3-003): clippy hub+client-gpui clean; client-gpui 344 passed 0 failed; shell/onboarding/machines 3/3; hub 345 passed; hub-test dispatch 5 passed + machine_do PASS; e2e app PASS 44.1s; fmt ok"
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -3659,6 +3659,22 @@ items:
     verify:
       - 'bash scripts/hub-test.sh dispatch'
       - 'cargo test -p client-gpui --test machines'
+  - id: M2B-013a
+    title: 'desktop: presence beyond online/offline (asleep) in the Where picker and waiting banner; inbox computer icon names the machine; banner lists a dispatched first task not yet started'
+    milestone: M2b
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M2B-013]
+    paths:
+      - 'crates/client-gpui/src/compose/**'
+      - 'crates/client-gpui/src/inbox/**'
+      - 'crates/client-gpui/src/task/**'
+      - 'crates/client-gpui/src/shell/**'
+    acceptance:
+      - 'Each behaviour has a test'
 
   - id: M2B-014
     title: 'Presence + reconnect notifications on the phone'
