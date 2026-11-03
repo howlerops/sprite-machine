@@ -51,9 +51,55 @@ impl ThemeChoice {
     }
 }
 
+/// The user's text size choice. gpui-component (rev c8917c3) and gpui 0.3.10 expose no OS text
+/// scale, so the default is `Default` (the theme's 16px base) until the platform exposes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TextSize {
+    Small,
+    #[default]
+    Default,
+    Large,
+    Larger,
+}
+
+impl TextSize {
+    pub const ALL: [TextSize; 4] = [Self::Small, Self::Default, Self::Large, Self::Larger];
+
+    /// The theme base font size in pixels; every rem-based size in the UI follows it.
+    pub fn base_px(self) -> f32 {
+        match self {
+            Self::Small => 14.0,
+            Self::Default => 16.0,
+            Self::Large => 20.0,
+            Self::Larger => 24.0,
+        }
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Default => "default",
+            Self::Large => "large",
+            Self::Larger => "larger",
+        }
+    }
+
+    /// Fluent id of the visible name.
+    pub fn message_id(self) -> &'static str {
+        match self {
+            Self::Small => "settings-text-size-small",
+            Self::Default => "settings-text-size-default",
+            Self::Large => "settings-text-size-large",
+            Self::Larger => "settings-text-size-larger",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    pub text_size: TextSize,
     pub theme: ThemeChoice,
     pub locale: String,
     pub hub_url: String,
@@ -64,6 +110,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            text_size: TextSize::Default,
             theme: ThemeChoice::System,
             locale: "en".to_string(),
             hub_url: String::new(),

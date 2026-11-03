@@ -30,7 +30,7 @@ use client_gpui::shell::model::{HubOutcome, Screen, ShellModel, parse_hub};
 use client_gpui::shell::nav::{NavModel, Section};
 use client_gpui::shell::pairing::{self, DeviceCode, PollOutcome, PollSchedule, QrMatrix};
 use client_gpui::shell::pkce::{self, Callback, GithubSignIn, LoopbackListener, Pkce};
-use client_gpui::shell::prefs::{Appearance, Preferences, ThemeChoice};
+use client_gpui::shell::prefs::{Appearance, Preferences, TextSize, ThemeChoice};
 use client_gpui::shell::session::{FileStore, MemoryStore, Session, SessionStore};
 use client_gpui::shell::{AppConfig, AppShell};
 use client_gpui::task::plan::{PLAN_EMPTY_ID, PLAN_ROW_ID, PLAN_SUMMARY_ID};
@@ -1214,6 +1214,10 @@ fn focus_order_is_stable_labelled_and_unique_on_every_screen() {
         "theme-system",
         "theme-light",
         "theme-dark",
+        "text-size-small",
+        "text-size-default",
+        "text-size-large",
+        "text-size-larger",
         "hub-address",
         "hub-save",
         "sign-out",
@@ -1286,7 +1290,10 @@ fn open_shell_with(
                             hub,
                             browser,
                             store,
-                            prefs: Preferences::default(),
+                            prefs: prefs_path
+                                .as_deref()
+                                .map(Preferences::load)
+                                .unwrap_or_default(),
                             prefs_path,
                             poll_speedup: 200,
                             link_thread,
@@ -1571,6 +1578,77 @@ fn the_theme_switches_between_light_and_dark_from_settings(cx: &mut TestAppConte
     .expect("window");
     assert!(!is_dark(cx));
     cx.update(|cx| assert_eq!(view.read(cx).model().prefs().theme, ThemeChoice::Light));
+}
+
+#[gpui_kit::test]
+fn the_text_size_setting_scales_the_ui_and_persists_across_a_reopen(cx: &mut TestAppContext) {
+    let dir = unique_dir("text-size");
+    let prefs = dir.join("preferences.json");
+    let (window, view) = open_shell_at(
+        cx,
+        "https://hub.test",
+        signed_in_store(),
+        Arc::new(RecordingBrowser::new()),
+        Some(prefs.clone()),
+    );
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(f32::from(window.rem_size()), 16.0);
+        assert_eq!(
+            window.find("text-size-default").label(),
+            Some("Text size: Default, selected")
+        );
+        assert_eq!(
+            window.find("text-size-large").label(),
+            Some("Text size: Large")
+        );
+        window.click("text-size-large", cx);
+        window.render_frame(cx);
+        assert_eq!(f32::from(window.rem_size()), 20.0);
+        assert_eq!(f32::from(cx.theme().font_size), 20.0);
+        assert_eq!(
+            window.find("text-size-large").label(),
+            Some("Text size: Large, selected")
+        );
+    })
+    .expect("window");
+    cx.update(|cx| assert_eq!(view.read(cx).model().prefs().text_size, TextSize::Large));
+    assert_eq!(Preferences::load(&prefs).text_size, TextSize::Large);
+
+    // Reopen with the saved preferences.
+    let (window, _view) = open_shell_at(
+        cx,
+        "https://hub.test",
+        signed_in_store(),
+        Arc::new(RecordingBrowser::new()),
+        Some(prefs),
+    );
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(f32::from(window.rem_size()), 20.0);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("text-size-large").label(),
+            Some("Text size: Large, selected")
+        );
+    })
+    .expect("window");
+}
+
+#[test]
+fn text_size_defaults_and_persists_in_preferences() {
+    assert_eq!(Preferences::default().text_size, TextSize::Default);
+    let dir = unique_dir("text-size-model");
+    let path = dir.join("preferences.json");
+    let mut shell = model(Arc::new(MemoryStore::default()), Some(path.clone()));
+    shell.set_text_size(TextSize::Larger).expect("set");
+    assert_eq!(Preferences::load(&path).text_size, TextSize::Larger);
+    // An old file without the field keeps the default.
+    std::fs::write(&path, r#"{"theme":"dark"}"#).expect("write");
+    assert_eq!(Preferences::load(&path).text_size, TextSize::Default);
 }
 
 #[gpui_kit::test]
