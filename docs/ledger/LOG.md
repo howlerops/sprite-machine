@@ -336,3 +336,4 @@
 - 2026-10-29 leader: merged M3-003 (onboarding path c, disabled a/b, six empty states). Filed M3-003a/b.
 - 2026-11-03 leader: resumed M2B-013 and M2B-015 after the weekly usage limit reset. Merged M2B-013 (PATCH rename, spawn validation, Where picker, machines screen, inbox icon, waiting banner); resolved shell/view.rs conflict with M3-003.
 - 2026-11-03 leader: M2B-013 verified on v2 (client-gpui 344, hub 345, dispatch + machine_do live, e2e app). Disk hit 0 once more; pruned. Filed M2B-013a.
+- 2026-11-03 leader: merged M2B-015 (runner::embed, LocalRunner, phone toggles + auto setting); client 410 passed, runner 253. Fixed racy attachments order assertion. Filed M2B-015a-d (P4).

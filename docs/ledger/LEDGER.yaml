@@ -3700,7 +3700,8 @@ items:
     title: 'Desktop app embeds the runner (Connect-to-phone toggle)'
     milestone: M2b
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged 21896e8; leader verify on v2: clippy client-core/gpui/runner clean; client-core+client-gpui 410 passed 0 failed; runner 253 passed; attachments+shell+local 10/10 runs (leader fixed order-racy attachments assertion); fmt ok. Limit: connected thread stays on hub after disconnect (M2B-015a)."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -3720,6 +3721,68 @@ items:
       - 'Local sessions run in-process via the runner library; toggle per session + global auto-connect; same sessions visible on phone'
     verify:
       - 'cargo test -p client-gpui --test local_sessions'
+  - id: M2B-015a
+    title: 'tunnel + hub: thread detach/close frame so a disconnected local session leaves the phone thread list'
+    milestone: M2b
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-015]
+    paths:
+      - 'docs/specs/tunnel.md'
+      - 'crates/protocol/src/**'
+      - 'crates/hub/src/**'
+      - 'crates/hub/tests/**'
+      - 'crates/runner/src/**'
+    acceptance:
+      - 'After disconnect the thread leaves GET /v1/threads (or is marked detached per spec); live test'
+  - id: M2B-015b
+    title: 'desktop: start/attach a local session from New task (Where: This computer), show its transcript from the session feed, per-session phone toggle in the task header'
+    milestone: M2b
+    phase: P4
+    status: "todo"
+    lane: client
+    size: M
+    risk: medium
+    deps: [M2B-015]
+    paths:
+      - 'crates/client-gpui/src/**'
+      - 'crates/client-gpui/tests/**'
+    acceptance:
+      - 'Window test: a local session started from the composer streams its transcript; toggle in the header connects it'
+  - id: M2B-015c
+    title: "desktop: enroll this computer from the app (runner login flow with a device-code UI); onboarding path 'Use this computer' instead of sm rc"
+    milestone: M2b
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: medium
+    deps: [M2B-015, M3-003]
+    paths:
+      - 'crates/client-gpui/src/local/**'
+      - 'crates/client-gpui/src/onboarding/**'
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/**'
+    acceptance:
+      - 'Enrollment from the app stores the credential via the runner CredentialStore; onboarding offers Use this computer (tests)'
+  - id: M2B-015d
+    title: 'embedded runner: accept dispatch from the phone (server mode in process) and guard against a second runner on the same machine id'
+    milestone: M2b
+    phase: P4
+    status: "todo"
+    lane: rust
+    size: S
+    risk: medium
+    deps: [M2B-015]
+    paths:
+      - 'crates/runner/src/**'
+      - 'crates/runner/tests/**'
+      - 'crates/client-gpui/src/local/**'
+    acceptance:
+      - 'Phone-dispatched task starts in the embedded runner; a second runner on the same id is refused with a clear message (tests)'
 
   - id: M2B-018
     title: 'Runner relays private BYO A2A agents through the tunnel'
