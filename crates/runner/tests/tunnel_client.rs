@@ -1529,6 +1529,7 @@ async fn a_steady_wall_clock_keeps_the_connection() {
 
 // ---- outbound only --------------------------------------------------------------------------
 
+#[cfg(target_os = "linux")]
 /// Local ports of TCP sockets in LISTEN state that this process owns (Linux).
 fn listening_ports() -> Vec<u16> {
     let mut inodes = Vec::new();
@@ -1560,6 +1561,7 @@ fn listening_ports() -> Vec<u16> {
     ports
 }
 
+#[cfg(target_os = "linux")]
 fn assert_only_hubs_listen(own_hub: u16) {
     // A parallel test's fake hub binds before it records its port in HUB_PORTS, so a listener
     // can be unregistered for a moment. Only one that stays unregistered is the runner's.
@@ -1577,6 +1579,8 @@ fn assert_only_hubs_listen(own_hub: u16) {
     panic!("listening sockets besides the fake hubs: {strangers:?}");
 }
 
+// Reads /proc, so Linux only (CI's linux job runs it).
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn the_runner_opens_no_listening_sockets() {
     let mut rig = Rig::new().await;
