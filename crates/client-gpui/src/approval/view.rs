@@ -218,7 +218,10 @@ fn options_row(card: &ApprovalCard, handler: Option<CardHandler>) -> impl IntoEl
             )))
             .label(option.name.clone())
             .accessibility_label(option.a11y.clone())
-            .disabled(!option.enabled);
+            .disabled(!option.enabled)
+            // Keyboard: a tab stop in option order (tree order); Enter/Space answer through
+            // on_click. An unanswerable option is not a stop.
+            .tab_stop(option.enabled);
             let button = match option.kind {
                 PermissionOptionKind::AllowOnce | PermissionOptionKind::AllowAlways => {
                     button.primary()

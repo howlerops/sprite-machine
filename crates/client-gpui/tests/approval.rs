@@ -1364,6 +1364,130 @@ fn clicking_in_the_pane_reaches_the_controller_and_the_outbox(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+fn an_approval_is_answered_with_keys_only_through_the_pane(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut ctl = controller(&clock, LocalPresets::in_memory());
+    let thread = open_thread();
+    let cards = ctl.cards(&thread);
+    let actions = Rc::new(RefCell::new(Vec::new()));
+    let handler: CardHandler = {
+        let actions = actions.clone();
+        Rc::new(move |action, _, _| actions.borrow_mut().push(action))
+    };
+    let (window, pane) = cx.update(|cx| {
+        gpui_kit::open_window(window_options(), cx, |_, cx| {
+            cx.new(|_| TranscriptPane::new())
+        })
+        .expect("window")
+    });
+    cx.update(|cx| {
+        pane.update(cx, |pane, cx| {
+            pane.set_thread(&thread, cx);
+            pane.set_approvals(cards, Some(handler), cx);
+        })
+    });
+    let answer = |id: &str| CardAction::Answer {
+        interrupt_id: "int_1".to_owned(),
+        option_id: id.to_owned(),
+    };
+    // Nothing has focus in a fresh window; the first traversal step enters the card, as the
+    // shell's focus root does in the app. Everything after that is keys.
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.focus_next(cx);
+    })
+    .expect("window is open");
+    // Key events are delivered when each window update ends, so one key per update.
+    let mut press = |key: &str| {
+        cx.update_window(window, |_, window, cx| {
+            window.press(key, cx);
+        })
+        .expect("window is open");
+        cx.update_window(window, |_, window, cx| window.render_frame(cx))
+            .expect("window is open");
+    };
+    // Tab walks the options in order; Enter and Space answer with the focused option's id.
+    for key in [
+        "enter", // allow
+        "tab", "space", // always
+        "tab", "tab", "enter", // never (reject is skipped over by two Tabs: reject, never)
+        "tab", "space", // the preset checkbox
+    ] {
+        press(key);
+    }
+    assert_eq!(
+        *actions.borrow(),
+        vec![
+            answer("allow"),
+            answer("always"),
+            answer("never"),
+            CardAction::SetPreset {
+                interrupt_id: "int_1".to_owned(),
+                checked: true
+            },
+        ]
+    );
+}
+
+#[gpui_kit::test]
+fn an_answered_cards_options_are_skipped_by_tab_and_ignore_keys(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let clock = Arc::new(ManualClock::new(RAISED_MS));
+    let mut ctl = controller(&clock, LocalPresets::in_memory());
+    let mut thread = open_thread();
+    thread
+        .apply(&envelope(
+            3,
+            resolved_event(json!({ "type": "selected", "option_id": "allow" }), jacob()),
+        ))
+        .expect("resolved");
+    let cards = ctl.cards(&thread);
+    let actions = Rc::new(RefCell::new(Vec::new()));
+    let handler: CardHandler = {
+        let actions = actions.clone();
+        Rc::new(move |action, _, _| actions.borrow_mut().push(action))
+    };
+    let (window, pane) = cx.update(|cx| {
+        gpui_kit::open_window(window_options(), cx, |_, cx| {
+            cx.new(|_| TranscriptPane::new())
+        })
+        .expect("window")
+    });
+    cx.update(|cx| {
+        pane.update(cx, |pane, cx| {
+            pane.set_thread(&thread, cx);
+            pane.set_approvals(cards, Some(handler), cx);
+        })
+    });
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.focus_next(cx);
+    })
+    .expect("window is open");
+    for key in ["enter", "tab", "space", "tab", "enter"] {
+        cx.update_window(window, |_, window, cx| window.press(key, cx))
+            .expect("window is open");
+        cx.update_window(window, |_, window, cx| window.render_frame(cx))
+            .expect("window is open");
+    }
+    cx.update_window(window, |_, window, _| {
+        for id in [
+            "approval-option-allow",
+            "approval-option-always",
+            "approval-option-reject",
+            "approval-option-never",
+        ] {
+            if let Some(el) = window.try_find(id) {
+                assert_eq!(el.focused(), Some(false), "{id} must not take focus");
+            }
+        }
+    })
+    .expect("window is open");
+    assert!(actions.borrow().is_empty(), "{:?}", actions.borrow());
+}
+
+#[gpui_kit::test]
 fn a_refused_answer_is_sent_again_from_the_card_buttons_with_a_new_key(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let clock = Arc::new(ManualClock::new(RAISED_MS));
