@@ -5220,32 +5220,38 @@ items:
     title: 'CI: build and upload an unsigned macOS client-gpui app (.app in a zip) on v2 pushes'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: ci
     size: S
     risk: low
     deps: [M3-review]
     paths:
-      - '.github/workflows/**'
-      - 'crates/client-gpui/Cargo.toml'
-      - 'crates/client-gpui/bundle/**'
-      - 'docs/ops/**'
+      - ".github/workflows/**"
+      - "crates/client-gpui/bundle/**"
+      - "crates/client-gpui/Cargo.toml"
+      - "scripts/bundle-macos.sh"
+      - "docs/ops/desktop-builds.md"
     acceptance:
       - 'The macos job (or a new one) builds client-gpui in release, bundles an unsigned .app (Info.plist with bundle id and version) and uploads it as a workflow artifact; docs say how to open an unsigned app on macOS'
   - id: M3-019
     title: 'docs/ux/a11y.md (desktop + mobile checklist) and desktop text scaling; manual VoiceOver pass on a Mac'
     milestone: M3
     phase: P3
-    status: "todo"
+    status: "assigned"
+    attempt: 1
+    assignee: "sonnet"
     lane: client
     size: S
     risk: low
     deps: [M3-review]
     paths:
-      - 'docs/ux/a11y.md'
-      - 'crates/client-gpui/src/shell/**'
-      - 'crates/client-gpui/src/settings/**'
-      - 'crates/client-gpui/tests/shell.rs'
+      - "docs/ux/a11y.md"
+      - "crates/client-gpui/src/shell/**"
+      - "crates/client-gpui/src/settings/**"
+      - "crates/client-gpui/locales/en/*.ftl"
+      - "crates/client-gpui/tests/shell.rs"
     acceptance:
       - 'a11y.md lists the checks (labels, focus order, status roles, text scale, reduced motion, contrast) with how each is tested'
       - 'A text-size setting (and the OS scale) changes the UI text size; window test'
