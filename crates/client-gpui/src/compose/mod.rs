@@ -9,6 +9,7 @@ mod commands;
 mod new;
 mod queue;
 mod thread;
+pub mod where_picker;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -452,7 +453,6 @@ impl ComposeView {
             }
             Status::Invalid(problem) => tr(match problem {
                 Invalid::NoMachine => "compose-invalid-no-machine",
-                Invalid::MachineOffline => "compose-invalid-machine-offline",
                 Invalid::NoAgent => "compose-invalid-no-agent",
                 Invalid::AgentNotOnMachine => "compose-invalid-agent-not-on-machine",
                 Invalid::NoWorkspace => "compose-invalid-no-workspace",
@@ -496,17 +496,8 @@ impl ComposeView {
             .machines()
             .iter()
             .map(|machine| {
-                let label = if machine.online {
-                    machine.name.clone()
-                } else {
-                    tr_args("compose-machine-offline", &[("name", &machine.name)])
-                };
-                let key = if selected.as_deref() == Some(machine.machine_id.as_str()) {
-                    "compose-machine-selected-a11y"
-                } else {
-                    "compose-machine-a11y"
-                };
-                let a11y = tr_args(key, &[("name", &machine.name)]);
+                let is_selected = selected.as_deref() == Some(machine.machine_id.as_str());
+                let (label, a11y) = where_picker::machine_labels(machine, is_selected);
                 (machine.machine_id.clone(), label, a11y)
             })
             .collect::<Vec<_>>();
@@ -527,6 +518,11 @@ impl ComposeView {
             .child(self.choices("machine", items, selected, cx, |this, id, _| {
                 this.model.set_machine(id);
             }))
+            .child(where_picker::cloud_choice(cx))
+            .when_some(
+                where_picker::wait_note(self.model.selected_machine()),
+                |el, text| el.child(where_picker::wait_line(text, cx)),
+            )
             .when_some(note, |el, text| {
                 el.child(
                     div()

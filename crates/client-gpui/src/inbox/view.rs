@@ -30,6 +30,8 @@ pub const ROW_HEIGHT: Pixels = px(48.);
 /// Element id of the list (scroll target in tests) and of each laid-out row.
 pub const LIST_ID: &str = "inbox-list";
 pub const ROW_ID: &str = "inbox-row";
+/// The computer icon of a machine-hosted row.
+pub const MACHINE_ICON_ID: &str = "inbox-row-machine";
 
 /// Where and as whom requests go: the `…/v1` base URL and the bearer token.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -713,6 +715,9 @@ impl InboxView {
                     .px_3()
                     .gap_2()
                     .items_center()
+                    .when(row.is_machine_hosted(), |el| {
+                        el.child(machine_icon(cx.theme().muted_foreground))
+                    })
                     // The title and detail area is the click target that opens the thread. It is
                     // a sibling of the buttons, so their clicks never reach it.
                     .child(
@@ -873,4 +878,27 @@ impl Render for InboxView {
                     ),
             )
     }
+}
+
+/// A small computer drawn from boxes (a screen on a stand), so no icon asset is needed. It is
+/// exposed to assistive technology as an image with a label.
+fn machine_icon(color: Hsla) -> impl IntoElement {
+    let label = tr("inbox-row-machine-a11y");
+    v_flex()
+        .id(MACHINE_ICON_ID)
+        .test_support()
+        .role(Role::Image)
+        .aria_label(label)
+        .flex_none()
+        .items_center()
+        .child(
+            div()
+                .w(px(16.))
+                .h(px(11.))
+                .border_2()
+                .border_color(color)
+                .rounded_sm(),
+        )
+        .child(div().w(px(6.)).h(px(2.)).bg(color))
+        .child(div().w(px(12.)).h(px(2.)).bg(color).rounded_sm())
 }

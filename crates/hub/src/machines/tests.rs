@@ -1713,6 +1713,91 @@ fn the_admin_api_issues_a_credential_once_and_stores_only_its_hash() {
 }
 
 #[test]
+fn renaming_changes_the_listed_name_audits_it_and_stays_inside_the_org() {
+    let db = Fake::new();
+    let control = FakeControl::default();
+    let admin = dev_admin(&db);
+    let created = block_on(admin::create_machine(
+        &db,
+        &control,
+        &admin,
+        &json!({"name": "old-name"}),
+        "r",
+    ))
+    .expect("create");
+    let id = created["machine"]["id"].as_str().expect("id").to_owned();
+
+    let renamed = block_on(admin::rename_machine(
+        &db,
+        &admin,
+        &id,
+        &json!({"name": "  my-laptop  "}),
+        "r2",
+    ))
+    .expect("rename");
+    assert_eq!(renamed["machine_id"], id.as_str());
+    assert_eq!(renamed["name"], "my-laptop", "trimmed");
+    let listed = block_on(admin::list_machines(&db, &admin)).expect("list");
+    assert_eq!(listed["machines"][0]["name"], "my-laptop");
+    let audit = block_on(crate::audit::list(&db, &admin.org_id, 0, 10)).expect("audit");
+    assert!(
+        audit
+            .iter()
+            .any(|e| e.action == "machine.rename" && e.target_id == id)
+    );
+
+    for bad in [json!({}), json!({"name": "  "}), json!({"name": 3})] {
+        let error = block_on(admin::rename_machine(&db, &admin, &id, &bad, "r")).expect_err("bad");
+        assert_eq!(error.status, 400, "{bad}");
+    }
+    let long = "x".repeat(129);
+    let error = block_on(admin::rename_machine(
+        &db,
+        &admin,
+        &id,
+        &json!({ "name": long }),
+        "r",
+    ))
+    .expect_err("long");
+    assert_eq!(error.status, 400);
+
+    let mut member = admin.clone();
+    member.role = Role::Member;
+    let error = block_on(admin::rename_machine(
+        &db,
+        &member,
+        &id,
+        &json!({"name": "x"}),
+        "r",
+    ))
+    .expect_err("member");
+    assert_eq!(error.status, 403);
+
+    let mut stranger = admin.clone();
+    stranger.org_id = "org_other".to_owned();
+    let error = block_on(admin::rename_machine(
+        &db,
+        &stranger,
+        &id,
+        &json!({"name": "x"}),
+        "r",
+    ))
+    .expect_err("other org");
+    assert_eq!(error.status, 404);
+
+    block_on(admin::revoke_machine(&db, &control, &admin, &id, "r")).expect("revoke");
+    let error = block_on(admin::rename_machine(
+        &db,
+        &admin,
+        &id,
+        &json!({"name": "x"}),
+        "r",
+    ))
+    .expect_err("revoked");
+    assert_eq!(error.status, 404, "a revoked machine cannot be renamed");
+}
+
+#[test]
 fn creating_and_revoking_need_the_admin_role_and_validate_input() {
     let db = Fake::new();
     let control = FakeControl::default();

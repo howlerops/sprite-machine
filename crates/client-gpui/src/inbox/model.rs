@@ -193,6 +193,13 @@ pub struct ThreadRow {
 }
 
 impl ThreadRow {
+    /// Whether the thread is hosted by a machine (a computer running `sm rc`), which the list
+    /// marks with a computer icon (M2B-013). Every hub thread has one today; a row without a
+    /// machine id (an older hub, a cached row) shows no icon.
+    pub fn is_machine_hosted(&self) -> bool {
+        !self.machine_id.trim().is_empty()
+    }
+
     /// The first open approval. Quick Allow / Deny answer this one, whatever else is listed
     /// before it.
     pub fn first_approval(&self) -> Option<&PendingInterrupt> {

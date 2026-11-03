@@ -264,6 +264,60 @@ pub async fn revoke_machine(
     Ok(json!({ "id": row.id, "revoked_at": row.revoked_at }))
 }
 
+/// `PATCH /v1/machines/{id}` `{ "name" }`: admin (M2B-013). Renames a machine that is not
+/// revoked and answers it in the `GET /v1/machines` shape. Same name rules as create; a revoked,
+/// unknown or other org's machine is `404`.
+pub async fn rename_machine(
+    db: &impl Db,
+    caller: &Principal,
+    machine_id: &str,
+    body: &Value,
+    request_id: &str,
+) -> Result<Value, ApiError> {
+    caller.require(Role::Admin)?;
+    let name = match body.get("name") {
+        Some(Value::String(name)) => name.trim().to_owned(),
+        _ => return Err(ApiError::invalid_request("name is required")),
+    };
+    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+        return Err(ApiError::invalid_request(format!(
+            "name must be 1-{MAX_NAME_CHARS} characters"
+        )));
+    }
+    let Some(row) = find(db, &caller.org_id, machine_id)
+        .await?
+        .filter(|row| row.revoked_at.is_none())
+    else {
+        return Err(ApiError::not_found(format!("no machine {machine_id}")));
+    };
+    audit::record(
+        db,
+        &Event::by(
+            caller,
+            "machine.rename",
+            "machine",
+            machine_id,
+            request_id,
+            json!({ "from": row.name, "to": name }),
+        ),
+    )
+    .await?;
+    db.execute(
+        "UPDATE machines SET name = ? WHERE id = ? AND org_id = ? AND revoked_at IS NULL",
+        &[
+            name.as_str().into(),
+            machine_id.into(),
+            caller.org_id.as_str().into(),
+        ],
+    )
+    .await
+    .map_err(db_failure)?;
+    let row = find(db, &caller.org_id, machine_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("machine row vanished"))?;
+    Ok(row.to_client_json())
+}
+
 /// `GET /v1/machines`: viewer. The org's machines in the client-api §5.1 shape, newest first.
 /// Revoked machines are left out (they cannot connect, and §5.1 has no field for them).
 pub async fn list_machines(db: &impl Db, caller: &Principal) -> Result<Value, ApiError> {
