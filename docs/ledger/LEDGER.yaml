@@ -5240,7 +5240,8 @@ items:
     title: 'docs/ux/a11y.md (desktop + mobile checklist) and desktop text scaling; manual VoiceOver pass on a Mac'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; leader verify on v2: client-gpui 359 passed 0 failed; shell 82 passed 3/3; clippy clean; fmt ok. docs/ux/a11y.md added; text size Small/Default/Large/Larger persisted; OS scale not exposed by gpui (M3-019b). Manual VoiceOver pass is M3-019d (human)."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -5257,6 +5258,49 @@ items:
       - 'a11y.md lists the checks (labels, focus order, status roles, text scale, reduced motion, contrast) with how each is tested'
       - 'A text-size setting (and the OS scale) changes the UI text size; window test'
       - 'Manual: VoiceOver reads the inbox, an approval card and the composer on a Mac (human, recorded in the doc)'
+  - id: M3-019a
+    title: 'approval card: answer an approval by keyboard (focus an option, Enter); test'
+    milestone: M3
+    phase: P3
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-019]
+    paths:
+      - 'crates/client-gpui/src/approval/**'
+      - 'crates/client-gpui/tests/approval.rs'
+    acceptance:
+      - 'Tab reaches the card options and Enter answers with the option id (window test)'
+  - id: M3-019b
+    title: 'settings page scrolls at Larger text so Sign out stays reachable; honour OS text scale when gpui exposes it'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-019]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'At Larger in a small window every settings control is reachable (test)'
+  - id: M3-019d
+    title: 'Manual a11y pass on a Mac: VoiceOver (inbox, approval card, composer, settings) and contrast in both themes; fill the results table in docs/ux/a11y.md'
+    milestone: M3
+    phase: P3
+    status: "blocked"
+    blocked_on: "human"
+    howto: "Download the unsigned app from the desktop workflow (docs/ops/desktop-builds.md), turn on VoiceOver (Cmd+F5) and follow the 'Manual checks' steps in docs/ux/a11y.md; record pass/fail per row and paste the table back."
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-019, M3-018]
+    paths:
+      - 'docs/ux/a11y.md'
+    acceptance:
+      - 'Results table filled'
 
   # ════════════════════════ M4 — managed cloud workspaces (+ handoff) ════════════════════════
   - id: M4-001
