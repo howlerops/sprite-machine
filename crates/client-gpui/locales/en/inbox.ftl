@@ -28,6 +28,7 @@ inbox-section-done = Done
 inbox-section-a11y = { $name }, { $count } tasks
 inbox-row-a11y = { $title }, { $agent }, { $status }
 inbox-row-untitled = Untitled task
+inbox-row-machine-a11y = Runs on a computer
 inbox-row-archived = archived
 inbox-rename = Rename
 inbox-rename-a11y = Rename { $title }

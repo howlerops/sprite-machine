@@ -51,6 +51,7 @@ use crate::auth::{
     Principal, authenticate, policy::thread_policy, routes::authorize_thread_request, ticket,
 };
 use crate::db::{Db, d1::D1, queries};
+use crate::dispatch;
 use crate::router::{REQUEST_ID_HEADER, path_and_query_without_ticket, request_id};
 use crate::worker::AppState;
 
@@ -302,6 +303,10 @@ async fn create_inner(env: &Env, req: Request) -> Result<Response, ApiError> {
         .filter(|id| is_valid_id(id))
         .ok_or_else(|| ApiError::invalid_request("machine_id is required"))?;
     require_machine_of_org(&db, machine_id, &principal.org_id).await?;
+    // M2B-013: an unknown spawn mode, or one the machine did not advertise, is refused before
+    // anything is mapped, audited or created.
+    let capabilities = dispatch::machine_capabilities(&db, machine_id, &principal.org_id).await?;
+    dispatch::check_spawn(&value, capabilities.as_deref())?;
     // Map the thread to the caller's org before anything is audited or created (M2-008e).
     let mapped = queries::claim_thread_host(&db, &thread_id, &principal.org_id, machine_id)
         .await

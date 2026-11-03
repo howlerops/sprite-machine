@@ -8,6 +8,7 @@ pub mod row_cache;
 pub mod tools;
 pub mod transcript;
 pub mod usage;
+pub mod waiting;
 
 pub use media::{HttpFetcher, ImageFetcher, LoadState, MediaCache, MediaRef};
 pub use plan::{PlanModel, PlanRow, render_plan};
@@ -16,3 +17,4 @@ pub use transcript::{
     Row, RowKind, Tone, TranscriptEvent, TranscriptPane, thread_rows, thread_rows_expanded,
 };
 pub use usage::{Money, UsageModel, UsageSnapshot, UsageTracker, format_tokens, render_usage};
+pub use waiting::{WAITING_ID, WAITING_ITEM_ID, Waiting, render_waiting, waiting_for};

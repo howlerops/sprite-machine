@@ -4,6 +4,7 @@
 //! | ------------------------------------------------ | -------------------------------------------- |
 //! | `POST /v1/machines`                              | session token, admin; audited                |
 //! | `GET /v1/machines`                               | session token, viewer                        |
+//! | `PATCH /v1/machines/{id}` `{name}`               | session token, admin; audited (M2B-013 rename) |
 //! | `DELETE /v1/machines/{id}`                       | session token, admin; audited                |
 //! | `GET /v1/machines/{id}/tunnel` (WebSocket)       | `Bearer <machine credential>`, checked by the Machine DO |
 //! | `POST /v1/dev/machines/{id}/credential`          | `Bearer dev` + `DEV_FIXTURES=1`, no D1       |
@@ -24,7 +25,7 @@ use axum::{
     extract::{Path, Request, State},
     http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
 };
 use protocol::turn_event::is_valid_id;
 use serde_json::{Value, json};
@@ -52,7 +53,7 @@ const DEV_ORG_ID: &str = crate::auth::DEV_ORG_ID;
 pub fn machine_routes() -> Router<AppState> {
     Router::new()
         .route("/v1/machines", post(create).get(list))
-        .route("/v1/machines/{machine_id}", delete(revoke))
+        .route("/v1/machines/{machine_id}", delete(revoke).patch(rename))
         .route("/v1/machines/{machine_id}/tunnel", get(tunnel))
         .route(
             "/v1/dev/machines/{machine_id}/credential",
@@ -158,6 +159,25 @@ async fn list(State(env): State<AppState>, req: Request) -> Response {
         let caller =
             authenticate(&db, authorization(&headers).as_deref(), dev_fixtures(&env)).await?;
         admin::list_machines(&db, &caller).await
+    }
+    .await;
+    respond(result, StatusCode::OK)
+}
+
+#[worker::send]
+async fn rename(
+    State(env): State<AppState>,
+    Path(machine_id): Path<String>,
+    req: Request,
+) -> Response {
+    let result = async {
+        let machine_id = valid_machine_id(&machine_id)?.to_owned();
+        let (headers, body) = read_body(req).await?;
+        let database = database(&env)?;
+        let db = D1::new(&database);
+        let caller =
+            authenticate(&db, authorization(&headers).as_deref(), dev_fixtures(&env)).await?;
+        admin::rename_machine(&db, &caller, &machine_id, &body, &request_id_of(&headers)).await
     }
     .await;
     respond(result, StatusCode::OK)

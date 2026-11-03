@@ -213,7 +213,8 @@ fn validation_names_the_first_problem() {
     model.set_prompt("go");
     assert!(model.prepare_send().is_ok());
     model.set_machine("mch_old");
-    assert_eq!(model.prepare_send().unwrap_err(), Invalid::MachineOffline);
+    // M2B-013: an offline machine can be chosen; the hub queues the task until it is back.
+    assert!(model.prepare_send().is_ok());
 }
 
 #[test]
@@ -518,7 +519,7 @@ fn ctrl_enter_sends_the_typed_task_to_the_hub(cx: &mut TestAppContext) {
     cx.update_window(window, |_, window, cx| {
         assert_eq!(
             window.find("machine-mch_old").label(),
-            Some("Run on old-box")
+            Some("Run on old-box, offline")
         );
         assert_eq!(
             window.find("machine-mch_laptop").label(),

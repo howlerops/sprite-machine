@@ -89,6 +89,15 @@ All paths are under `https://<hub>/v1`.
 }
 ```
 
+**`PATCH /v1/machines/{machine_id}`** `{ "name" }` → 200, the machine in the shape above (admin;
+audited as `machine.rename`). The name is trimmed and 1 to 128 characters (`400 invalid_request`
+otherwise). A revoked, unknown or other org's machine is `404 not_found`. No `Idempotency-Key` is
+needed (setting a name twice is the same as once). The desktop's Machines screen uses it.
+
+**`DELETE /v1/machines/{machine_id}`** → 200 `{ "id", "revoked_at" }` (admin, audited as
+`machine.revoke`, idempotent): revokes the machine. It closes its live tunnel with `auth_revoked`,
+and it is no longer listed. The desktop asks for a confirmation before it sends this.
+
 ### 5.2 Threads
 
 **`POST /v1/threads`**: create a thread on a machine and (normally) start its first task. The
@@ -117,6 +126,18 @@ stricter than the machine's own local mode (`plan` < `default` < `acceptEdits` <
 advertises that local mode as `capabilities.permission_mode` in `GET /v1/machines` (omitted when
 unknown), and clients offer only modes up to it and say when a choice was lowered. The thread's
 `current_mode_id` state shows the effective mode.
+`workspace.spawn` is `same_dir` or `worktree` (plan §4.10); anything else is `400 invalid_request`,
+and so is a mode the machine did not list in `capabilities.spawn` (once it has said hello). Nothing
+is created or queued in either case.
+
+**Capacity and offline machines.** The hub does not count a machine's sessions. The runner refuses
+a `dispatch` beyond its `max_sessions` with `command_result{ok:false, code:"capacity"}` (tunnel.md
+§3.6), and the hub then ends that task with `RunStarted` + `RunError{code:"capacity"}`: the thread
+shows the task failed. If the machine is offline or asleep, the create is accepted as usual
+(`201`, `status: "started"`) and the `dispatch` waits in the Machine DO's queue; it is delivered, in
+order, after the runner's next `welcome` (tunnel.md §5). Clients show "waiting for <machine>" from
+the machine's presence in `GET /v1/machines`.
+
 `prompt` may be omitted (thread created idle). `task_id`/`message_id` are optional client-chosen
 ids (so an offline client can render its own message before the hub answers); the hub generates
 them when absent. Threads started on the runner itself (TUI, `/rc`) appear through tunnel

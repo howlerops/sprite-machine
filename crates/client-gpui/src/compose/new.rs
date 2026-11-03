@@ -156,7 +156,6 @@ impl Draft {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Invalid {
     NoMachine,
-    MachineOffline,
     NoAgent,
     AgentNotOnMachine,
     NoWorkspace,
@@ -375,9 +374,7 @@ impl NewTaskModel {
         let Some(machine) = self.selected_machine() else {
             return Some(Invalid::NoMachine);
         };
-        if !machine.online {
-            return Some(Invalid::MachineOffline);
-        }
+        // An offline machine is fine: the hub queues the task until it is back (M2B-013).
         if self.draft.agent.is_empty() {
             return Some(Invalid::NoAgent);
         }

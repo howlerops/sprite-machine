@@ -32,6 +32,7 @@ use super::session::SessionStore;
 use crate::approval::{CardAction, CardHandler};
 use crate::compose::{ComposerEvent, ThreadComposer};
 use crate::inbox::{Filters, InboxEvent};
+use crate::machines::MachinesEvent;
 use crate::notify::{
     EventQueue, Notifier, NotifyConfig, NotifyEvent, NotifySettingsView, ToastSink, hub_link_thread,
 };
@@ -40,7 +41,8 @@ use crate::palette::{
     self, CommandId, NextThread, OpenPalette, PaletteEvent, PaletteView, PreviousThread, ShortcutId,
 };
 use crate::task::{
-    PlanModel, TranscriptEvent, TranscriptPane, UsageModel, render_plan, render_usage,
+    PlanModel, TranscriptEvent, TranscriptPane, UsageModel, Waiting, render_plan, render_usage,
+    render_waiting, waiting_for,
 };
 
 actions!(shell, [GoNewTask, NextSection, PreviousSection]);
@@ -134,6 +136,9 @@ pub struct AppShell {
     onboarding_completed: bool,
     /// Put the cursor in the thread composer on the next render (the empty transcript's action).
     focus_composer: bool,
+    /// The Machines page (rename, revoke), fed by the same machines feed.
+    machines_view: Entity<crate::machines::MachinesView>,
+    _machines_events: Subscription,
     /// The one `GET /v1/machines` feed: agents page, new-task composer and runner cap.
     machines: MachinesFeed,
     machines_pump: Option<Task<()>>,
@@ -273,6 +278,11 @@ impl AppShell {
                 this.show_setup(cx);
             }),
         ];
+        let machines_view = cx.new(|cx| crate::machines::MachinesView::new(window, cx));
+        // A rename or revoke went through: the feed is out of date.
+        let machines_events = cx.subscribe(&machines_view, |this, _, _: &MachinesEvent, cx| {
+            this.refresh_machines(cx);
+        });
         let mut shell = Self {
             model,
             driver,
@@ -302,6 +312,8 @@ impl AppShell {
             onboarding_requested: false,
             onboarding_completed: false,
             focus_composer: false,
+            machines_view,
+            _machines_events: machines_events,
             machines: MachinesFeed::default(),
             machines_pump: None,
             _machines_timer: None,
@@ -412,6 +424,11 @@ impl AppShell {
         &self.agents
     }
 
+    /// The Machines page.
+    pub fn machines_page(&self) -> &Entity<crate::machines::MachinesView> {
+        &self.machines_view
+    }
+
     /// The machines the shell's feed last received (empty before the first answer).
     pub fn machines(&self) -> &[crate::compose::MachineOption] {
         &self.machines.snapshot.options
@@ -472,6 +489,8 @@ impl AppShell {
                 let options = self.machines.snapshot.options.clone();
                 self.agents
                     .update(cx, |agents, cx| agents.set_machines(&info, cx));
+                self.machines_view
+                    .update(cx, |view, cx| view.set_machines(&info, cx));
                 self.compose
                     .update(cx, |compose, cx| compose.apply_machines(options, cx));
                 self.sync_runner_cap(cx);
@@ -525,6 +544,10 @@ impl AppShell {
         let (info, options) = (Vec::new(), Vec::new());
         self.agents
             .update(cx, |agents, cx| agents.set_machines(&info, cx));
+        self.machines_view.update(cx, |view, cx| {
+            view.set_target(target.clone(), cx);
+            view.set_machines(&info, cx);
+        });
         self.compose.update(cx, |compose, cx| {
             compose.set_send_target(target.clone(), cx);
             compose.apply_machines(options, cx);
@@ -1182,7 +1205,10 @@ impl AppShell {
 
     /// Opening the Agents page refreshes presence.
     fn refresh_if_agents(&mut self, cx: &mut Context<Self>) {
-        if self.model.nav.current() == Section::Agents {
+        if matches!(
+            self.model.nav.current(),
+            Section::Agents | Section::Machines
+        ) {
             self.refresh_machines(cx);
         }
     }
@@ -1358,6 +1384,8 @@ impl AppShell {
             self.compose.clone().into_any_element()
         } else if current == Section::Agents {
             self.render_agents(cx).into_any_element()
+        } else if current == Section::Machines {
+            self.machines_view.clone().into_any_element()
         } else if current == Section::Inbox && self.open_thread.is_some() {
             self.render_thread(slots, cx).into_any_element()
         } else if current == Section::Inbox && self.onboarding_visible(cx) {
@@ -1425,6 +1453,26 @@ impl AppShell {
             .child(self.agents.clone())
     }
 
+    /// "Waiting for <machine>" while the machine hosting the open thread is offline, with the
+    /// messages queued for it (M2B-013). Nothing while it is online or not in the feed.
+    fn waiting_banner(&self, cx: &App) -> Option<Waiting> {
+        let machine_id = self.thread_machine.as_deref()?;
+        let machine = self
+            .machines
+            .snapshot
+            .options
+            .iter()
+            .find(|machine| machine.machine_id == machine_id);
+        let items = self
+            .composer
+            .read(cx)
+            .queued()
+            .into_iter()
+            .map(|chip| chip.preview)
+            .collect();
+        waiting_for(machine, items)
+    }
+
     /// The open thread: a way back to the list, then the transcript with its approval cards, and
     /// beside it the plan and usage widgets. Both widgets show their empty states when the thread
     /// has no plan or usage yet.
@@ -1438,6 +1486,9 @@ impl AppShell {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.close_thread(cx))),
             )
+            .when_some(self.waiting_banner(cx), |el, waiting| {
+                el.child(render_waiting(&waiting, cx))
+            })
             .child(
                 h_flex()
                     .flex_1()

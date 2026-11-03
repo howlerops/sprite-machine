@@ -9,6 +9,7 @@ pub mod auth;
 pub mod db;
 pub mod dev_fixtures;
 pub mod devices;
+pub mod dispatch;
 pub mod links;
 pub mod machines;
 pub mod members;
