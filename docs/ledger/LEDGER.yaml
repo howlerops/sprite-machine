@@ -5262,7 +5262,8 @@ items:
     title: 'approval card: answer an approval by keyboard (focus an option, Enter); test'
     milestone: M3
     phase: P3
-    status: "assigned"
+    status: "done"
+    evidence: "merged; keyboard answering already worked via gpui-kit Button; worker added explicit tab_stop(enabled) and 2 key-only window tests (mutation check: tab_stop(false) fails them). Leader verify on v2: approval suite green, clippy clean."
     attempt: 1
     assignee: "sonnet"
     lane: client
@@ -5303,6 +5304,20 @@ items:
       - 'docs/ux/a11y.md'
     acceptance:
       - 'Results table filled'
+  - id: M3-019e
+    title: 'desktop: the first Tab in a window with nothing focused enters the page (shell root focus entry point)'
+    milestone: M3
+    phase: P4
+    status: "todo"
+    lane: client
+    size: S
+    risk: low
+    deps: [M3-019a]
+    paths:
+      - 'crates/client-gpui/src/shell/**'
+      - 'crates/client-gpui/tests/shell.rs'
+    acceptance:
+      - 'Fresh window, Tab focuses the first control of the current page (test)'
 
   # ════════════════════════ M4 — managed cloud workspaces (+ handoff) ════════════════════════
   - id: M4-001

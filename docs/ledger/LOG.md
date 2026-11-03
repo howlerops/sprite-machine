@@ -341,3 +341,4 @@
 - 2026-11-03 leader: M3 exit review done (report M3-review.md). Workspace 1369 passed, e2e app + tracer PASS. Fixed two macOS-only test keystrokes (paste, new task). Filed M3-018 (unsigned macOS app artifact) and M3-019 (a11y.md, text scaling, VoiceOver). alpha.2 not tagged yet.
 - 2026-11-03 leader: merged M3-018 (desktop.yml: release build, Sprite Machine.app, unsigned zip artifact 14 d). Awaiting first macOS run.
 - 2026-11-03 leader: merged M3-019 (a11y.md, text size). Filed M3-019a (keyboard approval), M3-019b, M3-019d (human: VoiceOver).
+- 2026-11-03 leader: merged M3-019a (keyboard approvals already worked; now guarded by tests). Filed M3-019e.
