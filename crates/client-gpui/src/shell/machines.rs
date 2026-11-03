@@ -13,6 +13,15 @@ use crate::compose::{MachineOption, Target, parse_machines};
 /// How often the machines list is refreshed while signed in (presence changes show up within it).
 pub const REFRESH_EVERY: Duration = Duration::from_secs(30);
 
+/// How often the machines list is refreshed while the onboarding page is showing, so a machine
+/// started with `sm rc` is noticed within a few seconds. Once onboarding is gone the shell is
+/// back on [`REFRESH_EVERY`]. A refresh never starts while one is still running.
+pub const ONBOARDING_REFRESH_EVERY: Duration = Duration::from_secs(3);
+
+/// How many [`ONBOARDING_REFRESH_EVERY`] ticks make one [`REFRESH_EVERY`].
+pub const TICKS_PER_REFRESH: u32 =
+    (REFRESH_EVERY.as_secs() / ONBOARDING_REFRESH_EVERY.as_secs()) as u32;
+
 /// One answer of `GET /v1/machines`, in the two shapes the pages need.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MachinesSnapshot {

@@ -41,9 +41,20 @@ struct Hub {
     threads: Mutex<Vec<Value>>,
     /// The status `GET /v1/machines` answers (0 means 200).
     machines_status: AtomicUsize,
+    /// The status `GET /v1/threads` answers (0 means 200).
+    threads_status: AtomicUsize,
+    /// How many `GET /v1/machines` requests arrived.
+    machines_hits: AtomicUsize,
+    /// Real milliseconds `GET /v1/machines` waits before answering.
+    machines_delay_ms: AtomicUsize,
 }
 
 async fn list_machines(State(hub): State<Arc<Hub>>) -> Response {
+    hub.machines_hits.fetch_add(1, Ordering::SeqCst);
+    let delay = hub.machines_delay_ms.load(Ordering::SeqCst) as u64;
+    if delay > 0 {
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+    }
     let status = hub.machines_status.load(Ordering::SeqCst);
     if status != 0 {
         return StatusCode::from_u16(status as u16)
@@ -53,9 +64,15 @@ async fn list_machines(State(hub): State<Arc<Hub>>) -> Response {
     Json(json!({ "machines": hub.machines.lock().expect("lock").clone() })).into_response()
 }
 
-async fn list_threads(State(hub): State<Arc<Hub>>) -> Json<Value> {
+async fn list_threads(State(hub): State<Arc<Hub>>) -> Response {
+    let status = hub.threads_status.load(Ordering::SeqCst);
+    if status != 0 {
+        return StatusCode::from_u16(status as u16)
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+    }
     let threads = hub.threads.lock().expect("lock").clone();
-    Json(json!({ "threads": threads, "next_cursor": null }))
+    Json(json!({ "threads": threads, "next_cursor": null })).into_response()
 }
 
 fn spawn_hub(hub: Arc<Hub>) -> String {
@@ -277,6 +294,76 @@ fn when_the_machines_feed_reports_a_machine_onboarding_completes_and_the_inbox_s
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(!shown(cx, window, VIEW_ID));
+}
+
+/// Advance the test clock `steps` times by `step`, letting fetches run in between.
+fn tick(cx: &mut TestAppContext, step: Duration, steps: u32) {
+    for _ in 0..steps {
+        cx.executor().advance_clock(step);
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+#[gpui_kit::test]
+fn a_machine_appearing_is_noticed_within_the_short_onboarding_interval(cx: &mut TestAppContext) {
+    use client_gpui::shell::machines::{ONBOARDING_REFRESH_EVERY, REFRESH_EVERY};
+    assert!(ONBOARDING_REFRESH_EVERY <= Duration::from_secs(5));
+    assert!(ONBOARDING_REFRESH_EVERY < REFRESH_EVERY);
+    let hub = Arc::new(Hub::default());
+    let (window, view, _url) = open_shell(cx, &hub);
+    wait_shown(cx, window, VIEW_ID);
+    hub.machines.lock().expect("lock").push(laptop());
+    // Far less than REFRESH_EVERY.
+    cx.executor().advance_clock(ONBOARDING_REFRESH_EVERY);
+    wait_gone(cx, window, VIEW_ID);
+    assert!(!cx.update(|cx| view.read(cx).onboarding_visible(cx)));
+}
+
+#[gpui_kit::test]
+fn the_refresh_returns_to_the_slow_cadence_once_onboarding_is_gone(cx: &mut TestAppContext) {
+    use client_gpui::shell::machines::{ONBOARDING_REFRESH_EVERY, REFRESH_EVERY};
+    let hub = Arc::new(Hub::default());
+    let (window, _view, _url) = open_shell(cx, &hub);
+    wait_shown(cx, window, VIEW_ID);
+    // While onboarding shows, every short tick fetches.
+    let before = hub.machines_hits.load(Ordering::SeqCst);
+    tick(cx, ONBOARDING_REFRESH_EVERY, 3);
+    assert!(hub.machines_hits.load(Ordering::SeqCst) >= before + 3);
+    hub.machines.lock().expect("lock").push(laptop());
+    tick(cx, ONBOARDING_REFRESH_EVERY, 1);
+    wait_gone(cx, window, VIEW_ID);
+    // Gone: a few short intervals do not fetch, a full REFRESH_EVERY does.
+    tick(cx, ONBOARDING_REFRESH_EVERY, 2);
+    let settled = hub.machines_hits.load(Ordering::SeqCst);
+    tick(cx, ONBOARDING_REFRESH_EVERY, 3);
+    assert_eq!(hub.machines_hits.load(Ordering::SeqCst), settled);
+    tick(cx, REFRESH_EVERY, 1);
+    assert!(hub.machines_hits.load(Ordering::SeqCst) > settled);
+}
+
+#[gpui_kit::test]
+fn a_slow_machines_answer_is_not_stacked_by_the_short_interval(cx: &mut TestAppContext) {
+    use client_gpui::shell::machines::ONBOARDING_REFRESH_EVERY;
+    let hub = Arc::new(Hub::default());
+    hub.machines_delay_ms.store(1500, Ordering::SeqCst);
+    let (_window, _view, _url) = open_shell(cx, &hub);
+    // Many short ticks pass in test time while the first answer is still in flight.
+    for _ in 0..8 {
+        cx.executor().advance_clock(ONBOARDING_REFRESH_EVERY);
+        cx.run_until_parked();
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(hub.machines_hits.load(Ordering::SeqCst), 1);
+}
+
+#[gpui_kit::test]
+fn a_failing_inbox_fetch_with_no_machines_still_shows_the_steps(cx: &mut TestAppContext) {
+    let hub = Arc::new(Hub::default());
+    hub.threads_status.store(500, Ordering::SeqCst);
+    let (window, view, _url) = open_shell(cx, &hub);
+    wait_shown(cx, window, VIEW_ID);
+    assert!(cx.update(|cx| view.read(cx).onboarding_visible(cx)));
 }
 
 #[gpui_kit::test]
