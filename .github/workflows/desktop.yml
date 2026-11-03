@@ -1,0 +1,48 @@
+name: desktop
+
+# Unsigned macOS build of client-gpui. No signing, no notarization, no secrets.
+# Separate from rust.yml so the test jobs there are not slowed down.
+on:
+  push:
+    branches: [v2]
+    paths:
+      - 'crates/**'
+      - 'Cargo.*'
+      - 'scripts/bundle-macos.sh'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  macos-app:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # Runner arch only (arm64 on macos-latest). Universal (two targets + lipo)
+      # would roughly double the build time; see docs/ops/desktop-builds.md.
+      - name: Build client-gpui (release)
+        run: cargo build --release -p client-gpui
+      - name: Bundle Sprite Machine.app
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name=="client-gpui") | .version')"
+          sha="$(git rev-parse --short=7 HEAD)"
+          bash scripts/bundle-macos.sh \
+            --binary target/release/client-gpui \
+            --out dist \
+            --version "$version" --sha "$sha"
+          plutil -lint "dist/Sprite Machine.app/Contents/Info.plist"
+          ditto -c -k --keepParent "dist/Sprite Machine.app" "dist/Sprite-Machine-macos-$(uname -m)-$sha.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sprite-machine-macos-unsigned
+          path: dist/*.zip
+          retention-days: 14
+          if-no-files-found: error
