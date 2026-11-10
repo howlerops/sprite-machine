@@ -343,3 +343,4 @@
 - 2026-11-03 leader: merged M3-019 (a11y.md, text size). Filed M3-019a (keyboard approval), M3-019b, M3-019d (human: VoiceOver).
 - 2026-11-03 leader: merged M3-019a (keyboard approvals already worked; now guarded by tests). Filed M3-019e.
 - 2026-11-03 leader: CI all green on b2bf24a (linux, tracer, macos tests, desktop app build); macOS app artifact uploaded. M3-018 done. P3 complete apart from human items.
+- 2026-11-10 leader: user asked to replace main with v2 and remove v1. Removed v1 (M6-007, ahead of P7); v1-final branch at d41a22d; workflows run on main and v2; ledger branch -> main; README added. The v1 Fly app keeps running until shut down by hand.

@@ -4,7 +4,7 @@ name: desktop
 # Separate from rust.yml so the test jobs there are not slowed down.
 on:
   push:
-    branches: [v2]
+    branches: [main, v2]
     paths:
       - 'crates/**'
       - 'Cargo.*'

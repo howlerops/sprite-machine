@@ -1,7 +1,7 @@
 name: deploy-hub
 
 # M2-015: deploys the v2 hub Worker (crates/hub) to Cloudflare, environment `production` of
-# crates/hub/wrangler.toml. v1's workflow is deploy.yml and is not touched. See docs/ops/hub.md.
+# crates/hub/wrangler.toml. See docs/ops/hub.md.
 #
 # Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID. Variable or secret: HUB_URL (the hub's
 # public https origin, for the post-deploy /healthz check). Without CLOUDFLARE_API_TOKEN (forks,
@@ -11,7 +11,7 @@ name: deploy-hub
 
 on:
   push:
-    branches: [v2]
+    branches: [main, v2]
     paths:
       - 'crates/hub/**'
       - 'crates/protocol/**'

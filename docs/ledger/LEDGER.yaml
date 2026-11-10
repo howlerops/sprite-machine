@@ -3,7 +3,7 @@
 # Work is ordered by `phase` (P0..P7, plan §5), then milestone, then priority.
 version: 1
 plan: docs/PLAN-v2-ade.md
-branch: v2
+branch: main
 models: { default: haiku, high_risk_or_retry: sonnet, never: opus } # user cost policy 2026-10-28
 max_parallel: 3 # Rust workers; the docs and client lanes add their own slots (see lanes)
 lanes: { rust: 3, docs: 1, client: 2, ts: 1 } # client raised 1 -> 2 on 2026-10-29 (line-tables-only builds keep disk ~8 GB free)
@@ -6470,6 +6470,8 @@ items:
     title: 'Retire v1 TypeScript apps/packages'
     milestone: M6
     phase: P7
+    status: "done"
+    evidence: "2026-11-10 at the user request (replace main with v2, remove v1): v1 removed (apps/, packages/, pnpm/Node config, Dockerfile, fly.toml, v1 workflows ci/deploy/eas-build). Last v1 commit d41a22d kept as branch v1-final (tag push refused by the session git proxy, HTTP 403). CI is Rust + web + workspace worker only. The v1 Fly deployment is not shut down by this."
     deps: [M2-015, M3-017, M3-015]
     paths:
       - 'apps/**'
